@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { Icon } from "@/components/Icon";
 import { askHelpChatFn, getHelpAiStatusFn } from "@/lib/help-ai";
-import { contextTipForPath, HELP_TOPICS } from "@/lib/help-chat";
 import { cn } from "@/lib/utils";
 
 type ChatMessage = {
@@ -12,6 +11,8 @@ type ChatMessage = {
   role: "bot" | "user";
   text: string;
 };
+
+const QUICK_PROMPTS = ["Quero consultar boleto", "Há títulos em aberto?", "Como funciona?"];
 
 function newId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -31,7 +32,7 @@ export function HelpChat() {
 
   useEffect(() => {
     try {
-      setHintSeen(localStorage.getItem("ancora-help-hint") === "1");
+      setHintSeen(localStorage.getItem("omie-boleto-chat-hint") === "1");
     } catch {
       setHintSeen(true);
     }
@@ -48,15 +49,20 @@ export function HelpChat() {
     if (!open || !aiStatusReady) return;
     setMessages((prev) => {
       if (prev.length > 0) return prev;
-      const tip = contextTipForPath(pathname);
       const extra = aiEnabled
-        ? " Estou com IA ligada (Groq) e também conheço a suíte Âncora Access."
-        : " Por enquanto respondo com a ajuda rápida da suíte. Configure GROQ_API_KEY no servidor para IA completa.";
-      return [{ id: newId(), role: "bot", text: `${tip}${extra}` }];
+        ? " Estou com IA Groq ligada."
+        : " Configure GROQ_API_KEY em Configurações (ou no .env) para respostas com IA; mesmo sem chave eu consulto boleto por CNPJ.";
+      return [
+        {
+          id: newId(),
+          role: "bot",
+          text: `Olá! Sou o assistente da Automação Omie. O que deseja?${extra}\n\nSe quiser boleto, eu peço o CNPJ e consulto os títulos em aberto.`,
+        },
+      ];
     });
     const timer = window.setTimeout(() => inputRef.current?.focus(), 180);
     return () => window.clearTimeout(timer);
-  }, [open, pathname, aiEnabled, aiStatusReady]);
+  }, [open, aiEnabled, aiStatusReady]);
 
   useEffect(() => {
     const el = listRef.current;
@@ -67,7 +73,7 @@ export function HelpChat() {
   function dismissHint() {
     setHintSeen(true);
     try {
-      localStorage.setItem("ancora-help-hint", "1");
+      localStorage.setItem("omie-boleto-chat-hint", "1");
     } catch {
       // ignore
     }
@@ -107,10 +113,7 @@ export function HelpChat() {
         },
       });
       if (!result.ok) {
-        setMessages((prev) => [
-          ...prev,
-          { id: newId(), role: "bot", text: result.error },
-        ]);
+        setMessages((prev) => [...prev, { id: newId(), role: "bot", text: result.error }]);
         return;
       }
       setMessages((prev) => [...prev, { id: newId(), role: "bot", text: result.answer }]);
@@ -133,16 +136,16 @@ export function HelpChat() {
       {open ? (
         <section
           className="pointer-events-auto flex h-[min(32rem,calc(100vh-7rem))] w-[min(22.5rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl bg-surface-container-lowest shadow-[0_24px_60px_-28px_color-mix(in_oklch,var(--primary)_45%,transparent)] ring-1 ring-outline-variant/80 animate-[login-rise_0.35s_cubic-bezier(0.22,1,0.36,1)_both]"
-          aria-label="Assistente Âncora Access"
+          aria-label="Assistente de boletos Omie"
         >
           <header className="flex items-center gap-sm border-b border-outline-variant bg-primary px-md py-sm text-on-primary">
             <div className="flex h-10 w-10 items-center justify-center rounded-full bg-on-primary/10 p-1">
               <BrandLogo className="h-full w-full" alt="" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-label-md font-bold">Assistente Âncora</p>
+              <p className="truncate text-label-md font-bold">Assistente Omie</p>
               <p className="truncate text-[0.7rem] text-on-primary/75">
-                {aiEnabled ? "IA Groq ativa" : "Ajuda rápida da suíte"}
+                {aiEnabled ? "IA Groq · consulta de boletos" : "Consulta de boletos por CNPJ"}
               </p>
             </div>
             <button
@@ -176,7 +179,7 @@ export function HelpChat() {
             {pending ? (
               <div className="flex justify-start">
                 <div className="rounded-2xl rounded-bl-md bg-surface-container-lowest px-md py-sm text-label-md text-on-surface-variant ring-1 ring-outline-variant/70">
-                  Pensando…
+                  Consultando…
                 </div>
               </div>
             ) : null}
@@ -184,15 +187,15 @@ export function HelpChat() {
 
           <div className="border-t border-outline-variant bg-surface-container-lowest px-md py-sm">
             <div className="mb-sm flex gap-xs overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {HELP_TOPICS.slice(0, 6).map((topic) => (
+              {QUICK_PROMPTS.map((prompt) => (
                 <button
-                  key={topic.id}
+                  key={prompt}
                   type="button"
                   disabled={pending}
-                  onClick={() => void ask(topic.label)}
+                  onClick={() => void ask(prompt)}
                   className="shrink-0 rounded-full border border-outline-variant bg-surface-container-low px-sm py-1 text-label-md text-primary transition-colors hover:border-secondary-container hover:bg-secondary-container/40 disabled:opacity-60"
                 >
-                  {topic.label}
+                  {prompt}
                 </button>
               ))}
             </div>
@@ -207,7 +210,7 @@ export function HelpChat() {
                 ref={inputRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="Digite sua dúvida…"
+                placeholder="Digite ou informe o CNPJ…"
                 disabled={pending}
                 className="input-glow min-w-0 flex-1 rounded-full border border-outline-variant bg-surface-container-low px-md py-sm text-body-md outline-none focus:border-primary disabled:opacity-70"
               />
@@ -226,7 +229,7 @@ export function HelpChat() {
 
       {!open && !hintSeen ? (
         <div className="pointer-events-auto relative mb-1 max-w-[14rem] rounded-2xl rounded-br-md bg-primary px-md py-sm text-label-md text-on-primary shadow-elevation-1 animate-[login-rise_0.45s_ease-out_both]">
-          Precisa de ajuda? É só clicar aqui.
+          Precisa consultar boleto? É só clicar.
           <button
             type="button"
             aria-label="Dispensar dica"
@@ -251,11 +254,7 @@ export function HelpChat() {
             className="absolute inset-0 rounded-full bg-secondary-container/35 animate-[login-pulse_2.8s_ease-in-out_infinite]"
           />
         ) : null}
-        <span
-          aria-hidden
-          className="absolute inset-0 rounded-full border border-secondary-container/50 animate-[login-orbit_8s_linear_infinite]"
-        />
-        <Icon name={open ? "close" : "chat"} className="relative text-[26px]" />
+        <Icon name={open ? "close" : "smart_toy"} className="relative text-[26px]" />
       </button>
     </div>
   );

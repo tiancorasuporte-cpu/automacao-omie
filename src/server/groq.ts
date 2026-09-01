@@ -52,7 +52,23 @@ export function isGroqConfigured() {
   return Boolean(readGroqConfig().apiKey);
 }
 
-function buildSystemPrompt(pathname?: string) {
+function buildSystemPrompt(pathname?: string, mode: "help" | "boleto" = "help") {
+  if (mode === "boleto") {
+    return [
+      "Você é o assistente da Automação Omie da Âncora Segurança.",
+      "Fale sempre em português do Brasil, de forma curta, clara e objetiva.",
+      "No início da conversa, pergunte o que a pessoa deseja.",
+      "Se o pedido for sobre boleto, fatura, 2ª via ou PDF, peça o CNPJ (ou CPF) para buscar e enviar.",
+      "Quando o usuário enviar CNPJ/CPF, o sistema consulta o Omie e pode enviar PDF/link — você NÃO inventa boletos nem valores.",
+      "Se houver vários boletos, o cliente escolhe respondendo com o número (ex: 1).",
+      "Não peça senhas, chaves de API ou dados sensíveis além do CNPJ/CPF para a consulta.",
+      "Se perguntarem algo fora do escopo (boletos Omie / alertas WhatsApp), diga educadamente o que você consegue fazer.",
+      pathname ? `Rota atual do usuário: ${pathname}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
   const topics = HELP_TOPICS.map((topic) => `- ${topic.label}: ${topic.answer}`).join("\n");
   return [
     "Você é o Assistente Âncora Access, da Âncora Segurança.",
@@ -149,12 +165,13 @@ export async function chatWithGroq(input: {
   message: string;
   pathname?: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
+  mode?: "help" | "boleto";
 }) {
   const { apiKey, model: preferredModel } = readGroqConfig();
   if (!apiKey) throw new Error("GROQ_API_KEY não configurada");
 
   const messages: GroqChatMessage[] = [
-    { role: "system", content: buildSystemPrompt(input.pathname) },
+    { role: "system", content: buildSystemPrompt(input.pathname, input.mode ?? "help") },
     ...(input.history ?? []).slice(-10).map((item) => ({
       role: item.role,
       content: item.content.slice(0, 1500),

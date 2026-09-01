@@ -10,7 +10,7 @@ import {
 } from "@/db/due-items";
 import type { DueItem } from "@/db/schema";
 import { formatDisplayDate, listOmieApps } from "@/server/omie/client";
-import { resolveDueItemDocument } from "@/server/omie/documents";
+import { resolveBoletoPdfWithStatus } from "@/server/omie/documents";
 import { clientDisplayName, clientPhones, getCliente } from "@/server/omie/clients";
 import { sendWahaDocument, sendWahaText } from "@/server/waha";
 
@@ -192,22 +192,42 @@ async function sendItemPdf(chatId: string, item: DueItem, errors: string[]) {
   if (item.itemType !== "boleto") return;
 
   const app = listOmieApps().find((entry) => entry.id === item.omieAppId);
-  if (!app) return;
+  if (!app || !item.omieCode) return;
 
-  const document = await resolveDueItemDocument(app, item);
-  if (!document) return;
+  const result = await resolveBoletoPdfWithStatus(app, {
+    omieCode: item.omieCode,
+    integrationCode: item.integrationCode,
+    documentNumber: item.documentNumber,
+  });
 
   const caption = [
     item.clientName?.trim(),
-    item.documentNumber ? `Doc. ${item.documentNumber}` : null,
+    (result.documentNumber ?? item.documentNumber) ? `Doc. ${result.documentNumber ?? item.documentNumber}` : null,
     `Venc. ${formatDisplayDate(item.dueDate)}`,
   ]
     .filter(Boolean)
     .join(" · ");
 
   try {
-    await sendWahaDocument(chatId, document, caption);
+    if (result.document) {
+      await sendWahaDocument(chatId, result.document, caption);
+      return;
+    }
+    if (result.link) {
+      const lines = ["📎 *Boleto*", caption, "", result.link];
+      if (result.barcode) lines.push("", `Linha digitável:\n${result.barcode}`);
+      await sendWahaText(chatId, lines.filter(Boolean).join("\n"));
+      return;
+    }
   } catch (pdfError) {
+    if (result.link) {
+      try {
+        await sendWahaText(chatId, ["📎 *Boleto*", caption, "", result.link].join("\n"));
+        return;
+      } catch {
+        // fallthrough
+      }
+    }
     const pdfErr = pdfError instanceof Error ? pdfError.message : "Falha ao enviar PDF";
     errors.push(`${item.clientName ?? "Sem cliente"} (PDF): ${pdfErr}`);
   }

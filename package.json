@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "db:setup": "bun scripts/setup-db.ts"
+    "db:setup": "bun scripts/setup-db.ts",
+    "bot:listen": "bun scripts/waha-bot-listener.ts",
+    "bot:stop": "bun scripts/waha-bot-stop.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

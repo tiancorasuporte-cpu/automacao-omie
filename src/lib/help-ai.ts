@@ -1,8 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { answerHelpQuestion } from "@/lib/help-chat";
-
 const historyItemSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string().max(2000),
@@ -31,26 +29,10 @@ export const askHelpChatFn = createServerFn({ method: "POST" })
       return { ok: false as const, error: "Faça login para usar o assistente." };
     }
 
-    const { isGroqConfigured, chatWithGroq } = await import("@/server/groq");
-    if (isGroqConfigured()) {
-      try {
-        const answer = await chatWithGroq({
-          message: data.message,
-          pathname: data.pathname,
-          history: data.history,
-        });
-        return { ok: true as const, source: "groq" as const, answer };
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : "Falha ao falar com o Groq";
-        const fallback = answerHelpQuestion(data.message);
-        return {
-          ok: true as const,
-          source: "faq" as const,
-          answer: `${fallback.answer}\n\n(IA indisponível: ${reason})`,
-        };
-      }
-    }
-
-    const faq = answerHelpQuestion(data.message);
-    return { ok: true as const, source: "faq" as const, answer: faq.answer };
+    const { answerBoletoAssistant } = await import("@/server/omie/boleto-assistant");
+    return answerBoletoAssistant({
+      message: data.message,
+      pathname: data.pathname,
+      history: data.history,
+    });
   });

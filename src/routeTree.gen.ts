@@ -17,6 +17,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as VencimentosRouteImport } from './routes/vencimentos'
+import { Route as ApiWahaWebhookRouteImport } from './routes/api/waha/webhook'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -58,6 +59,11 @@ const VencimentosRoute = VencimentosRouteImport.update({
   path: '/vencimentos',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiWahaWebhookRoute = ApiWahaWebhookRouteImport.update({
+  id: '/api/waha/webhook',
+  path: '/api/waha/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -68,6 +74,7 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
+  '/api/waha/webhook': typeof ApiWahaWebhookRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -78,6 +85,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
+  '/api/waha/webhook': typeof ApiWahaWebhookRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -89,6 +97,7 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
+  '/api/waha/webhook': typeof ApiWahaWebhookRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -101,6 +110,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/users'
     | '/vencimentos'
+    | '/api/waha/webhook'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -111,6 +121,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/users'
     | '/vencimentos'
+    | '/api/waha/webhook'
   id:
     | '__root__'
     | '/'
@@ -121,6 +132,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/users'
     | '/vencimentos'
+    | '/api/waha/webhook'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -132,6 +144,7 @@ export interface RootRouteChildren {
   SetupRoute: typeof SetupRoute
   UsersRoute: typeof UsersRoute
   VencimentosRoute: typeof VencimentosRoute
+  ApiWahaWebhookRoute: typeof ApiWahaWebhookRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -192,6 +205,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VencimentosRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/waha/webhook': {
+      id: '/api/waha/webhook'
+      path: '/api/waha/webhook'
+      fullPath: '/api/waha/webhook'
+      preLoaderRoute: typeof ApiWahaWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -204,6 +224,7 @@ const rootRouteChildren: RootRouteChildren = {
   SetupRoute: SetupRoute,
   UsersRoute: UsersRoute,
   VencimentosRoute: VencimentosRoute,
+  ApiWahaWebhookRoute: ApiWahaWebhookRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
