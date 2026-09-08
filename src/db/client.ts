@@ -8,7 +8,7 @@ import "@tanstack/react-start/server-only";
 
 const envPath = resolve(process.cwd(), ".env");
 
-const ENV_RELOAD_PREFIXES = ["OMIE_", "PG", "WAHA_", "TEST_", "APP_", "PUBLIC_", "WHATSAPP_"];
+const ENV_RELOAD_PREFIXES = ["OMIE_", "PG", "WAHA_", "TEST_", "APP_", "PUBLIC_", "WHATSAPP_", "INTEGGRI_"];
 
 function shouldReloadEnvKey(key: string) {
   return key.startsWith("GROQ_") || ENV_RELOAD_PREFIXES.some((prefix) => key.startsWith(prefix));

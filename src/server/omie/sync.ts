@@ -1,93 +1,19 @@
 import "@tanstack/react-start/server-only";
 
-import { finishSyncLog, startSyncLog, upsertDueItem } from "@/db/due-items";
+import { finishSyncLog, markStaleOpenDueItems, startSyncLog, closeNonOpenInvoiceDueItems } from "@/db/due-items";
 import {
   formatOmieDate,
   listOmieApps,
   omiePaginate,
-  parseAmount,
   parseOmieDate,
   type OmieAppConfig,
 } from "@/server/omie/client";
 
-import {
-  clearClienteCache,
-  clientDisplayName,
-  getCliente,
-  pickClientCodeFromRecord,
-  pickClientNameFromRecord,
-  resolveStoredClientPhone,
-} from "@/server/omie/clients";
-
-const CLOSED_STATUS = new Set(["CANCELADO", "RECEBIDO", "LIQUIDADO", "PAGO", "BAIXADO"]);
+import { clearClienteCache } from "@/server/omie/clients";
+import { saveDueItemFromMovement, syncInvoiceDocuments } from "@/server/omie/invoice-sync";
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function pickDueDate(item: Record<string, unknown>) {
-  return (
-    parseOmieDate(String(item["dDtVenc"] ?? "")) ??
-    parseOmieDate(String(item["data_vencimento"] ?? "")) ??
-    parseOmieDate(String(item["dDtVencimento"] ?? "")) ??
-    parseOmieDate(String(item["dDtVencParcela"] ?? ""))
-  );
-}
-
-function isBoletoMovement(detalhes: Record<string, unknown>) {
-  const tipo = String(detalhes["cTipo"] ?? "").toUpperCase();
-  const boleto = String(detalhes["cNumBoleto"] ?? "").trim();
-  return tipo === "BOL" || Boolean(boleto);
-}
-
-function isDueDateInWindow(dueDate: string, from: Date, to: Date) {
-  const fromIso = parseOmieDate(formatOmieDate(from));
-  const toIso = parseOmieDate(formatOmieDate(to));
-  if (!fromIso || !toIso) return true;
-  return dueDate >= fromIso && dueDate <= toIso;
-}
-
-async function saveDueItemFromMovement(
-  app: OmieAppConfig,
-  detalhes: Record<string, unknown>,
-  window?: { from: Date; to: Date },
-) {
-  if (!isBoletoMovement(detalhes)) return false;
-
-  const dueDate = pickDueDate(detalhes);
-  if (!dueDate) return false;
-  if (window && !isDueDateInWindow(dueDate, window.from, window.to)) return false;
-
-  const status = String(detalhes["cStatus"] ?? detalhes["status_titulo"] ?? "").toUpperCase();
-  if (status && CLOSED_STATUS.has(status)) return false;
-
-  const clientCode = pickClientCodeFromRecord(detalhes);
-  const client = clientCode ? await getCliente(app, clientCode) : undefined;
-  const omieCode = Number(detalhes["nCodTitulo"] ?? detalhes["codigo_lancamento_omie"] ?? 0) || null;
-
-  await upsertDueItem({
-    omieAppId: app.id,
-    omieAppName: app.name,
-    itemType: "boleto",
-    omieCode,
-    integrationCode: String(detalhes["cCodIntTitulo"] ?? detalhes["codigo_lancamento_integracao"] ?? "") || null,
-    documentNumber:
-      String(
-        detalhes["cNumBoleto"] ??
-          detalhes["cNumDocFiscal"] ??
-          detalhes["cNumTitulo"] ??
-          detalhes["numero_documento"] ??
-          "",
-      ) || null,
-    clientCode,
-    clientName: clientDisplayName(client) || pickClientNameFromRecord(detalhes),
-    clientPhone: resolveStoredClientPhone(client, detalhes),
-    dueDate,
-    amount: parseAmount(detalhes["nValorTitulo"] ?? detalhes["valor_documento"]),
-    status: status || null,
-  });
-
-  return true;
 }
 
 async function syncMovimentosFinanceiros(app: OmieAppConfig, from: Date, to: Date) {
@@ -155,6 +81,7 @@ async function syncContasReceber(app: OmieAppConfig, from: Date, to: Date) {
   );
 
   let count = 0;
+  const openOmieCodes: number[] = [];
   for (const raw of items) {
     const item = raw as Record<string, unknown>;
     const mapped = {
@@ -163,11 +90,31 @@ async function syncContasReceber(app: OmieAppConfig, from: Date, to: Date) {
       nCodTitulo: item["nCodTitulo"] ?? item["codigo_lancamento_omie"],
       nCodCliente: item["nCodCliente"] ?? item["codigo_cliente_fornecedor"],
       nValorTitulo: item["nValorTitulo"] ?? item["valor_documento"],
-      cStatus: item["cStatus"] ?? item["status_titulo"],
+      cStatus: item["cStatus"] ?? item["status_titulo"] ?? "A VENCER",
       cNumBoleto: (item["boleto"] as Record<string, unknown> | undefined)?.["cNumBoleto"] ?? item["cNumBoleto"],
       cTipo: (item["boleto"] as Record<string, unknown> | undefined)?.["cGerado"] === "S" ? "BOL" : item["cTipo"],
+      chave_nfe: item["chave_nfe"],
+      cChaveNFe: item["chave_nfe"],
+      nCodOS: item["nCodOS"],
+      numero_documento_fiscal: item["numero_documento_fiscal"],
     };
+    const omieCode = Number(mapped.nCodTitulo ?? 0) || null;
+    if (omieCode) openOmieCodes.push(omieCode);
     if (await saveDueItemFromMovement(app, mapped, { from, to })) count += 1;
+  }
+
+  const fromIso = parseOmieDate(fromStr) ?? fromStr;
+  const toIso = parseOmieDate(toStr) ?? toStr;
+  // Só fecha stale se a lista em aberto veio com sucesso (mesmo vazia = tudo quitado na janela).
+  try {
+    await markStaleOpenDueItems({
+      omieAppId: app.id,
+      from: fromIso,
+      to: toIso,
+      openOmieCodes,
+    });
+  } catch (error) {
+    console.warn("[sync] falha ao fechar títulos stale", app.id, error);
   }
 
   return count;
@@ -191,10 +138,10 @@ export async function syncOmieApp(app: OmieAppConfig, daysBack = 90, daysAhead =
   const errors: string[] = [];
 
   try {
-    const tasks = [
+    const tasks: Array<[string, (app: OmieAppConfig, from: Date, to: Date) => Promise<number>]> = [
       ["movimentos", syncMovimentosFinanceiros],
       ["contas_receber", syncContasReceber],
-    ] as const;
+    ];
 
     for (const [name, fn] of tasks) {
       try {
@@ -204,6 +151,17 @@ export async function syncOmieApp(app: OmieAppConfig, daysBack = 90, daysAhead =
         breakdown[name] = 0;
         errors.push(`${name}: ${error instanceof Error ? error.message : "erro"}`);
       }
+    }
+
+    try {
+      const invoiceResult = await syncInvoiceDocuments(app, from, to);
+      breakdown.nfe = invoiceResult.nfe;
+      breakdown.nfse = invoiceResult.nfse;
+      errors.push(...invoiceResult.errors);
+    } catch (error) {
+      breakdown.nfe = 0;
+      breakdown.nfse = 0;
+      errors.push(`notas: ${error instanceof Error ? error.message : "erro"}`);
     }
 
     const total = Object.values(breakdown).reduce((sum, value) => sum + value, 0);
@@ -231,6 +189,11 @@ export async function syncAllOmieApps(daysBack = 90, daysAhead = 120) {
   for (let index = 0; index < apps.length; index++) {
     if (index > 0) await sleep(8_000);
     results.push(await syncOmieApp(apps[index]!, daysBack, daysAhead));
+  }
+  try {
+    await closeNonOpenInvoiceDueItems();
+  } catch (error) {
+    console.warn("[sync] cleanup notas", error);
   }
   return { ok: true as const, results };
 }

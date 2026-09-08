@@ -97,6 +97,18 @@ console.info("[waha-bot-listener] ouvindo mensagens. Ctrl+C para parar.");
 let lastHandledRestartAt = readWahaBotRestartRequest()?.requestedAt ?? 0;
 
 setInterval(() => {
+  void (async () => {
+    if (!(await isWhatsAppBotEnabled())) {
+      const { stopWahaEventsSocket } = await import("../src/server/waha-events");
+      stopWahaEventsSocket();
+      console.info("[waha-bot-listener] bot desativado nas configurações — encerrando listener.");
+      releaseListenerLock();
+      process.exit(0);
+    }
+  })();
+}, 3_000);
+
+setInterval(() => {
   writeWahaBotStatus({ pid: process.pid });
 }, 30_000);
 

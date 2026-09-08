@@ -31,6 +31,7 @@ export function useShellSearch() {
 
 const NAV = [
   { to: "/dashboard", label: "Painel", icon: "dashboard" },
+  { to: "/conversas", label: "Conversas", icon: "chat" },
   { to: "/vencimentos", label: "Vencimentos", icon: "event" },
   { to: "/notificacoes", label: "Notificações", icon: "history" },
   { to: "/settings", label: "Configurações", icon: "settings", adminOnly: true },
@@ -201,10 +202,13 @@ export function AppShell({
   children,
   mobileTitle,
   searchPlaceholder = "Buscar...",
+  fullHeight = false,
 }: {
   children: ReactNode;
   mobileTitle: string;
   searchPlaceholder?: string;
+  /** Preenche a viewport e evita scroll da página (ex.: inbox de conversas). */
+  fullHeight?: boolean;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { user } = RootRoute.useRouteContext();
@@ -228,7 +232,8 @@ export function AppShell({
     <ShellSearchContext.Provider value={search}>
       <div
         className={cn(
-          "relative flex min-h-screen bg-background text-on-background",
+          "relative flex bg-background text-on-background",
+          fullHeight ? "h-dvh overflow-hidden" : "min-h-screen",
           enterAnim && "animate-[shell-enter_0.85s_cubic-bezier(0.22,1,0.36,1)_both]",
         )}
       >
@@ -249,8 +254,13 @@ export function AppShell({
           </div>
         ) : null}
 
-        <div className="flex min-h-screen min-w-0 flex-1 flex-col md:ml-[280px]">
-          <header className="sticky top-0 z-30 flex w-full items-center justify-between border-b border-outline-variant bg-surface px-margin-mobile py-md md:px-margin-desktop">
+        <div
+          className={cn(
+            "flex min-w-0 flex-1 flex-col md:ml-[280px]",
+            fullHeight ? "h-dvh min-h-0 overflow-hidden" : "min-h-screen",
+          )}
+        >
+          <header className="z-30 flex w-full shrink-0 items-center justify-between border-b border-outline-variant bg-surface px-margin-mobile py-md md:sticky md:top-0 md:px-margin-desktop">
             <button
               type="button"
               aria-label="Abrir menu"
@@ -279,9 +289,13 @@ export function AppShell({
             <div className="text-headline-md font-bold text-primary md:hidden">{mobileTitle}</div>
             <ProfileMenu user={user} />
           </header>
-          {children}
+          {fullHeight ? (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
+          ) : (
+            children
+          )}
         </div>
-        <HelpChat />
+        {!fullHeight ? <HelpChat /> : null}
       </div>
     </ShellSearchContext.Provider>
   );

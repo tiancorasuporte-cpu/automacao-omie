@@ -14,28 +14,31 @@ import {
   testGroqFn,
 } from "@/lib/groq-settings";
 import { getWahaSettingsFn, saveWahaSettingsFn, testWahaFn, registerWahaWebhookFn, restartWahaBotFn, stopWahaBotFn } from "@/lib/waha";
+import { getInteggriSettingsFn, saveInteggriSettingsFn, testInteggriFn } from "@/lib/integgri";
 import { isSuperadmin, requireAdmin } from "@/lib/require-auth";
+import { APP_NAME } from "@/lib/brand";
 import { Route as RootRoute } from "@/routes/__root";
 
 export const Route = createFileRoute("/settings")({
   beforeLoad: requireAdmin,
   loader: async () => {
-    const [waha, notifications, apps, groq] = await Promise.all([
+    const [waha, integgri, notifications, apps, groq] = await Promise.all([
       getWahaSettingsFn(),
+      getInteggriSettingsFn(),
       getNotificationSettingsFn(),
       getOmieAppsFn(),
       getGroqSettingsFn().catch(() => null),
     ]);
-    return { waha, notifications, apps, groq };
+    return { waha, integgri, notifications, apps, groq };
   },
   head: () => ({
-    meta: [{ title: "Configurações — Automação Omie" }],
+    meta: [{ title: `Configurações — ${APP_NAME}` }],
   }),
   component: SettingsPage,
 });
 
 function SettingsPage() {
-  const { waha, notifications, apps, groq } = Route.useLoaderData();
+  const { waha, integgri, notifications, apps, groq } = Route.useLoaderData();
   const { user } = RootRoute.useRouteContext();
   const router = useRouter();
 
@@ -46,7 +49,7 @@ function SettingsPage() {
           <div>
             <h2 className="text-headline-lg tracking-tight text-primary">Configurações</h2>
             <p className="mt-base text-body-lg text-on-surface-variant">
-              WAHA, alertas automáticos, assistente Groq e aplicativos Omie configurados no `.env`.
+              WAHA, Integgri Chat, alertas automáticos, assistente Groq e aplicativos Omie configurados no `.env`.
             </p>
           </div>
 
@@ -79,6 +82,7 @@ function SettingsPage() {
           </section>
 
           <NotificationSettings initial={notifications} onSaved={() => router.invalidate()} />
+          {integgri ? <InteggriSettings initial={integgri} /> : null}
           {waha ? <WahaSettings initial={waha} /> : null}
           {isSuperadmin(user) && groq ? <GroqSettings initial={groq} /> : null}
         </div>
@@ -117,8 +121,9 @@ function NotificationSettings({
         Alertas de vencimento
       </h3>
       <p className="mb-md text-body-md text-on-surface-variant">
-        Envia WhatsApp com 1 dia de antecedência para boletos que vencem amanhã. Se o cliente tiver
-        celular, telefone 1 e telefone 2 no Omie, a mensagem vai para todos os números válidos.
+        Envia WhatsApp com 1 dia de antecedência para documentos (boleto, NF-e e NFS-e) que vencem
+        amanhã, e um segundo lembrete 10 dias após o vencimento se ainda estiverem em aberto. Usa o
+        telefone 2 do cadastro Omie; se estiver vazio, tenta celular / telefone 1.
       </p>
       <form
         className="space-y-md"
@@ -183,18 +188,19 @@ function NotificationSettings({
           <input
             type="number"
             min={1}
-            max={200}
+            max={40}
             value={hourlyLimit}
-            onChange={(e) => setHourlyLimit(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
+            onChange={(e) => setHourlyLimit(Math.max(1, Math.min(40, Number(e.target.value) || 1)))}
             className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
           />
           <span className="mt-xs block text-label-md text-on-surface-variant">
-            Conta números distintos com envio OK na última hora (lote + individual). Padrão: 20.
-            Reduz risco de bloqueio, mas não elimina — WAHA não é a API oficial da Meta.
+            Contatos distintos com envio OK na última hora. Padrão: 12 (máx. 40). Também há limite de
+            8 contatos por lote e intervalo de ~10s entre envios, para respeitar as políticas da Meta
+            na API oficial (Integgri). Só envia para celular (DDD + 9…).
           </span>
         </label>
         <label className="block text-label-md text-on-surface-variant">
-          WhatsApp padrão (quando o cliente Omie não tiver telefone)
+          WhatsApp padrão (quando o cliente Omie não tiver celular)
           <input
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
@@ -210,6 +216,156 @@ function NotificationSettings({
         >
           {pending ? "Salvando..." : "Salvar alertas"}
         </button>
+      </form>
+    </section>
+  );
+}
+
+function InteggriSettings({
+  initial,
+}: {
+  initial: {
+    url: string;
+    hasToken: boolean;
+    whatsappId: string;
+    queueId: string;
+    userId: string;
+    configured: boolean;
+    enabled: boolean;
+    provider: string;
+  };
+}) {
+  const router = useRouter();
+  const [url, setUrl] = useState(initial.url);
+  const [token, setToken] = useState("");
+  const [whatsappId, setWhatsappId] = useState(initial.whatsappId);
+  const [queueId, setQueueId] = useState(initial.queueId);
+  const [userId, setUserId] = useState(initial.userId);
+  const [enabled, setEnabled] = useState(initial.enabled);
+  const [testPhone, setTestPhone] = useState("");
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-lg">
+      <h3 className="mb-sm flex items-center gap-xs text-title-lg text-primary">
+        <Icon name="hub" className="text-secondary" />
+        Integgri Chat
+      </h3>
+      <p className="mb-md text-body-md text-on-surface-variant">
+        Envia lembretes, boletos e respostas pelo{" "}
+        <a href="https://app.integgri.com.br/api-docs" className="text-primary underline" target="_blank" rel="noreferrer">
+          Integgri Chat
+        </a>
+        . Use a URL da API <code>https://iapi.integgri.com.br</code> (não o app). O token fica em Conexões → API. Com isso ativo, o WAHA deixa de ser usado no envio.
+      </p>
+      <form
+        className="space-y-md"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setPending(true);
+          setError(null);
+          setMessage(null);
+          try {
+            await saveInteggriSettingsFn({
+              data: { url, token, whatsappId, queueId, userId, enabled },
+            });
+            setMessage(enabled ? "Integgri salva. Envios passam a usar a Integgri." : "Integgri salva. Envios continuam no WAHA.");
+            setToken("");
+            await router.invalidate();
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        <label className="flex items-center gap-sm text-body-md text-on-surface">
+          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          Usar Integgri para enviar mensagens
+        </label>
+        <label className="block text-label-md text-on-surface-variant">
+          URL da API
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://iapi.integgri.com.br"
+            className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
+          />
+        </label>
+        <label className="block text-label-md text-on-surface-variant">
+          Token {initial.hasToken ? "(deixe vazio para manter)" : ""}
+          <input
+            type="password"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder={initial.hasToken ? "••••••••" : "Bearer token da conexão"}
+            className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
+          />
+        </label>
+        <label className="block text-label-md text-on-surface-variant">
+          ID da conexão WhatsApp (opcional)
+          <input
+            value={whatsappId}
+            onChange={(e) => setWhatsappId(e.target.value)}
+            placeholder="whatsappId da API"
+            className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
+          />
+        </label>
+        <div className="grid gap-md md:grid-cols-2">
+          <label className="block text-label-md text-on-surface-variant">
+            Fila / departamento (opcional)
+            <input
+              value={queueId}
+              onChange={(e) => setQueueId(e.target.value)}
+              className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
+            />
+          </label>
+          <label className="block text-label-md text-on-surface-variant">
+            Usuário Integgri (opcional)
+            <input
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
+            />
+          </label>
+        </div>
+        <div className="flex flex-wrap gap-sm">
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
+          >
+            Salvar Integgri
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={async () => {
+              setError(null);
+              setMessage(null);
+              const result = await testInteggriFn({ data: { phone: testPhone } });
+              if (!result.ok) {
+                setError(result.error);
+                return;
+              }
+              setMessage("Mensagem de teste enviada pela Integgri.");
+            }}
+            className="rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary"
+          >
+            Testar envio
+          </button>
+        </div>
+        <input
+          value={testPhone}
+          onChange={(e) => setTestPhone(e.target.value)}
+          placeholder="WhatsApp para teste (ex: 5511999999999)"
+          className="w-full rounded-lg border border-outline-variant px-md py-sm"
+        />
+        {message ? <p className="text-body-md text-primary">{message}</p> : null}
+        {error ? <p className="text-body-md text-on-error-container">{error}</p> : null}
+        {!initial.configured ? (
+          <p className="text-label-md text-on-surface-variant">Cole o token da Integgri para habilitar o envio oficial.</p>
+        ) : null}
       </form>
     </section>
   );
@@ -398,10 +554,15 @@ function WahaSettings({
                   setError(result.error);
                   return;
                 }
+                setBotEnabled(false);
                 if (result.stopped === 0) {
-                  setMessage("Nenhum listener estava rodando.");
+                  setMessage(
+                    "Bot desativado nas configurações. Nenhum processo listener estava rodando.",
+                  );
                 } else {
-                  setMessage(`Bot parado (${result.stopped} processo(s) encerrado(s)).`);
+                  setMessage(
+                    `Bot parado (${result.stopped} processo(s)). Desmarque e salve para manter desligado, ou rode npm run bot:listen para reativar.`,
+                  );
                 }
                 await router.invalidate();
               } finally {

@@ -163,7 +163,7 @@ export async function ensureDefaultSettings() {
     default_notify_phone: "",
     test_mode_enabled: "true",
     test_notify_phone: "",
-    notification_hourly_limit: "20",
+    notification_hourly_limit: "12",
     whatsapp_bot_enabled: "true",
   };
 

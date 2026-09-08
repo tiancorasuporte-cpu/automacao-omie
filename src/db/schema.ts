@@ -34,8 +34,11 @@ export type DueItem = {
   amount: number | null;
   status: string | null;
   notifiedAt: string | null;
+  overdueNotifiedAt: string | null;
   syncedAt: string;
 };
+
+export type NotificationKind = "pre_due" | "overdue";
 
 let ready: Promise<void> | undefined;
 
@@ -70,6 +73,17 @@ async function indexExists(name: string) {
   const rows = await sql<{ exists: boolean }[]>`
     select exists (
       select 1 from pg_indexes where schemaname = 'public' and indexname = ${name}
+    ) as exists
+  `;
+  return Boolean(rows[0]?.exists);
+}
+
+async function columnExists(table: string, column: string) {
+  const sql = getSql();
+  const rows = await sql<{ exists: boolean }[]>`
+    select exists (
+      select 1 from information_schema.columns
+      where table_schema = 'public' and table_name = ${table} and column_name = ${column}
     ) as exists
   `;
   return Boolean(rows[0]?.exists);
@@ -125,6 +139,15 @@ export async function ensureSchema() {
     );
   }
 
+  if (!(await columnExists("due_items", "overdue_notified_at"))) {
+    await sql.unsafe("alter table due_items add column overdue_notified_at timestamptz");
+  }
+  if (!(await indexExists("due_items_overdue_notified_idx"))) {
+    await sql.unsafe(
+      "create index due_items_overdue_notified_idx on due_items (due_date, overdue_notified_at) where overdue_notified_at is null",
+    );
+  }
+
   if (!(await tableExists("notification_log"))) {
     await sql`
       create table notification_log (
@@ -134,9 +157,14 @@ export async function ensureSchema() {
         message text not null,
         success boolean not null default true,
         error text,
-        sent_at timestamptz not null default now()
+        sent_at timestamptz not null default now(),
+        kind varchar(16) not null default 'pre_due'
       )
     `;
+  }
+
+  if (!(await columnExists("notification_log", "kind"))) {
+    await sql.unsafe("alter table notification_log add column kind varchar(16) not null default 'pre_due'");
   }
 
   if (!(await tableExists("sync_log"))) {

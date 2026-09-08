@@ -5,13 +5,14 @@ import { AppShell, useShellSearch } from "@/components/AppShell";
 import { FilterChips, MobileSearch } from "@/components/FilterBar";
 import { createUserFn, listUsersFn, setUserActiveFn } from "@/lib/accounts";
 import { roleLabel, requireAdmin } from "@/lib/require-auth";
+import { APP_NAME } from "@/lib/brand";
 import { matchesQuery } from "@/lib/text-search";
 
 export const Route = createFileRoute("/users")({
   beforeLoad: requireAdmin,
   loader: () => listUsersFn(),
   head: () => ({
-    meta: [{ title: "Usuários — Automação Omie" }],
+    meta: [{ title: `Usuários — ${APP_NAME}` }],
   }),
   component: UsersPage,
 });

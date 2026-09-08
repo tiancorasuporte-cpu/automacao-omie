@@ -6,11 +6,17 @@ import { Icon } from "@/components/Icon";
 import { TablePager } from "@/components/TablePager";
 import { listNotificationLogsFn } from "@/lib/omie";
 import { requireAuth } from "@/lib/require-auth";
+import { APP_NAME } from "@/lib/brand";
 
 const TYPE_LABELS = {
   boleto: "Boleto",
   nfe: "NF-e",
   nfse: "NFS-e",
+} as const;
+
+const KIND_LABELS = {
+  pre_due: "Pré-vencimento",
+  overdue: "Atraso (+10 dias)",
 } as const;
 
 const searchSchema = z.object({
@@ -23,7 +29,7 @@ export const Route = createFileRoute("/notificacoes")({
   loaderDeps: ({ search }) => ({ page: search.page }),
   loader: ({ deps }) => listNotificationLogsFn({ data: { page: deps.page } }),
   head: () => ({
-    meta: [{ title: "Notificações — Automação Omie" }],
+    meta: [{ title: `Notificações — ${APP_NAME}` }],
   }),
   component: NotificacoesPage,
 });
@@ -68,6 +74,7 @@ function NotificacoesPage() {
                     <th className="px-md py-sm text-label-md text-on-surface-variant">Enviado em</th>
                     <th className="px-md py-sm text-label-md text-on-surface-variant">Cliente</th>
                     <th className="px-md py-sm text-label-md text-on-surface-variant">Empresa</th>
+                    <th className="px-md py-sm text-label-md text-on-surface-variant">Alerta</th>
                     <th className="px-md py-sm text-label-md text-on-surface-variant">Tipo</th>
                     <th className="px-md py-sm text-label-md text-on-surface-variant">Vencimento</th>
                     <th className="px-md py-sm text-label-md text-on-surface-variant">Telefone</th>
@@ -77,7 +84,7 @@ function NotificacoesPage() {
                 <tbody>
                   {data.items.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-md py-xl text-center text-on-surface-variant">
+                      <td colSpan={8} className="px-md py-xl text-center text-on-surface-variant">
                         Nenhuma notificação registrada ainda.
                       </td>
                     </tr>
@@ -87,6 +94,7 @@ function NotificacoesPage() {
                         <td className="px-md py-sm text-on-surface">{formatDateTime(entry.sentAt)}</td>
                         <td className="px-md py-sm text-primary">{entry.clientName ?? "—"}</td>
                         <td className="px-md py-sm text-on-surface">{entry.omieAppName ?? "—"}</td>
+                        <td className="px-md py-sm text-on-surface-variant">{KIND_LABELS[entry.kind]}</td>
                         <td className="px-md py-sm">
                           {entry.itemType ? (
                             <span className="inline-flex items-center gap-xs rounded-full bg-surface-container-high px-sm py-xs text-label-md">

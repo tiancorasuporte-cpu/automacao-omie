@@ -4,12 +4,13 @@ import { useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { updateProfileFn } from "@/lib/accounts";
 import { roleLabel, requireAuth } from "@/lib/require-auth";
+import { APP_NAME } from "@/lib/brand";
 import { Route as RootRoute } from "@/routes/__root";
 
 export const Route = createFileRoute("/profile")({
   beforeLoad: requireAuth,
   head: () => ({
-    meta: [{ title: "Perfil — Automação Omie" }],
+    meta: [{ title: `Perfil — ${APP_NAME}` }],
   }),
   component: ProfilePage,
 });

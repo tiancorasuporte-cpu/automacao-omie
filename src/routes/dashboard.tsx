@@ -5,12 +5,13 @@ import { AppShell } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
 import { getDashboardFn, syncOmieFn, sendNotificationsFn } from "@/lib/omie";
 import { isAdmin, requireAuth } from "@/lib/require-auth";
+import { APP_NAME } from "@/lib/brand";
 
 export const Route = createFileRoute("/dashboard")({
   beforeLoad: requireAuth,
   loader: () => getDashboardFn(),
   head: () => ({
-    meta: [{ title: "Painel — Automação Omie" }],
+    meta: [{ title: `Painel — ${APP_NAME}` }],
   }),
   component: DashboardPage,
 });
@@ -29,6 +30,11 @@ function DashboardPage() {
     { label: "Vencem amanhã", value: data.stats.due_tomorrow, icon: "event_upcoming" },
     { label: "Próximos 7 dias", value: data.stats.due_week, icon: "date_range" },
     { label: "Alertas pendentes", value: data.stats.pending_notifications, icon: "notifications" },
+    {
+      label: "Atraso (+10 dias)",
+      value: data.stats.pending_overdue_notifications,
+      icon: "warning",
+    },
   ];
 
   return (
@@ -92,6 +98,7 @@ function DashboardPage() {
                       const result = await sendNotificationsFn();
                       setMessage(
                         `Alertas enviados: ${result.sent}. Ignorados: ${result.skipped}.` +
+                          (result.overdueSent ? ` Atraso: ${result.overdueSent}.` : "") +
                           (result.testMode ? " Modo teste ativo." : "") +
                           (result.errors.length
                             ? ` ${result.errors[0]?.startsWith("Envio já em andamento") ? result.errors[0] : `Erros: ${result.errors.length}.`}`

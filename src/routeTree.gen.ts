@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ConversasRouteImport } from './routes/conversas'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as NotificacoesRouteImport } from './routes/notificacoes'
 import { Route as ProfileRouteImport } from './routes/profile'
@@ -22,6 +23,11 @@ import { Route as ApiWahaWebhookRouteImport } from './routes/api/waha/webhook'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConversasRoute = ConversasRouteImport.update({
+  id: '/conversas',
+  path: '/conversas',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -67,6 +73,7 @@ const ApiWahaWebhookRoute = ApiWahaWebhookRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
   '/notificacoes': typeof NotificacoesRoute
   '/profile': typeof ProfileRoute
@@ -78,6 +85,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
   '/notificacoes': typeof NotificacoesRoute
   '/profile': typeof ProfileRoute
@@ -90,6 +98,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
   '/notificacoes': typeof NotificacoesRoute
   '/profile': typeof ProfileRoute
@@ -103,6 +112,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/conversas'
     | '/dashboard'
     | '/notificacoes'
     | '/profile'
@@ -114,6 +124,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/conversas'
     | '/dashboard'
     | '/notificacoes'
     | '/profile'
@@ -125,6 +136,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/conversas'
     | '/dashboard'
     | '/notificacoes'
     | '/profile'
@@ -137,6 +149,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ConversasRoute: typeof ConversasRoute
   DashboardRoute: typeof DashboardRoute
   NotificacoesRoute: typeof NotificacoesRoute
   ProfileRoute: typeof ProfileRoute
@@ -154,6 +167,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/conversas': {
+      id: '/conversas'
+      path: '/conversas'
+      fullPath: '/conversas'
+      preLoaderRoute: typeof ConversasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -217,6 +237,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ConversasRoute: ConversasRoute,
   DashboardRoute: DashboardRoute,
   NotificacoesRoute: NotificacoesRoute,
   ProfileRoute: ProfileRoute,

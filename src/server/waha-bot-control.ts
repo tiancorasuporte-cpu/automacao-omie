@@ -1,10 +1,12 @@
 import "@tanstack/react-start/server-only";
 
+import { execSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -12,6 +14,7 @@ import { join } from "node:path";
 const CACHE_DIR = join(process.cwd(), ".cache");
 const STATUS_FILE = join(CACHE_DIR, "waha-bot-status.json");
 const RESTART_FILE = join(CACHE_DIR, "waha-bot-restart.json");
+const LISTENER_LOCK = join(CACHE_DIR, "waha-bot-listener.pid");
 
 export type WahaBotStatus = {
   pid: number;
@@ -113,6 +116,9 @@ export async function restartWahaBotListenerInProcess() {
 }
 
 export async function restartWahaBotListener() {
+  const { setSetting } = await import("@/db/settings");
+  await setSetting("whatsapp_bot_enabled", "true");
+
   if (isBotListenerProcess()) {
     return restartWahaBotListenerInProcess();
   }
@@ -153,25 +159,87 @@ export async function restartWahaBotListener() {
   };
 }
 
-export async function stopWahaBotListeners() {
-  const { execSync } = await import("node:child_process");
-  const psStop = [
-    "Get-CimInstance Win32_Process",
-    "| Where-Object { $_.Name -eq 'bun.exe' -and $_.CommandLine -match 'waha-bot-listener' }",
-    "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }",
-  ].join(" ");
+function clearWahaBotStatusFile() {
   try {
-    if (process.platform === "win32") {
-      const output = execSync(`powershell -NoProfile -Command "${psStop}"`, { encoding: "utf8" }).trim();
-      const pids = output.split(/\s+/).filter(Boolean);
-      return {
-        ok: true as const,
-        stopped: pids.length,
-        pids: pids.map(Number),
-      };
+    if (existsSync(STATUS_FILE)) unlinkSync(STATUS_FILE);
+  } catch {
+    // ignore
+  }
+}
+
+function clearWahaBotRuntimeFiles() {
+  try {
+    if (existsSync(RESTART_FILE)) unlinkSync(RESTART_FILE);
+    if (existsSync(LISTENER_LOCK)) unlinkSync(LISTENER_LOCK);
+    clearWahaBotStatusFile();
+  } catch {
+    // ignore
+  }
+}
+
+function killListenerProcesses() {
+  if (process.platform === "win32") {
+    const scripts = [
+      "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'bun.exe' -and $_.CommandLine -match 'waha-bot-listener' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }",
+      "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'npm run bot:listen' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }",
+    ];
+    const pids = new Set<number>();
+    for (const script of scripts) {
+      try {
+        const output = execSync(`powershell -NoProfile -Command "${script}"`, { encoding: "utf8" }).trim();
+        for (const part of output.split(/\s+/)) {
+          const pid = Number(part);
+          if (pid > 0) pids.add(pid);
+        }
+      } catch {
+        // ignore per-pass errors
+      }
     }
+    return [...pids];
+  }
+  try {
     execSync("pkill -f waha-bot-listener || true");
-    return { ok: true as const, stopped: -1, pids: [] as number[] };
+  } catch {
+    // ignore
+  }
+  return [] as number[];
+}
+
+/** Para o bot de verdade: mata listeners, desativa nas configs e remove webhook do WAHA. */
+export async function stopWahaBotCompletely() {
+  const { setSetting } = await import("@/db/settings");
+  const { clearWahaInboundWebhooks } = await import("@/server/waha");
+  const { stopWahaEventsSocket } = await import("@/server/waha-events");
+  const { stopWahaWebhookHttpServer } = await import("@/server/waha-webhook-http");
+
+  await setSetting("whatsapp_bot_enabled", "false");
+  stopWahaEventsSocket();
+  stopWahaWebhookHttpServer();
+
+  const pids = killListenerProcesses();
+
+  let webhooksCleared = false;
+  try {
+    const cleared = await clearWahaInboundWebhooks();
+    webhooksCleared = cleared.ok;
+  } catch {
+    // ignore
+  }
+
+  clearWahaBotRuntimeFiles();
+
+  return {
+    ok: true as const,
+    stopped: pids.length,
+    pids,
+    botDisabled: true as const,
+    webhooksCleared,
+  };
+}
+
+export async function stopWahaBotListeners() {
+  try {
+    return await stopWahaBotCompletely();
   } catch (error) {
     return {
       ok: false as const,

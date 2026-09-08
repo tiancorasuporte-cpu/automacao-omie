@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { toWhatsAppChatId } from "@/server/omie/notifications";
+import { APP_NAME } from "@/lib/brand";
 
 const saveSchema = z.object({
   url: z.string().trim(),
@@ -87,7 +88,7 @@ export const testWahaFn = createServerFn({ method: "POST" })
     }
     try {
       const { sendWahaText } = await import("@/server/waha");
-      await sendWahaText(chatId, "Automação Omie: conexão com o WAHA ok.");
+      await sendWahaText(chatId, `${APP_NAME}: conexão com o WAHA ok.`);
       return { ok: true as const };
     } catch (error) {
       return {

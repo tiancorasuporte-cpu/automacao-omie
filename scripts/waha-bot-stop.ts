@@ -1,40 +1,28 @@
 /**
- * Para todos os processos `bot:listen` em execução.
+ * Para o bot WhatsApp por completo:
  *   npm run bot:stop
  */
-import { execSync } from "node:child_process";
-import { existsSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { reloadEnvFromFile } from "../src/db/client";
 
-const PS_STOP = [
-  "Get-CimInstance Win32_Process",
-  "| Where-Object { $_.Name -eq 'bun.exe' -and $_.CommandLine -match 'waha-bot-listener' }",
-  "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }",
-].join(" ");
+reloadEnvFromFile();
 
-function stopWindows() {
-  const output = execSync(`powershell -NoProfile -Command "${PS_STOP}"`, { encoding: "utf8" }).trim();
-  const pids = output.split(/\s+/).filter(Boolean);
-  try {
-    const lock = join(process.cwd(), ".cache", "waha-bot-listener.pid");
-    if (existsSync(lock)) unlinkSync(lock);
-  } catch {
-    // ignore
-  }
-  if (pids.length === 0) {
-    console.info("[bot:stop] nenhum listener em execução.");
-    return;
-  }
-  console.info(`[bot:stop] ${pids.length} listener(s) encerrado(s): ${pids.join(", ")}`);
+const { stopWahaBotCompletely } = await import("../src/server/waha-bot-control");
+
+const result = await stopWahaBotCompletely();
+
+if (!result.ok) {
+  console.error("[bot:stop]", result.error);
+  process.exit(1);
 }
 
-function stopUnix() {
-  execSync("pkill -f waha-bot-listener || true", { stdio: "inherit" });
-  console.info("[bot:stop] listeners encerrados (se havia algum).");
-}
-
-if (process.platform === "win32") {
-  stopWindows();
+if (result.stopped === 0) {
+  console.info("[bot:stop] nenhum processo listener encontrado; bot desativado nas configurações.");
 } else {
-  stopUnix();
+  console.info(`[bot:stop] ${result.stopped} processo(s) encerrado(s): ${result.pids.join(", ")}`);
 }
+
+if (result.webhooksCleared) {
+  console.info("[bot:stop] webhooks do WAHA removidos.");
+}
+
+console.info("[bot:stop] Bot automático desligado. Para voltar: marque o checkbox em Configurações e rode npm run bot:listen");

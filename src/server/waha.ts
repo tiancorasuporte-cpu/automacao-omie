@@ -119,8 +119,25 @@ export async function sendWahaDocument(
   caption?: string,
   config = readWahaConfig(),
 ) {
-  const payload =
-    file.url && !file.base64 ? await downloadFileAsBase64({ url: file.url, filename: file.filename, mimetype: file.mimetype }) : file;
+  let payload = file;
+  if (file.base64) {
+    const cleaned = file.base64.includes(",")
+      ? file.base64.slice(file.base64.indexOf(",") + 1)
+      : file.base64.replace(/\s+/g, "");
+    const buffer = Buffer.from(cleaned, "base64");
+    const isPdf = file.mimetype.includes("pdf") || file.filename.toLowerCase().endsWith(".pdf");
+    if (isPdf && !(buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46)) {
+      if (file.url) {
+        payload = await downloadFileAsBase64({ url: file.url, filename: file.filename, mimetype: file.mimetype });
+      } else {
+        throw new Error("Arquivo não é um PDF válido.");
+      }
+    } else {
+      payload = { ...file, base64: cleaned };
+    }
+  } else if (file.url) {
+    payload = await downloadFileAsBase64({ url: file.url, filename: file.filename, mimetype: file.mimetype });
+  }
 
   await sendWahaFile(chatId, payload, caption, config);
   return { mode: "file" as const };

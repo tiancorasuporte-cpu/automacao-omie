@@ -10,6 +10,7 @@ import {
   type OpenBoletoHit,
 } from "@/server/omie/boleto-lookup";
 import { formatDisplayDate } from "@/server/omie/client";
+import { APP_NAME } from "@/lib/brand";
 
 export type ChatHistoryItem = {
   role: "user" | "assistant";
@@ -20,7 +21,7 @@ export type ConversationMode = "menu" | "boleto" | "human";
 
 export function welcomeMenuMessage() {
   return [
-    "Olá! Sou o assistente da *Automação Omie*.",
+    `Olá! Sou o assistente da *${APP_NAME}*.`,
     "",
     "Como posso ajudar?",
     "",

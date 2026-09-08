@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import type { AppUser } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { APP_NAME } from "@/lib/brand";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
@@ -80,7 +81,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient; user
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Automação Omie — Alertas de vencimento" },
+      { title: `${APP_NAME} — Alertas de vencimento` },
       {
         name: "description",
         content:

@@ -3,7 +3,7 @@ import "@tanstack/react-start/server-only";
 import { formatDisplayDate, listOmieApps } from "@/server/omie/client";
 import { resolveBoletoPdfWithStatus } from "@/server/omie/documents";
 import type { OpenBoletoHit } from "@/server/omie/boleto-lookup";
-import { sendWahaDocument, sendWahaText } from "@/server/waha";
+import { sendWhatsAppDocument, sendWhatsAppText } from "@/server/whatsapp";
 
 const MAX_BOLETO_PDFS = 5;
 
@@ -70,7 +70,7 @@ export async function sendOpenBoletoPdfs(chatId: string, boletos: OpenBoletoHit[
 
       if (result.document) {
         try {
-          await sendWahaDocument(chatId, result.document, caption);
+          await sendWhatsAppDocument(chatId, result.document, caption);
           sent += 1;
           console.info("[waha-bot] PDF enviado", { chatId, omieCode: hit.omieCode });
           continue;
@@ -106,13 +106,13 @@ export async function sendOpenBoletoPdfs(chatId: string, boletos: OpenBoletoHit[
   }
 
   if (linkSections.length > 0) {
-    await sendWahaText(chatId, ["📎 *Boletos:*", "", ...linkSections].join("\n\n"));
+    await sendWhatsAppText(chatId, ["📎 *Boletos:*", "", ...linkSections].join("\n\n"));
     sent += linkSections.length;
     console.info("[waha-bot] links enviados em lote", { chatId, count: linkSections.length });
   }
 
   if (failures.length > 0) {
-    await sendWahaText(
+    await sendWhatsAppText(
       chatId,
       [
         sent > 0

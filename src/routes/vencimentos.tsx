@@ -7,8 +7,18 @@ import { Icon } from "@/components/Icon";
 import { paginateList, TablePager } from "@/components/TablePager";
 import { getOmieAppsFn, getDueItemBoletoViewFn, listDueItemsFn, sendDueItemNotificationFn } from "@/lib/omie";
 import { isAdmin, requireAuth } from "@/lib/require-auth";
+import { APP_NAME } from "@/lib/brand";
+import type { DueItemType } from "@/db/schema";
 
 const PAGE_SIZE = 15;
+
+const TYPE_LABELS = {
+  boleto: "Boleto",
+  nfe: "NF-e",
+  nfse: "NFS-e",
+} as const;
+
+type TypeFilter = "all" | DueItemType;
 
 const searchSchema = z.object({
   page: z.coerce.number().int().min(1).catch(1),
@@ -22,7 +32,7 @@ export const Route = createFileRoute("/vencimentos")({
     return { items, apps };
   },
   head: () => ({
-    meta: [{ title: "Vencimentos — Automação Omie" }],
+    meta: [{ title: `Vencimentos — ${APP_NAME}` }],
   }),
   component: VencimentosPage,
 });
@@ -51,6 +61,21 @@ function matchesText(value: string | null | undefined, filter: string) {
     .includes(filter.trim().toLowerCase());
 }
 
+function downloadPdfBase64(filename: string, base64: string) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename.endsWith(".pdf") ? filename : `${filename}.pdf`;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
+}
+
 function VencimentosPage() {
   const { items, apps } = Route.useLoaderData();
   const navigate = Route.useNavigate();
@@ -60,6 +85,7 @@ function VencimentosPage() {
   const { page: urlPage } = Route.useSearch();
   const { query } = useShellSearch();
   const [appFilter, setAppFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>("all");
   const [clientFilter, setClientFilter] = useState("");
   const [documentFilter, setDocumentFilter] = useState("");
   const [dueFrom, setDueFrom] = useState("");
@@ -72,6 +98,7 @@ function VencimentosPage() {
     const q = query.trim().toLowerCase();
     return items.filter((item) => {
       if (appFilter !== "all" && item.omieAppId !== appFilter) return false;
+      if (typeFilter !== "all" && item.itemType !== typeFilter) return false;
       if (!matchesText(item.clientName, clientFilter)) return false;
       if (!matchesText(item.documentNumber, documentFilter)) return false;
       if (dueFrom && item.dueDate < dueFrom) return false;
@@ -81,10 +108,11 @@ function VencimentosPage() {
         .filter(Boolean)
         .some((part) => String(part).toLowerCase().includes(q));
     });
-  }, [items, query, appFilter, clientFilter, documentFilter, dueFrom, dueTo]);
+  }, [items, query, appFilter, typeFilter, clientFilter, documentFilter, dueFrom, dueTo]);
 
   const hasActiveFilters =
     appFilter !== "all" ||
+    typeFilter !== "all" ||
     clientFilter.trim() !== "" ||
     documentFilter.trim() !== "" ||
     dueFrom !== "" ||
@@ -111,6 +139,7 @@ function VencimentosPage() {
 
   const resetFilters = () => {
     setAppFilter("all");
+    setTypeFilter("all");
     setClientFilter("");
     setDocumentFilter("");
     setDueFrom("");
@@ -119,13 +148,13 @@ function VencimentosPage() {
   };
 
   return (
-    <AppShell mobileTitle="Vencimentos" searchPlaceholder="Busca rápida (cliente, boleto, telefone)...">
+    <AppShell mobileTitle="Vencimentos" searchPlaceholder="Busca rápida (cliente, documento, telefone)...">
       <main className="flex-1 p-margin-mobile md:p-margin-desktop">
         <div className="mx-auto max-w-6xl space-y-lg">
           <div>
             <h2 className="text-headline-lg tracking-tight text-primary">Vencimentos</h2>
             <p className="mt-base text-body-lg text-on-surface-variant">
-              Boletos em aberto com vencimento em{" "}
+              Boletos, NF-e e NFS-e em aberto com vencimento em{" "}
               <span className="font-medium capitalize text-primary">{currentMonthLabel()}</span>.
             </p>
           </div>
@@ -144,16 +173,34 @@ function VencimentosPage() {
               />
             </label>
             <label className="block text-label-md text-on-surface-variant">
-              Nº do boleto
+              Nº do documento
               <input
                 value={documentFilter}
                 onChange={(event) => {
                   setDocumentFilter(event.target.value);
                   setPage(1);
                 }}
-                placeholder="Ex.: 130"
+                placeholder="Ex.: 130 ou chave NF-e"
                 className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-md py-sm text-body-md text-primary"
               />
+            </label>
+            <label className="block text-label-md text-on-surface-variant">
+              Tipo
+              <select
+                value={typeFilter}
+                onChange={(event) => {
+                  setTypeFilter(event.target.value as TypeFilter);
+                  setPage(1);
+                }}
+                className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-md py-sm text-body-md text-primary"
+              >
+                <option value="all">Todos</option>
+                {(Object.keys(TYPE_LABELS) as DueItemType[]).map((type) => (
+                  <option key={type} value={type}>
+                    {TYPE_LABELS[type]}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block text-label-md text-on-surface-variant">
               Empresa
@@ -227,6 +274,7 @@ function VencimentosPage() {
               <table className="min-w-full text-left text-body-md">
                 <thead className="border-b border-outline-variant bg-surface-container-low">
                   <tr>
+                    <th className="px-md py-sm text-label-md text-on-surface-variant">Tipo</th>
                     <th className="px-md py-sm text-label-md text-on-surface-variant">Vencimento</th>
                     <th className="px-md py-sm text-label-md text-on-surface-variant">Empresa</th>
                     <th className="px-md py-sm text-label-md text-on-surface-variant">Cliente</th>
@@ -239,28 +287,46 @@ function VencimentosPage() {
                 <tbody>
                   {pagination.items.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-md py-xl text-center text-on-surface-variant">
+                      <td colSpan={8} className="px-md py-xl text-center text-on-surface-variant">
                         {items.length === 0
-                          ? "Nenhum boleto neste mês. Configure os apps Omie no `.env` e sincronize."
+                          ? "Nenhum documento neste mês. Configure os apps Omie no `.env` e sincronize."
                           : "Nenhum resultado para os filtros aplicados."}
                       </td>
                     </tr>
                   ) : (
                     pagination.items.map((item) => (
                       <tr key={item.id} className="border-b border-outline-variant/60">
+                        <td className="px-md py-sm">
+                          <span
+                            className={`inline-flex rounded-full px-sm py-xs text-label-md ${
+                              item.itemType === "boleto"
+                                ? "bg-primary-container/40 text-primary"
+                                : item.itemType === "nfe"
+                                  ? "bg-secondary-container/50 text-on-secondary-container"
+                                  : "bg-tertiary-container/50 text-on-tertiary-container"
+                            }`}
+                          >
+                            {TYPE_LABELS[item.itemType]}
+                          </span>
+                        </td>
                         <td className="px-md py-sm text-primary">{formatDate(item.dueDate)}</td>
                         <td className="px-md py-sm text-on-surface">{item.omieAppName}</td>
                         <td className="px-md py-sm text-on-surface">{item.clientName ?? "—"}</td>
                         <td className="px-md py-sm text-on-surface">{item.documentNumber ?? "—"}</td>
                         <td className="px-md py-sm text-on-surface">{formatMoney(item.amount)}</td>
                         <td className="px-md py-sm">
-                          {item.notifiedAt ? (
-                            <span className="text-label-md text-secondary">Alertado</span>
-                          ) : item.clientPhone ? (
-                            <span className="text-label-md text-on-surface-variant">{item.clientPhone}</span>
-                          ) : (
-                            <span className="text-label-md text-error">Sem telefone</span>
-                          )}
+                          <div className="flex flex-col gap-xs">
+                            {item.notifiedAt ? (
+                              <span className="text-label-md text-secondary">Pré-vencimento</span>
+                            ) : item.clientPhone ? (
+                              <span className="text-label-md text-on-surface-variant">{item.clientPhone}</span>
+                            ) : (
+                              <span className="text-label-md text-error">Sem telefone</span>
+                            )}
+                            {item.overdueNotifiedAt ? (
+                              <span className="text-label-md text-error">Atraso alertado</span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="px-md py-sm">
                           <div className="flex flex-wrap gap-xs">
@@ -278,19 +344,39 @@ function VencimentosPage() {
                                     setFeedback({ type: "error", text: result.error });
                                     return;
                                   }
-                                  window.open(result.url, "_blank", "noopener,noreferrer");
+                                  if (result.mode === "link") {
+                                    window.open(result.url, "_blank", "noopener,noreferrer");
+                                    return;
+                                  }
+                                  downloadPdfBase64(result.filename, result.base64);
                                 } finally {
                                   setViewingId(null);
                                 }
                               }}
                               className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
-                              title="Visualizar boleto em PDF"
+                              title={
+                                item.itemType === "boleto"
+                                  ? "Abrir boleto"
+                                  : `Baixar ${TYPE_LABELS[item.itemType]}`
+                              }
                             >
                               <Icon
-                                name={viewingId === item.id ? "hourglass_empty" : "picture_as_pdf"}
+                                name={
+                                  viewingId === item.id
+                                    ? "hourglass_empty"
+                                    : item.itemType === "boleto"
+                                      ? "picture_as_pdf"
+                                      : "download"
+                                }
                                 className="text-[16px]"
                               />
-                              {viewingId === item.id ? "Abrindo..." : "Boleto"}
+                              {viewingId === item.id
+                                ? item.itemType === "boleto"
+                                  ? "Abrindo..."
+                                  : "Baixando..."
+                                : item.itemType === "boleto"
+                                  ? "Boleto"
+                                  : "PDF"}
                             </button>
                             {admin ? (
                               <button

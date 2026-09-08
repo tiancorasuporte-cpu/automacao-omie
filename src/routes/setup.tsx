@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { Icon } from "@/components/Icon";
 import { getSetupStatusFn, setupDatabaseFn } from "@/lib/setup";
+import { APP_NAME } from "@/lib/brand";
 
 export const Route = createFileRoute("/setup")({
   beforeLoad: async () => {
@@ -13,7 +14,7 @@ export const Route = createFileRoute("/setup")({
   },
   head: () => ({
     meta: [
-      { title: "Configurar banco — Automação Omie" },
+      { title: `Configurar banco — ${APP_NAME}` },
       {
         name: "description",
         content: "Informe a conexão PostgreSQL na primeira execução da suíte Âncora Access.",

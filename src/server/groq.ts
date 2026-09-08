@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import "@tanstack/react-start/server-only";
+import { APP_NAME } from "@/lib/brand";
 
 import { HELP_TOPICS } from "@/lib/help-chat";
 
@@ -55,7 +55,7 @@ export function isGroqConfigured() {
 function buildSystemPrompt(pathname?: string, mode: "help" | "boleto" = "help") {
   if (mode === "boleto") {
     return [
-      "Você é o assistente da Automação Omie da Âncora Segurança.",
+      `Você é o assistente da ${APP_NAME} da Âncora Segurança.`,
       "Fale sempre em português do Brasil, de forma curta, clara e objetiva.",
       "No início da conversa, pergunte o que a pessoa deseja.",
       "Se o pedido for sobre boleto, fatura, 2ª via ou PDF, peça o CNPJ (ou CPF) para buscar e enviar.",

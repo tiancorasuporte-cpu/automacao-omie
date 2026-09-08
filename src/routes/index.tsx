@@ -10,12 +10,13 @@ import {
 } from "@/components/LoginShell";
 import { redirectIfAuthenticated } from "@/lib/require-auth";
 import { loginFn } from "@/lib/auth";
+import { APP_NAME } from "@/lib/brand";
 
 export const Route = createFileRoute("/")({
   beforeLoad: redirectIfAuthenticated,
   head: () => ({
     meta: [
-      { title: "Entrar — Automação Omie" },
+      { title: `Entrar — ${APP_NAME}` },
       {
         name: "description",
         content: "Acesse o painel de vencimentos e alertas WhatsApp integrados ao Omie.",
@@ -34,7 +35,7 @@ function Login() {
 
   return (
     <LoginShell
-      title="Automação Omie"
+      title={APP_NAME}
       subtitle="Entre com suas credenciais para acessar vencimentos e alertas."
       exiting={exiting}
     >

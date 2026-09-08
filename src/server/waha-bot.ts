@@ -5,7 +5,8 @@ import { answerBoletoAssistant, type ChatHistoryItem, type ConversationMode } fr
 import { sendOpenBoletoPdfs } from "@/server/omie/boleto-whatsapp";
 import { buildWahaDedupeKeys, claimWahaInboundMessage } from "@/server/waha-dedupe";
 import { getWahaBotReadyAt } from "@/server/waha-bot-ready";
-import { readWahaConfig, sendWahaText } from "@/server/waha";
+import { readWahaConfig } from "@/server/waha";
+import { sendWhatsAppText } from "@/server/whatsapp";
 
 type ConversationState = {
   history: ChatHistoryItem[];
@@ -385,6 +386,11 @@ export async function handleWahaIncomingWebhook(body: unknown) {
     mode: "menu" as ConversationMode,
   };
 
+  const { isHumanHandoff } = await import("@/server/waha-handoff");
+  if (isHumanHandoff(parsed.chatId)) {
+    state.mode = "human";
+  }
+
   if (state.mode === "human") {
     const resetToMenu = /\b(menu|inicio|início|voltar|reiniciar|0)\b/i.test(parsed.text.trim());
     if (!resetToMenu) {
@@ -410,11 +416,11 @@ export async function handleWahaIncomingWebhook(body: unknown) {
     });
 
     if (!result.ok) {
-      await sendWahaText(parsed.chatId, result.error);
+      await sendWhatsAppText(parsed.chatId, result.error);
       return { ok: false as const, error: result.error, chatId: parsed.chatId };
     }
 
-    await sendWahaText(parsed.chatId, result.answer);
+    await sendWhatsAppText(parsed.chatId, result.answer);
 
     let pdfsSent = 0;
     if ("boletos" in result && result.boletos?.length) {

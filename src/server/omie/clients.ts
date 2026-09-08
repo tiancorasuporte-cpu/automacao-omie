@@ -49,26 +49,23 @@ function pickValidPhone(...values: string[]) {
 
 function phoneCandidates(client: ClienteResumo) {
   return [
+    `${client.telefone2_ddd}${client.telefone2_numero}`,
+    client.telefone2_numero,
     client.celular,
     `${client.telefone1_ddd}${client.telefone1_numero}`,
     client.telefone1_numero,
-    `${client.telefone2_ddd}${client.telefone2_numero}`,
-    client.telefone2_numero,
   ];
 }
 
+/** Preferência: Telefone 2 do Omie; se vazio, celular / telefone 1 (um único número). */
 export function clientPhones(client: ClienteResumo | undefined) {
   if (!client) return [] as string[];
 
-  const seen = new Set<string>();
-  const phones: string[] = [];
   for (const candidate of phoneCandidates(client)) {
     const digits = pickValidPhone(candidate);
-    if (!digits || seen.has(digits)) continue;
-    seen.add(digits);
-    phones.push(digits);
+    if (digits) return [digits];
   }
-  return phones;
+  return [];
 }
 
 export function clientPhone(client: ClienteResumo | undefined) {
@@ -82,6 +79,8 @@ export function clientDisplayName(client: ClienteResumo | undefined) {
 
 export function pickClientPhoneFromRecord(record: Record<string, unknown>) {
   const candidates = [
+    `${record["telefone2_ddd"] ?? ""}${record["telefone2_numero"] ?? ""}`,
+    record["telefone2_numero"],
     record["celular"],
     record["telefone"],
     record["cTel"],
@@ -90,7 +89,6 @@ export function pickClientPhoneFromRecord(record: Record<string, unknown>) {
     record["cFone"],
     `${record["ddd"] ?? ""}${record["telefone1_numero"] ?? ""}`,
     `${record["telefone1_ddd"] ?? ""}${record["telefone1_numero"] ?? ""}`,
-    `${record["telefone2_ddd"] ?? ""}${record["telefone2_numero"] ?? ""}`,
   ];
   for (const value of candidates) {
     const digits = digitsPhone(String(value ?? ""));

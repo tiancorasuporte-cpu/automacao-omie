@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { Icon } from "@/components/Icon";
 import { askHelpChatFn, getHelpAiStatusFn } from "@/lib/help-ai";
+import { APP_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 
 type ChatMessage = {
@@ -56,7 +57,7 @@ export function HelpChat() {
         {
           id: newId(),
           role: "bot",
-          text: `Olá! Sou o assistente da Automação Omie. O que deseja?${extra}\n\nSe quiser boleto, eu peço o CNPJ e consulto os títulos em aberto.`,
+          text: `Olá! Sou o assistente da ${APP_NAME}. O que deseja?${extra}\n\nSe quiser boleto, eu peço o CNPJ e consulto os títulos em aberto.`,
         },
       ];
     });
