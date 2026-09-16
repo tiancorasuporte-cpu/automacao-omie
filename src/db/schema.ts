@@ -190,6 +190,93 @@ export async function ensureSchema() {
     `;
   }
 
+  if (!(await tableExists("omie_products"))) {
+    await sql`
+      create table omie_products (
+        id serial primary key,
+        omie_app_id varchar(64) not null,
+        omie_app_name varchar(160) not null,
+        codigo_produto bigint not null,
+        codigo_interno varchar(120),
+        descricao varchar(255) not null,
+        unidade varchar(20),
+        valor_unitario numeric(15, 4),
+        ncm varchar(20),
+        inactive boolean not null default false,
+        synced_at timestamptz not null default now(),
+        unique (omie_app_id, codigo_produto)
+      )
+    `;
+  }
+  if (!(await indexExists("omie_products_descricao_idx"))) {
+    await sql.unsafe(
+      "create index omie_products_descricao_idx on omie_products (omie_app_id, descricao)",
+    );
+  }
+
+  if (!(await tableExists("quotes"))) {
+    await sql`
+      create table quotes (
+        id serial primary key,
+        omie_app_id varchar(64) not null,
+        omie_app_name varchar(160) not null,
+        client_code bigint not null,
+        client_name varchar(200),
+        numero_interno varchar(40) not null,
+        omie_pedido_code bigint,
+        integration_code varchar(120),
+        numero_pedido varchar(40),
+        etapa varchar(8) not null default '00',
+        data_previsao date,
+        observacao text,
+        total numeric(15, 2),
+        status varchar(32) not null default 'draft',
+        error text,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (numero_interno)
+      )
+    `;
+  }
+
+  if (!(await columnExists("quotes", "numero_interno"))) {
+    await sql.unsafe("alter table quotes add column numero_interno varchar(40)");
+    await sql.unsafe(`
+      update quotes
+      set numero_interno = 'ORC-' || to_char(created_at, 'YYYY') || '-' || lpad(id::text, 5, '0')
+      where numero_interno is null or trim(numero_interno) = ''
+    `);
+    await sql.unsafe("alter table quotes alter column numero_interno set not null");
+    await sql.unsafe(
+      "create unique index if not exists quotes_numero_interno_uidx on quotes (numero_interno)",
+    );
+  }
+  if (!(await columnExists("quotes", "observacao"))) {
+    await sql.unsafe("alter table quotes add column observacao text");
+  }
+  if (!(await columnExists("quotes", "data_previsao"))) {
+    await sql.unsafe("alter table quotes add column data_previsao date");
+  }
+  if (!(await columnExists("quotes", "updated_at"))) {
+    await sql.unsafe("alter table quotes add column updated_at timestamptz not null default now()");
+  }
+
+  if (!(await tableExists("quote_items"))) {
+    await sql`
+      create table quote_items (
+        id serial primary key,
+        quote_id integer not null references quotes(id) on delete cascade,
+        codigo_produto bigint not null,
+        descricao varchar(255) not null,
+        unidade varchar(20),
+        quantidade numeric(15, 4) not null,
+        valor_unitario numeric(15, 4) not null,
+        ncm varchar(20)
+      )
+    `;
+  }
+
   const superUsername = process.env["APP_SUPERADMIN_USERNAME"] ?? "superadmin";
   const superPassword = process.env["APP_SUPERADMIN_PASSWORD"] ?? "ancora";
   const superName = process.env["APP_SUPERADMIN_NAME"] ?? "Super Admin";

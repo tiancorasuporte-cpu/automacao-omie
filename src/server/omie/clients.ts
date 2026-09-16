@@ -15,7 +15,7 @@ export type ClienteResumo = {
 
 const clientCache = new Map<string, ClienteResumo>();
 
-function normalizeCliente(raw: Record<string, unknown>, fallbackCode?: number): ClienteResumo | undefined {
+export function normalizeCliente(raw: Record<string, unknown>, fallbackCode?: number): ClienteResumo | undefined {
   const root = (raw["clientes_cadastro"] ?? raw["cadastro"] ?? raw) as Record<string, unknown>;
   const code = Number(root["codigo_cliente_omie"] ?? root["codigo_cliente"] ?? fallbackCode ?? 0);
   if (!code) return undefined;

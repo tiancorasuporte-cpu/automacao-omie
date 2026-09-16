@@ -33,6 +33,7 @@ const NAV = [
   { to: "/dashboard", label: "Painel", icon: "dashboard" },
   { to: "/conversas", label: "Conversas", icon: "chat" },
   { to: "/vencimentos", label: "Vencimentos", icon: "event" },
+  { to: "/orcamentos", label: "Orçamentos", icon: "request_quote" },
   { to: "/notificacoes", label: "Notificações", icon: "history" },
   { to: "/settings", label: "Configurações", icon: "settings", adminOnly: true },
   { to: "/users", label: "Usuários", icon: "manage_accounts", adminOnly: true },
