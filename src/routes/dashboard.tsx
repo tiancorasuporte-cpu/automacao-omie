@@ -4,11 +4,11 @@ import { useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
 import { getDashboardFn, syncOmieFn, sendNotificationsFn } from "@/lib/omie";
-import { isAdmin, requireAuth } from "@/lib/require-auth";
+import { isAdmin, requireModule } from "@/lib/require-auth";
 import { APP_NAME } from "@/lib/brand";
 
 export const Route = createFileRoute("/dashboard")({
-  beforeLoad: requireAuth,
+  beforeLoad: () => requireModule("dashboard"),
   loader: () => getDashboardFn(),
   head: () => ({
     meta: [{ title: `Painel — ${APP_NAME}` }],

@@ -2,8 +2,11 @@ import "@tanstack/react-start/server-only";
 import { hash } from "bcryptjs";
 
 import { getSql } from "./client";
+import type { AppModuleId } from "@/lib/modules";
 
 export type AppRole = "superadmin" | "admin" | "operator";
+
+export type { AppModuleId };
 
 export type AppUser = {
   id: number;
@@ -11,10 +14,18 @@ export type AppUser = {
   name: string;
   role: AppRole;
   active: boolean;
+  /** Módulos liberados. Admin/superadmin sempre têm todos. */
+  modules: AppModuleId[];
 };
 
-export type AppUserRow = AppUser & {
+export type AppUserRow = {
+  id: number;
+  username: string;
   password_hash: string;
+  name: string;
+  role: string;
+  active: boolean;
+  modules?: string | null;
 };
 
 export type DueItemType = "boleto" | "nfe" | "nfse";
@@ -101,10 +112,15 @@ export async function ensureSchema() {
         name varchar(120) not null,
         role varchar(32) not null default 'operator',
         active boolean not null default true,
+        modules text,
         created_at timestamptz not null default now(),
         updated_at timestamptz not null default now()
       )
     `;
+  }
+
+  if (!(await columnExists("users", "modules"))) {
+    await sql.unsafe("alter table users add column modules text");
   }
 
   if (!(await tableExists("due_items"))) {

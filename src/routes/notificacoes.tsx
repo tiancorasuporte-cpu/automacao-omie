@@ -5,7 +5,7 @@ import { AppShell } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
 import { TablePager } from "@/components/TablePager";
 import { listNotificationLogsFn } from "@/lib/omie";
-import { requireAuth } from "@/lib/require-auth";
+import { requireModule } from "@/lib/require-auth";
 import { APP_NAME } from "@/lib/brand";
 
 const TYPE_LABELS = {
@@ -25,7 +25,7 @@ const searchSchema = z.object({
 
 export const Route = createFileRoute("/notificacoes")({
   validateSearch: searchSchema,
-  beforeLoad: requireAuth,
+  beforeLoad: () => requireModule("notificacoes"),
   loaderDeps: ({ search }) => ({ page: search.page }),
   loader: ({ deps }) => listNotificationLogsFn({ data: { page: deps.page } }),
   head: () => ({

@@ -24,8 +24,8 @@ const chatIdSchema = z.object({
 export const listInboxChatsFn = createServerFn({ method: "GET" })
   .validator(listSchema.optional())
   .handler(async ({ data }) => {
-    const { requireAuth } = await import("@/lib/require-auth");
-    await requireAuth();
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("conversas");
     const { fetchInboxChats } = await import("@/server/waha-inbox");
     const { isWahaConfigured } = await import("@/server/waha");
     try {
@@ -43,8 +43,8 @@ export const listInboxChatsFn = createServerFn({ method: "GET" })
 export const getInboxMessagesFn = createServerFn({ method: "GET" })
   .validator(messagesSchema)
   .handler(async ({ data }) => {
-    const { requireAuth } = await import("@/lib/require-auth");
-    await requireAuth();
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("conversas");
     const { fetchInboxMessages } = await import("@/server/waha-inbox");
     try {
       return await fetchInboxMessages(data.chatId, { limit: data.limit });
@@ -59,8 +59,8 @@ export const getInboxMessagesFn = createServerFn({ method: "GET" })
 export const sendInboxReplyFn = createServerFn({ method: "POST" })
   .validator(sendSchema)
   .handler(async ({ data }) => {
-    const { requireAuth } = await import("@/lib/require-auth");
-    await requireAuth();
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("conversas");
     const { sendWhatsAppText } = await import("@/server/whatsapp");
     const { addHumanHandoff, normalizeInboxChatId } = await import("@/server/waha-handoff");
 
@@ -87,8 +87,8 @@ export const sendInboxReplyFn = createServerFn({ method: "POST" })
 export const assumeInboxChatFn = createServerFn({ method: "POST" })
   .validator(chatIdSchema)
   .handler(async ({ data }) => {
-    const { requireAuth } = await import("@/lib/require-auth");
-    await requireAuth();
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("conversas");
     const { addHumanHandoff } = await import("@/server/waha-handoff");
     return addHumanHandoff(data.chatId);
   });
@@ -96,8 +96,8 @@ export const assumeInboxChatFn = createServerFn({ method: "POST" })
 export const releaseInboxChatFn = createServerFn({ method: "POST" })
   .validator(chatIdSchema)
   .handler(async ({ data }) => {
-    const { requireAuth } = await import("@/lib/require-auth");
-    await requireAuth();
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("conversas");
     const { removeHumanHandoff } = await import("@/server/waha-handoff");
     return removeHumanHandoff(data.chatId);
   });

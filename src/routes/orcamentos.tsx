@@ -25,10 +25,10 @@ import {
   syncOmieProductsFn,
 } from "@/lib/orcamentos";
 import { openOrcamentoPdf } from "@/lib/orcamento-pdf";
-import { requireAuth } from "@/lib/require-auth";
+import { requireModule } from "@/lib/require-auth";
 
 export const Route = createFileRoute("/orcamentos")({
-  beforeLoad: requireAuth,
+  beforeLoad: () => requireModule("orcamentos"),
   loader: async () => getOrcamentosBootstrapFn(),
   head: () => ({
     meta: [{ title: `Orçamentos — ${APP_NAME}` }],

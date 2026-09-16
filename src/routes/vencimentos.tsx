@@ -6,7 +6,7 @@ import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
 import { paginateList, TablePager } from "@/components/TablePager";
 import { getOmieAppsFn, getDueItemBoletoViewFn, listDueItemsFn, sendDueItemNotificationFn } from "@/lib/omie";
-import { isAdmin, requireAuth } from "@/lib/require-auth";
+import { isAdmin, requireModule } from "@/lib/require-auth";
 import { APP_NAME } from "@/lib/brand";
 import type { DueItemType } from "@/db/schema";
 
@@ -26,7 +26,7 @@ const searchSchema = z.object({
 
 export const Route = createFileRoute("/vencimentos")({
   validateSearch: searchSchema,
-  beforeLoad: requireAuth,
+  beforeLoad: () => requireModule("vencimentos"),
   loader: async () => {
     const [items, apps] = await Promise.all([listDueItemsFn(), getOmieAppsFn()]);
     return { items, apps };

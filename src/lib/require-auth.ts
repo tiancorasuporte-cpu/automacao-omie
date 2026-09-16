@@ -1,6 +1,11 @@
 import { redirect } from "@tanstack/react-router";
 
 import { getCurrentUser } from "@/lib/auth";
+import {
+  APP_MODULES,
+  pathForModule,
+  type AppModuleId,
+} from "@/lib/modules";
 import { getSetupStatusFn } from "@/lib/setup";
 import type { AppUser } from "@/db/schema";
 
@@ -18,6 +23,21 @@ export function roleLabel(role: string) {
   return "Operador";
 }
 
+export function canAccessModule(
+  user: Pick<AppUser, "role" | "modules"> | null | undefined,
+  moduleId: AppModuleId,
+) {
+  if (!user) return false;
+  if (isAdmin(user)) return true;
+  return (user.modules ?? []).includes(moduleId);
+}
+
+export function firstAccessiblePath(user: Pick<AppUser, "role" | "modules">) {
+  if (isAdmin(user)) return "/dashboard";
+  const first = APP_MODULES.find((module) => canAccessModule(user, module.id));
+  return first ? pathForModule(first.id) : "/profile";
+}
+
 export async function requireAuth() {
   const { configured } = await getSetupStatusFn();
   if (!configured) {
@@ -30,10 +50,18 @@ export async function requireAuth() {
   return { user };
 }
 
+export async function requireModule(moduleId: AppModuleId) {
+  const { user } = await requireAuth();
+  if (!canAccessModule(user, moduleId)) {
+    throw redirect({ to: firstAccessiblePath(user) });
+  }
+  return { user };
+}
+
 export async function requireAdmin() {
   const { user } = await requireAuth();
   if (!isAdmin(user)) {
-    throw redirect({ to: "/dashboard" });
+    throw redirect({ to: firstAccessiblePath(user) });
   }
   return { user };
 }
@@ -48,7 +76,7 @@ export async function requireSuperadmin() {
     throw redirect({ to: "/" });
   }
   if (!isSuperadmin(user)) {
-    throw redirect({ to: "/dashboard" });
+    throw redirect({ to: firstAccessiblePath(user) });
   }
   return { user };
 }
@@ -60,6 +88,6 @@ export async function redirectIfAuthenticated() {
   }
   const user = await getCurrentUser();
   if (user) {
-    throw redirect({ to: "/dashboard" });
+    throw redirect({ to: firstAccessiblePath(user) });
   }
 }

@@ -15,10 +15,11 @@ import { Icon } from "@/components/Icon";
 import { logoutFn } from "@/lib/auth";
 import { APP_NAME } from "@/lib/brand";
 import { consumeLoginEnter } from "@/lib/login-enter";
-import { isAdmin, isSuperadmin, roleLabel } from "@/lib/require-auth";
+import { isAdmin, isSuperadmin, canAccessModule, roleLabel } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 import { Route as RootRoute } from "@/routes/__root";
 import type { AppUser } from "@/db/schema";
+import type { AppModuleId } from "@/lib/modules";
 
 const ShellSearchContext = createContext<{
   query: string;
@@ -29,15 +30,21 @@ export function useShellSearch() {
   return useContext(ShellSearchContext);
 }
 
-const NAV = [
-  { to: "/dashboard", label: "Painel", icon: "dashboard" },
-  { to: "/conversas", label: "Conversas", icon: "chat" },
-  { to: "/vencimentos", label: "Vencimentos", icon: "event" },
-  { to: "/orcamentos", label: "Orçamentos", icon: "request_quote" },
-  { to: "/notificacoes", label: "Notificações", icon: "history" },
+const NAV: Array<{
+  to: "/dashboard" | "/conversas" | "/vencimentos" | "/orcamentos" | "/notificacoes" | "/settings" | "/users";
+  label: string;
+  icon: string;
+  adminOnly?: boolean;
+  module?: AppModuleId;
+}> = [
+  { to: "/dashboard", label: "Painel", icon: "dashboard", module: "dashboard" },
+  { to: "/conversas", label: "Conversas", icon: "chat", module: "conversas" },
+  { to: "/vencimentos", label: "Vencimentos", icon: "event", module: "vencimentos" },
+  { to: "/orcamentos", label: "Orçamentos", icon: "request_quote", module: "orcamentos" },
+  { to: "/notificacoes", label: "Notificações", icon: "history", module: "notificacoes" },
   { to: "/settings", label: "Configurações", icon: "settings", adminOnly: true },
   { to: "/users", label: "Usuários", icon: "manage_accounts", adminOnly: true },
-] as const;
+];
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -55,7 +62,11 @@ function NavList({
   user: AppUser | null;
   onNavigate?: (() => void) | undefined;
 }) {
-  const items = NAV.filter((item) => !item.adminOnly || isAdmin(user));
+  const items = NAV.filter((item) => {
+    if (item.adminOnly) return isAdmin(user);
+    if (item.module) return canAccessModule(user, item.module);
+    return true;
+  });
   return (
     <nav className="flex-1 space-y-1">
       {items.map((item) => {

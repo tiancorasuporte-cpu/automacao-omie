@@ -11,7 +11,7 @@ import {
   releaseInboxChatFn,
   sendInboxReplyFn,
 } from "@/lib/inbox";
-import { requireAuth } from "@/lib/require-auth";
+import { requireModule } from "@/lib/require-auth";
 import { APP_NAME } from "@/lib/brand";
 import type { InboxChat, InboxMessage } from "@/server/waha-inbox";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ const searchSchema = z.object({
 
 export const Route = createFileRoute("/conversas")({
   validateSearch: searchSchema,
-  beforeLoad: requireAuth,
+  beforeLoad: () => requireModule("conversas"),
   loader: async () => listInboxChatsFn({ data: { limit: 60 } }),
   head: () => ({
     meta: [{ title: `Conversas — ${APP_NAME}` }],

@@ -3,9 +3,10 @@ import { useMemo, useState } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { FilterChips, MobileSearch } from "@/components/FilterBar";
-import { createUserFn, listUsersFn, setUserActiveFn } from "@/lib/accounts";
-import { roleLabel, requireAdmin } from "@/lib/require-auth";
+import { createUserFn, listUsersFn, setUserActiveFn, updateUserModulesFn } from "@/lib/accounts";
 import { APP_NAME } from "@/lib/brand";
+import { APP_MODULES, moduleLabel, type AppModuleId } from "@/lib/modules";
+import { roleLabel, requireAdmin } from "@/lib/require-auth";
 import { matchesQuery } from "@/lib/text-search";
 
 export const Route = createFileRoute("/users")({
@@ -17,6 +18,38 @@ export const Route = createFileRoute("/users")({
   component: UsersPage,
 });
 
+function ModulesPicker({
+  value,
+  onChange,
+}: {
+  value: AppModuleId[];
+  onChange: (next: AppModuleId[]) => void;
+}) {
+  return (
+    <div className="mt-base grid gap-sm sm:grid-cols-2">
+      {APP_MODULES.map((module) => {
+        const checked = value.includes(module.id);
+        return (
+          <label
+            key={module.id}
+            className="flex items-center gap-sm rounded-lg border border-outline-variant px-sm py-sm text-body-md text-on-surface"
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(event) => {
+                if (event.target.checked) onChange([...value, module.id]);
+                else onChange(value.filter((id) => id !== module.id));
+              }}
+            />
+            {module.label}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 function UsersPage() {
   const loaded = Route.useLoaderData();
   const router = useRouter();
@@ -25,6 +58,9 @@ function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [role, setRole] = useState<"admin" | "operator">("operator");
+  const [modules, setModules] = useState<AppModuleId[]>(APP_MODULES.map((m) => m.id));
+  const [editingModulesId, setEditingModulesId] = useState<number | null>(null);
+  const [draftModules, setDraftModules] = useState<AppModuleId[]>([]);
   const users = loaded.ok ? loaded.users : [];
   const { query } = useShellSearch();
   const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "operator" | "superadmin">("all");
@@ -32,7 +68,13 @@ function UsersPage() {
   const visible = useMemo(() => {
     return users.filter((user) => {
       if (roleFilter !== "all" && user.role !== roleFilter) return false;
-      return matchesQuery(query, [user.name, user.username, user.role, roleLabel(user.role)]);
+      return matchesQuery(query, [
+        user.name,
+        user.username,
+        user.role,
+        roleLabel(user.role),
+        ...user.modules.map(moduleLabel),
+      ]);
     });
   }, [users, query, roleFilter]);
 
@@ -46,7 +88,7 @@ function UsersPage() {
           <div>
             <h2 className="text-headline-lg tracking-tight text-primary">Usuários</h2>
             <p className="mt-base text-body-lg text-on-surface-variant">
-              Crie logins de administrador ou operador para acessar vencimentos e configurações.
+              Crie administradores ou operadores e defina quais módulos cada operador pode acessar.
             </p>
           </div>
 
@@ -68,6 +110,7 @@ function UsersPage() {
                       username: String(data.get("username") ?? ""),
                       password: String(data.get("password") ?? ""),
                       role,
+                      ...(role === "operator" ? { modules } : {}),
                     },
                   });
                   if (!result.ok) {
@@ -77,6 +120,7 @@ function UsersPage() {
                   setMessage(`${result.user.name} criado como ${roleLabel(result.user.role)}.`);
                   form.reset();
                   setRole("operator");
+                  setModules(APP_MODULES.map((m) => m.id));
                   await router.invalidate();
                 } finally {
                   setPending(false);
@@ -119,6 +163,21 @@ function UsersPage() {
                   ))}
                 </div>
               </fieldset>
+
+              {role === "operator" ? (
+                <fieldset className="md:col-span-2 block text-label-md text-on-surface-variant">
+                  <legend>Acessos do operador</legend>
+                  <p className="mt-xs text-body-md text-on-surface-variant">
+                    Marque os módulos que este operador poderá ver no menu.
+                  </p>
+                  <ModulesPicker value={modules} onChange={setModules} />
+                </fieldset>
+              ) : (
+                <p className="md:col-span-2 text-body-md text-on-surface-variant">
+                  Administradores têm acesso a todos os módulos, configurações e usuários.
+                </p>
+              )}
+
               <div className="md:col-span-2">
                 <button
                   type="submit"
@@ -158,38 +217,111 @@ function UsersPage() {
               visible.map((user) => (
                 <article
                   key={user.id}
-                  className="flex flex-col gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md sm:flex-row sm:items-center sm:justify-between"
+                  className="space-y-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md"
                 >
-                  <div>
-                    <h3 className="text-title-lg text-primary">{user.name}</h3>
-                    <p className="text-body-md text-on-surface-variant">
-                      {user.username} • {roleLabel(user.role)}
-                      {user.active ? "" : " • inativo"}
-                    </p>
+                  <div className="flex flex-col gap-sm sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h3 className="text-title-lg text-primary">{user.name}</h3>
+                      <p className="text-body-md text-on-surface-variant">
+                        {user.username} • {roleLabel(user.role)}
+                        {user.active ? "" : " • inativo"}
+                      </p>
+                      {user.role === "operator" ? (
+                        <p className="mt-xs text-label-md text-on-surface-variant">
+                          Acessos:{" "}
+                          {user.modules.length
+                            ? user.modules.map(moduleLabel).join(", ")
+                            : "nenhum"}
+                        </p>
+                      ) : (
+                        <p className="mt-xs text-label-md text-on-surface-variant">Acesso completo</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-sm">
+                      {user.role === "operator" ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingModulesId(user.id);
+                            setDraftModules([...user.modules]);
+                            setError(null);
+                            setMessage(null);
+                          }}
+                          className="rounded-lg border border-outline-variant px-sm py-sm text-label-md text-primary"
+                        >
+                          Editar acessos
+                        </button>
+                      ) : null}
+                      {user.role !== "superadmin" ? (
+                        <button
+                          type="button"
+                          disabled={busyId === user.id}
+                          onClick={async () => {
+                            setBusyId(user.id);
+                            setError(null);
+                            setMessage(null);
+                            try {
+                              const result = await setUserActiveFn({
+                                data: { id: user.id, active: !user.active },
+                              });
+                              if (!result.ok) setError(result.error);
+                              else
+                                setMessage(
+                                  user.active ? `${user.name} desativado.` : `${user.name} reativado.`,
+                                );
+                              await router.invalidate();
+                            } finally {
+                              setBusyId(null);
+                            }
+                          }}
+                          className="rounded-lg border border-outline-variant px-sm py-sm text-label-md text-primary disabled:opacity-60"
+                        >
+                          {user.active ? "Desativar" : "Reativar"}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
-                  {user.role !== "superadmin" ? (
-                    <button
-                      type="button"
-                      disabled={busyId === user.id}
-                      onClick={async () => {
-                        setBusyId(user.id);
-                        setError(null);
-                        setMessage(null);
-                        try {
-                          const result = await setUserActiveFn({
-                            data: { id: user.id, active: !user.active },
-                          });
-                          if (!result.ok) setError(result.error);
-                          else setMessage(user.active ? `${user.name} desativado.` : `${user.name} reativado.`);
-                          await router.invalidate();
-                        } finally {
-                          setBusyId(null);
-                        }
-                      }}
-                      className="rounded-lg border border-outline-variant px-sm py-sm text-label-md text-primary disabled:opacity-60"
-                    >
-                      {user.active ? "Desativar" : "Reativar"}
-                    </button>
+
+                  {editingModulesId === user.id ? (
+                    <div className="rounded-lg border border-outline-variant bg-surface px-md py-sm">
+                      <p className="text-label-md text-on-surface-variant">Acessos de {user.name}</p>
+                      <ModulesPicker value={draftModules} onChange={setDraftModules} />
+                      <div className="mt-sm flex flex-wrap gap-sm">
+                        <button
+                          type="button"
+                          disabled={busyId === user.id}
+                          onClick={async () => {
+                            setBusyId(user.id);
+                            setError(null);
+                            setMessage(null);
+                            try {
+                              const result = await updateUserModulesFn({
+                                data: { id: user.id, modules: draftModules },
+                              });
+                              if (!result.ok) {
+                                setError(result.error);
+                                return;
+                              }
+                              setMessage(`Acessos de ${user.name} atualizados.`);
+                              setEditingModulesId(null);
+                              await router.invalidate();
+                            } finally {
+                              setBusyId(null);
+                            }
+                          }}
+                          className="rounded-lg bg-primary px-sm py-sm text-label-md text-on-primary disabled:opacity-60"
+                        >
+                          Salvar acessos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingModulesId(null)}
+                          className="rounded-lg border border-outline-variant px-sm py-sm text-label-md text-primary"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
                   ) : null}
                 </article>
               ))

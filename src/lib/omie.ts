@@ -33,8 +33,8 @@ export const getOmieAppsFn = createServerFn({ method: "GET" }).handler(async () 
 });
 
 export const getDashboardFn = createServerFn({ method: "GET" }).handler(async () => {
-  const { requireAuth } = await import("@/lib/require-auth");
-  await requireAuth();
+  const { requireModule } = await import("@/lib/require-auth");
+  await requireModule("dashboard");
   const [stats, syncLogs, apps] = await Promise.all([
     getDashboardStats(),
     getLastSyncLogs(5),
@@ -44,16 +44,16 @@ export const getDashboardFn = createServerFn({ method: "GET" }).handler(async ()
 });
 
 export const listDueItemsFn = createServerFn({ method: "GET" }).handler(async () => {
-  const { requireAuth } = await import("@/lib/require-auth");
-  await requireAuth();
+  const { requireModule } = await import("@/lib/require-auth");
+  await requireModule("vencimentos");
   return listDueItems({ currentMonthOnly: true, openOnly: true });
 });
 
 export const listNotificationLogsFn = createServerFn({ method: "GET" })
   .validator((input) => z.object({ page: z.coerce.number().int().min(1).optional() }).parse(input ?? {}))
   .handler(async ({ data }) => {
-    const { requireAuth } = await import("@/lib/require-auth");
-    await requireAuth();
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("notificacoes");
     return listNotificationLogsPaginated(data.page ?? 1, 15);
   });
 
@@ -80,8 +80,8 @@ export const sendDueItemNotificationFn = createServerFn({ method: "POST" })
 export const getDueItemBoletoViewFn = createServerFn({ method: "GET" })
   .validator((input) => z.object({ dueItemId: z.coerce.number().int().positive() }).parse(input ?? {}))
   .handler(async ({ data }) => {
-    const { requireAuth } = await import("@/lib/require-auth");
-    await requireAuth();
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("vencimentos");
 
     const item = await getDueItemById(data.dueItemId);
     if (!item) {
