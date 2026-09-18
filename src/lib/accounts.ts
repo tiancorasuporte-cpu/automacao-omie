@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
-import { ALL_MODULE_IDS, isAppModuleId } from "@/lib/modules";
+import { ALL_MODULE_IDS, isAppModuleId, isAppNavModuleId } from "@/lib/modules";
 
 const moduleSchema = z
   .array(z.string())
@@ -29,6 +29,11 @@ const modulesUpdateSchema = z.object({
   modules: moduleSchema,
 });
 
+const adminPasswordSchema = z.object({
+  id: z.number().int().positive(),
+  password: z.string().min(4, "A senha deve ter pelo menos 4 caracteres"),
+});
+
 export const listUsersFn = createServerFn({ method: "GET" }).handler(async () => {
   const { requireAdmin } = await import("@/lib/require-auth");
   await requireAdmin();
@@ -46,6 +51,12 @@ export const createUserFn = createServerFn({ method: "POST" })
       return {
         ok: false as const,
         error: "Selecione ao menos um acesso para o operador.",
+      };
+    }
+    if (data.role === "operator" && data.modules && !data.modules.some(isAppNavModuleId)) {
+      return {
+        ok: false as const,
+        error: "Selecione ao menos um módulo de menu para o operador.",
       };
     }
     const existing = await findUserByUsername(data.username);
@@ -95,6 +106,12 @@ export const updateUserModulesFn = createServerFn({ method: "POST" })
     if (data.modules.length === 0) {
       return { ok: false as const, error: "Selecione ao menos um acesso para o operador." };
     }
+    if (!data.modules.some(isAppNavModuleId)) {
+      return {
+        ok: false as const,
+        error: "Selecione ao menos um módulo de menu para o operador.",
+      };
+    }
     const { updateUserModules } = await import("@/db/users");
     try {
       const user = await updateUserModules(data.id, data.modules);
@@ -104,6 +121,37 @@ export const updateUserModulesFn = createServerFn({ method: "POST" })
       return {
         ok: false as const,
         error: error instanceof Error ? error.message : "Não foi possível atualizar os acessos.",
+      };
+    }
+  });
+
+export const setUserPasswordFn = createServerFn({ method: "POST" })
+  .validator(adminPasswordSchema)
+  .handler(async ({ data }) => {
+    const { requireAdmin, isSuperadmin, isAdmin } = await import("@/lib/require-auth");
+    const { user: actor } = await requireAdmin();
+    const { findUserById, setUserPasswordByAdmin } = await import("@/db/users");
+    const target = await findUserById(data.id, { includeInactive: true });
+    if (!target) return { ok: false as const, error: "Usuário não encontrado." };
+
+    if (isSuperadmin(target) && !isSuperadmin(actor)) {
+      return { ok: false as const, error: "Apenas superadmin pode alterar a senha de outro superadmin." };
+    }
+    if (isAdmin(target) && target.role === "admin" && !isSuperadmin(actor)) {
+      return {
+        ok: false as const,
+        error: "Apenas superadmin pode alterar a senha de um administrador.",
+      };
+    }
+
+    try {
+      const user = await setUserPasswordByAdmin(data.id, data.password);
+      if (!user) return { ok: false as const, error: "Usuário não encontrado." };
+      return { ok: true as const, user };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Não foi possível alterar a senha.",
       };
     }
   });

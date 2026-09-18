@@ -130,3 +130,14 @@ export async function updateUserProfile(id: number, name: string, password?: str
   }
   await db`update users set name = ${name}, updated_at = now() where id = ${id}`;
 }
+
+export async function setUserPasswordByAdmin(id: number, password: string) {
+  const db = await getDb();
+  const passwordHash = await hash(password, 10);
+  await db`
+    update users
+    set password_hash = ${passwordHash}, updated_at = now()
+    where id = ${id}
+  `;
+  return findUserById(id, { includeInactive: true });
+}

@@ -238,9 +238,10 @@ export async function deleteQuoteById(quoteId: number) {
   return { quoteId, numeroInterno: existing.numeroInterno };
 }
 
-export async function listQuotes(limit = 50): Promise<Quote[]> {
+export async function listQuotes(limit = 50, omieAppId?: string): Promise<Quote[]> {
   const db = await getDb();
   const safeLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
+  const appId = omieAppId?.trim() || null;
   const rows = (await db`
     select
       q.id, q.omie_app_id, q.omie_app_name, q.client_code, q.client_name,
@@ -252,6 +253,7 @@ export async function listQuotes(limit = 50): Promise<Quote[]> {
       coalesce(q.updated_at::text, q.created_at::text) as updated_at
     from quotes q
     left join users u on u.id = q.created_by
+    where (${appId}::text is null or q.omie_app_id = ${appId})
     order by q.id desc
     limit ${safeLimit}
   `) as Array<Record<string, unknown>>;

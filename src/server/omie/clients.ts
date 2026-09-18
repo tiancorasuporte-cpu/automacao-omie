@@ -6,6 +6,7 @@ export type ClienteResumo = {
   codigo_cliente_omie: number;
   razao_social: string;
   nome_fantasia: string;
+  cnpj_cpf: string | null;
   telefone1_ddd: string;
   telefone1_numero: string;
   telefone2_ddd: string;
@@ -22,11 +23,13 @@ export function normalizeCliente(raw: Record<string, unknown>, fallbackCode?: nu
 
   const nomeFantasia = String(root["nome_fantasia"] ?? root["nome"] ?? "").trim();
   const razaoSocial = String(root["razao_social"] ?? root["cRazaoSocial"] ?? nomeFantasia).trim();
+  const cnpjCpf = String(root["cnpj_cpf"] ?? root["cnpj"] ?? root["cpf_cnpj"] ?? "").trim() || null;
 
   return {
     codigo_cliente_omie: code,
     razao_social: razaoSocial,
     nome_fantasia: nomeFantasia || razaoSocial,
+    cnpj_cpf: cnpjCpf,
     telefone1_ddd: String(root["telefone1_ddd"] ?? root["ddd"] ?? ""),
     telefone1_numero: String(root["telefone1_numero"] ?? root["telefone"] ?? ""),
     telefone2_ddd: String(root["telefone2_ddd"] ?? ""),

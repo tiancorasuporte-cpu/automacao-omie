@@ -14,6 +14,7 @@ import { Route as ConversasRouteImport } from './routes/conversas'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as NotificacoesRouteImport } from './routes/notificacoes'
 import { Route as OrcamentosRouteImport } from './routes/orcamentos'
+import { Route as ProdutosRouteImport } from './routes/produtos'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
@@ -44,6 +45,11 @@ const NotificacoesRoute = NotificacoesRouteImport.update({
 const OrcamentosRoute = OrcamentosRouteImport.update({
   id: '/orcamentos',
   path: '/orcamentos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProdutosRoute = ProdutosRouteImport.update({
+  id: '/produtos',
+  path: '/produtos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProfileRoute = ProfileRouteImport.update({
@@ -83,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
+  '/produtos': typeof ProdutosRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -96,6 +103,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
+  '/produtos': typeof ProdutosRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -110,6 +118,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
+  '/produtos': typeof ProdutosRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
@@ -125,6 +134,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/notificacoes'
     | '/orcamentos'
+    | '/produtos'
     | '/profile'
     | '/settings'
     | '/setup'
@@ -138,6 +148,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/notificacoes'
     | '/orcamentos'
+    | '/produtos'
     | '/profile'
     | '/settings'
     | '/setup'
@@ -151,6 +162,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/notificacoes'
     | '/orcamentos'
+    | '/produtos'
     | '/profile'
     | '/settings'
     | '/setup'
@@ -165,6 +177,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   NotificacoesRoute: typeof NotificacoesRoute
   OrcamentosRoute: typeof OrcamentosRoute
+  ProdutosRoute: typeof ProdutosRoute
   ProfileRoute: typeof ProfileRoute
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
@@ -208,6 +221,13 @@ declare module '@tanstack/react-router' {
       path: '/orcamentos'
       fullPath: '/orcamentos'
       preLoaderRoute: typeof OrcamentosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/produtos': {
+      id: '/produtos'
+      path: '/produtos'
+      fullPath: '/produtos'
+      preLoaderRoute: typeof ProdutosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/profile': {
@@ -261,6 +281,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   NotificacoesRoute: NotificacoesRoute,
   OrcamentosRoute: OrcamentosRoute,
+  ProdutosRoute: ProdutosRoute,
   ProfileRoute: ProfileRoute,
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,

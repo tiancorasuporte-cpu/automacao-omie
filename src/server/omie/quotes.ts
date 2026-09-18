@@ -69,7 +69,7 @@ export async function searchOmieClients(app: OmieAppConfig, query: string) {
 
   const attempts = [{ razao_social: q }, { nome_fantasia: q }];
 
-  const out: Array<{ codigo: number; nome: string }> = [];
+  const out: Array<{ codigo: number; nome: string; cnpjCpf: string | null }> = [];
   const seen = new Set<number>();
 
   for (const filtro of attempts) {
@@ -88,7 +88,8 @@ export async function searchOmieClients(app: OmieAppConfig, query: string) {
         seen.add(client.codigo_cliente_omie);
         out.push({
           codigo: client.codigo_cliente_omie,
-          nome: clientDisplayName(client) || client.razao_social,
+          nome: client.razao_social || clientDisplayName(client) || `Cliente ${client.codigo_cliente_omie}`,
+          cnpjCpf: client.cnpj_cpf,
         });
       }
       if (out.length > 0) break;
@@ -98,6 +99,53 @@ export async function searchOmieClients(app: OmieAppConfig, query: string) {
   }
 
   return out;
+}
+
+export type OmieEmpresaInfo = {
+  razaoSocial: string;
+  nomeFantasia: string | null;
+  cnpj: string | null;
+};
+
+function envEmpresaKey(appId: string, suffix: string) {
+  return `OMIE_${appId.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}_${suffix}`;
+}
+
+/** Razão social + CNPJ da empresa Omie (Belfer). Env: OMIE_{ID}_RAZAO_SOCIAL / _CNPJ. */
+export async function getOmieEmpresaInfo(app: OmieAppConfig): Promise<OmieEmpresaInfo> {
+  const fromEnvRazao = (process.env[envEmpresaKey(app.id, "RAZAO_SOCIAL")] ?? "").trim();
+  const fromEnvCnpj = (process.env[envEmpresaKey(app.id, "CNPJ")] ?? "").trim();
+
+  try {
+    const response = await omieCall<{
+      empresas_cadastro?: Record<string, unknown>[];
+    }>(app, "/geral/empresas/", "ListarEmpresas", {
+      pagina: 1,
+      registros_por_pagina: 20,
+      apenas_importado_api: "N",
+    });
+    const rows = response.empresas_cadastro ?? [];
+    const active =
+      rows.find((row) => String(row["inativa"] ?? "N").toUpperCase() !== "S") ?? rows[0];
+    if (active) {
+      const razaoSocial =
+        String(active["razao_social"] ?? "").trim() ||
+        fromEnvRazao ||
+        String(active["nome_fantasia"] ?? "").trim() ||
+        app.name;
+      const nomeFantasia = String(active["nome_fantasia"] ?? "").trim() || null;
+      const cnpj = String(active["cnpj"] ?? "").trim() || fromEnvCnpj || null;
+      return { razaoSocial, nomeFantasia, cnpj };
+    }
+  } catch {
+    // fallback env / nome curto
+  }
+
+  return {
+    razaoSocial: fromEnvRazao || app.name,
+    nomeFantasia: app.name,
+    cnpj: fromEnvCnpj || null,
+  };
 }
 
 function validateItems(items: QuoteLineInput[]) {

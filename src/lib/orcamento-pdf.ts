@@ -1,4 +1,6 @@
 import { APP_NAME, BRAND_LOGO_URL } from "@/lib/brand";
+import { buildOrcamentoFileBaseName } from "@/lib/orcamento-excel";
+import { formatCnpjCpf } from "@/lib/format";
 
 export type OrcamentoPdfItem = {
   descricao: string;
@@ -10,7 +12,9 @@ export type OrcamentoPdfItem = {
 
 export type OrcamentoPdfOptions = {
   empresaNome: string;
+  empresaCnpj?: string | null;
   clienteNome: string;
+  clienteCnpj?: string | null;
   clienteCodigo?: number | null;
   numeroInterno?: string | null;
   criadoPor?: string | null;
@@ -52,6 +56,10 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
   const showTotal = options.showTotal;
   const logoUrl =
     typeof window !== "undefined" ? new URL(BRAND_LOGO_URL, window.location.origin).toString() : BRAND_LOGO_URL;
+  const fileTitle = buildOrcamentoFileBaseName({
+    numeroInterno: options.numeroInterno,
+    clienteNome: options.clienteNome,
+  });
 
   const rows = options.items
     .map((item) => {
@@ -74,12 +82,14 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
   if (showValues) headers.push("Unitário", "Subtotal");
 
   const colCount = headers.length;
+  const empresaCnpj = formatCnpjCpf(options.empresaCnpj);
+  const clienteCnpj = formatCnpjCpf(options.clienteCnpj);
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Orçamento — ${escapeHtml(options.clienteNome)}</title>
+  <title>${escapeHtml(fileTitle)}</title>
   <style>
     @page { margin: 16mm; }
     * { box-sizing: border-box; }
@@ -91,17 +101,17 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
     .sheet { max-width: 800px; margin: 0 auto; }
     .header {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
       gap: 16px;
       border-bottom: 2px solid #0b3d5c;
       padding-bottom: 14px;
       margin-bottom: 18px;
     }
-    .brand { display: flex; align-items: center; gap: 12px; }
-    .brand img { height: 48px; width: auto; }
-    .brand h1 { margin: 0; font-size: 18px; color: #0b3d5c; }
-    .brand p { margin: 2px 0 0; color: #5f6368; font-size: 11px; }
+    .brand { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+    .brand img { height: 48px; width: auto; flex-shrink: 0; }
+    .brand h1 { margin: 0; font-size: 16px; color: #0b3d5c; line-height: 1.25; }
+    .brand p { margin: 4px 0 0; color: #5f6368; font-size: 11px; }
     .badge {
       border: 1px solid #0b3d5c;
       color: #0b3d5c;
@@ -111,6 +121,7 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
       font-weight: 700;
       letter-spacing: 0.04em;
       text-transform: uppercase;
+      flex-shrink: 0;
     }
     .meta-grid {
       display: grid;
@@ -154,11 +165,6 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
       font-size: 14px;
       font-weight: 700;
     }
-    .footnote {
-      margin-top: 28px;
-      color: #5f6368;
-      font-size: 10px;
-    }
     @media print {
       .no-print { display: none !important; }
       body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -172,6 +178,7 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
         <img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(APP_NAME)}" />
         <div>
           <h1>${escapeHtml(options.empresaNome || APP_NAME)}</h1>
+          ${empresaCnpj ? `<p>CNPJ ${escapeHtml(empresaCnpj)}</p>` : ""}
           <p>Orçamento de produtos</p>
         </div>
       </div>
@@ -186,6 +193,7 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
       <div>
         <div class="label">Cliente</div>
         <div class="value">${escapeHtml(options.clienteNome)}</div>
+        ${clienteCnpj ? `<div class="meta">CNPJ/CPF ${escapeHtml(clienteCnpj)}</div>` : ""}
         ${
           options.clienteCodigo
             ? `<div class="meta">Código Omie ${options.clienteCodigo}</div>`
@@ -236,12 +244,6 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
         ? `<div class="obs"><div class="label">Observações</div><div>${escapeHtml(options.observacao.trim())}</div></div>`
         : ""
     }
-
-    <p class="footnote">
-      Documento gerado por ${escapeHtml(APP_NAME)}.
-      ${!showValues && showTotal ? " Valores unitários ocultos — exibindo apenas o total." : ""}
-      ${!showValues && !showTotal ? " Valores ocultos neste documento." : ""}
-    </p>
   </div>
 </body>
 </html>`;
@@ -256,12 +258,16 @@ export function openOrcamentoPdf(options: OrcamentoPdfOptions) {
   }
 
   const html = buildOrcamentoPdfHtml(options);
+  const fileBase = buildOrcamentoFileBaseName({
+    numeroInterno: options.numeroInterno,
+    clienteNome: options.clienteNome,
+  });
   const existing = document.getElementById("orcamento-pdf-frame");
   if (existing) existing.remove();
 
   const iframe = document.createElement("iframe");
   iframe.id = "orcamento-pdf-frame";
-  iframe.setAttribute("title", "Pré-visualização do orçamento");
+  iframe.setAttribute("title", fileBase);
   iframe.style.position = "fixed";
   iframe.style.right = "0";
   iframe.style.bottom = "0";
@@ -282,15 +288,36 @@ export function openOrcamentoPdf(options: OrcamentoPdfOptions) {
   frameDocument.open();
   frameDocument.write(html);
   frameDocument.close();
+  try {
+    frameDocument.title = fileBase;
+  } catch {
+    // ignore
+  }
+
+  const previousTitle = document.title;
+  let restored = false;
+  const restoreTitle = () => {
+    if (restored) return;
+    restored = true;
+    document.title = previousTitle;
+    window.removeEventListener("afterprint", restoreTitle);
+    frameWindow.removeEventListener("afterprint", restoreTitle);
+  };
 
   const cleanup = () => {
     setTimeout(() => {
       iframe.remove();
     }, 1000);
+    // Fallback: se afterprint não disparar, restaura o título depois.
+    setTimeout(restoreTitle, 60_000);
   };
 
   const triggerPrint = () => {
     try {
+      // O "Salvar como" do Windows/Chrome usa o título da aba principal.
+      document.title = fileBase;
+      window.addEventListener("afterprint", restoreTitle);
+      frameWindow.addEventListener("afterprint", restoreTitle);
       frameWindow.focus();
       frameWindow.print();
     } finally {

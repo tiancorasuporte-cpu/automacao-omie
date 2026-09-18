@@ -25,6 +25,8 @@ import {
   syncOmieProductsFn,
 } from "@/lib/orcamentos";
 import { openOrcamentoPdf } from "@/lib/orcamento-pdf";
+import { downloadOrcamentoExcel } from "@/lib/orcamento-excel";
+import { effectiveCmc, isUnitBelowCmc, isUnitBelowSuggested, suggestedPriceFromCmc } from "@/lib/product-pricing";
 import { requireModule } from "@/lib/require-auth";
 
 export const Route = createFileRoute("/orcamentos")({
@@ -43,6 +45,9 @@ type CartItem = {
   unidade: string | null;
   quantidade: number;
   valorUnitario: number;
+  cmc: number | null;
+  cmcInterno: number | null;
+  markup: number | null;
   ncm: string | null;
 };
 
@@ -69,14 +74,21 @@ function OrcamentosPage() {
   const [apps] = useState(bootstrap.apps);
   const [quotes, setQuotes] = useState(bootstrap.quotes);
   const [productCount, setProductCount] = useState(bootstrap.productCount);
-  const [omieAppId, setOmieAppId] = useState(bootstrap.apps[0]?.id ?? "");
+  const [omieAppId] = useState(bootstrap.omieAppId ?? bootstrap.apps[0]?.id ?? "");
+  const canDeleteQuotes = bootstrap.canDeleteQuotes === true;
   const [editingQuoteId, setEditingQuoteId] = useState<number | null>(null);
   const [numeroInterno, setNumeroInterno] = useState<string | null>(null);
   const [criadoPor, setCriadoPor] = useState<string | null>(null);
   const [quoteStatus, setQuoteStatus] = useState<string | null>(null);
   const [clientQuery, setClientQuery] = useState("");
-  const [clientResults, setClientResults] = useState<Array<{ codigo: number; nome: string }>>([]);
-  const [selectedClient, setSelectedClient] = useState<{ codigo: number; nome: string } | null>(null);
+  const [clientResults, setClientResults] = useState<
+    Array<{ codigo: number; nome: string; cnpjCpf: string | null }>
+  >([]);
+  const [selectedClient, setSelectedClient] = useState<{
+    codigo: number;
+    nome: string;
+    cnpjCpf: string | null;
+  } | null>(null);
   const [productQuery, setProductQuery] = useState("");
   const [products, setProducts] = useState<
     Array<{
@@ -84,6 +96,11 @@ function OrcamentosPage() {
       descricao: string;
       unidade: string | null;
       valorUnitario: number | null;
+      cmc: number | null;
+      cmcInterno: number | null;
+      cmcEfetivo: number | null;
+      markup: number;
+      precoSugerido: number | null;
       ncm: string | null;
       codigoInterno: string | null;
     }>
@@ -106,6 +123,25 @@ function OrcamentosPage() {
 
   const total = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantidade * item.valorUnitario, 0),
+    [cart],
+  );
+
+  const belowCmcCount = useMemo(
+    () =>
+      cart.filter((item) =>
+        isUnitBelowCmc(item.valorUnitario, effectiveCmc(item.cmc, item.cmcInterno)),
+      ).length,
+    [cart],
+  );
+
+  const belowSuggestedCount = useMemo(
+    () =>
+      cart.filter((item) => {
+        const cmcEfetivo = effectiveCmc(item.cmc, item.cmcInterno);
+        if (isUnitBelowCmc(item.valorUnitario, cmcEfetivo)) return false;
+        const sugerido = suggestedPriceFromCmc(cmcEfetivo, item.markup ?? undefined);
+        return isUnitBelowSuggested(item.valorUnitario, sugerido);
+      }).length,
     [cart],
   );
 
@@ -194,7 +230,7 @@ function OrcamentosPage() {
         type: errors.length ? "error" : "ok",
         text: errors.length
           ? `Sync parcial: ${result.total} produtos. ${errors.map((e) => `${e.appId}: ${e.error}`).join(" · ")}`
-          : `${result.total} produtos sincronizados da Omie.`,
+          : `${result.total} produtos sincronizados da Omie${"cmcTotal" in result && result.cmcTotal ? ` (CMC em ${result.cmcTotal})` : ""}.`,
       });
       const rows = await searchOmieProductsFn({
         data: { omieAppId, query: productQuery || undefined, limit: 40 },
@@ -231,6 +267,9 @@ function OrcamentosPage() {
           unidade: product.unidade,
           quantidade: 1,
           valorUnitario: product.valorUnitario ?? 0,
+          cmc: product.cmc ?? null,
+          cmcInterno: product.cmcInterno ?? null,
+          markup: product.markup ?? null,
           ncm: product.ncm,
         },
       ];
@@ -339,6 +378,10 @@ function OrcamentosPage() {
   }
 
   function handleDeleteQuote(quote: (typeof quotes)[number]) {
+    if (!canDeleteQuotes) {
+      setFeedback({ type: "error", text: "Seu usuário não tem permissão para excluir orçamentos." });
+      return;
+    }
     setDeleteTarget(quote);
   }
 
@@ -388,9 +431,14 @@ function OrcamentosPage() {
       setNumeroInterno(quote.numeroInterno);
       setCriadoPor(quote.createdByName);
       setQuoteStatus(quote.status);
-      setOmieAppId(quote.omieAppId);
-      setSelectedClient({ codigo: quote.clientCode, nome: quote.clientName ?? `Cliente ${quote.clientCode}` });
-      setClientQuery(quote.clientName ?? "");
+      setSelectedClient({
+        codigo: quote.clientCode,
+        nome: result.clienteNomeCompleto ?? quote.clientName ?? `Cliente ${quote.clientCode}`,
+        cnpjCpf: result.clienteCnpj ?? null,
+      });
+      setClientQuery(
+        result.clienteNomeCompleto ?? quote.clientName ?? "",
+      );
       setObservacao(quote.observacao ?? "");
       setDataPrevisao(quote.dataPrevisao ?? todayIso());
       setCart(
@@ -401,6 +449,9 @@ function OrcamentosPage() {
           unidade: item.unidade,
           quantidade: item.quantidade,
           valorUnitario: item.valorUnitario,
+          cmc: item.cmc ?? null,
+          cmcInterno: item.cmcInterno ?? null,
+          markup: item.markup ?? null,
           ncm: item.ncm,
         })),
       );
@@ -419,22 +470,16 @@ function OrcamentosPage() {
     }
   }
 
-  async function handleGeneratePdf() {
-    if (cart.length === 0) {
-      setFeedback({ type: "error", text: "Adicione produtos antes de gerar o PDF." });
-      return;
-    }
-    setFeedback(null);
-    try {
-      let numero = numeroInterno;
-      let elaborador = criadoPor;
-      if (!numero || !editingQuoteId) {
-        setSaving(true);
+  async function ensureQuoteSavedForExport() {
+    let numero = numeroInterno;
+    let elaborador = criadoPor;
+    if (!numero || !editingQuoteId) {
+      setSaving(true);
+      try {
         const result = await saveOrcamentoFn({ data: buildPayload() });
-        setSaving(false);
         if (!result.ok) {
           setFeedback({ type: "error", text: result.error });
-          return;
+          return null;
         }
         setEditingQuoteId(result.quoteId);
         setNumeroInterno(result.numeroInterno);
@@ -446,15 +491,43 @@ function OrcamentosPage() {
           elaborador = loaded.quote.createdByName;
           setCriadoPor(elaborador);
         }
+      } finally {
+        setSaving(false);
       }
+    }
+    return {
+      numero,
+      elaborador,
+      clienteNome: selectedClient?.nome ?? "Cliente não informado",
+      clienteCodigo: selectedClient?.codigo ?? null,
+      clienteCnpj: selectedClient?.cnpjCpf ?? null,
+      empresaNome: bootstrap.empresaRazaoSocial || apps.find((app) => app.id === omieAppId)?.name || APP_NAME,
+      empresaCnpj: bootstrap.empresaCnpj ?? null,
+    };
+  }
 
-      const empresaNome = apps.find((app) => app.id === omieAppId)?.name ?? APP_NAME;
+  async function handleGeneratePdf() {
+    if (cart.length === 0) {
+      setFeedback({ type: "error", text: "Adicione produtos antes de gerar o PDF." });
+      return;
+    }
+    if (!selectedClient) {
+      setFeedback({ type: "error", text: "Selecione o cliente antes de gerar o PDF." });
+      return;
+    }
+    setFeedback(null);
+    try {
+      const saved = await ensureQuoteSavedForExport();
+      if (!saved) return;
+
       openOrcamentoPdf({
-        empresaNome,
-        clienteNome: selectedClient?.nome ?? "Cliente não informado",
-        clienteCodigo: selectedClient?.codigo ?? null,
-        numeroInterno: numero,
-        criadoPor: elaborador,
+        empresaNome: saved.empresaNome,
+        empresaCnpj: saved.empresaCnpj,
+        clienteNome: saved.clienteNome,
+        clienteCnpj: saved.clienteCnpj,
+        clienteCodigo: saved.clienteCodigo,
+        numeroInterno: saved.numero,
+        criadoPor: saved.elaborador,
         dataPrevisao,
         observacao,
         showLineValues,
@@ -468,10 +541,56 @@ function OrcamentosPage() {
         })),
       });
     } catch (error) {
-      setSaving(false);
       setFeedback({
         type: "error",
         text: error instanceof Error ? error.message : "Não foi possível gerar o PDF.",
+      });
+    }
+  }
+
+  async function handleExportExcel() {
+    if (cart.length === 0) {
+      setFeedback({ type: "error", text: "Adicione produtos antes de exportar o Excel." });
+      return;
+    }
+    if (!selectedClient) {
+      setFeedback({ type: "error", text: "Selecione o cliente antes de exportar o Excel." });
+      return;
+    }
+    setFeedback(null);
+    try {
+      const saved = await ensureQuoteSavedForExport();
+      if (!saved) return;
+
+      downloadOrcamentoExcel({
+        empresaNome: saved.empresaNome,
+        empresaCnpj: saved.empresaCnpj,
+        clienteNome: saved.clienteNome,
+        clienteCnpj: saved.clienteCnpj,
+        clienteCodigo: saved.clienteCodigo,
+        numeroInterno: saved.numero,
+        criadoPor: saved.elaborador,
+        dataPrevisao,
+        observacao,
+        showLineValues,
+        showTotal,
+        items: cart.map((item) => ({
+          descricao: item.descricao,
+          codigoProduto: item.codigoProduto,
+          unidade: item.unidade,
+          quantidade: item.quantidade,
+          cmc: effectiveCmc(item.cmc, item.cmcInterno),
+          valorUnitario: item.valorUnitario,
+        })),
+      });
+      setFeedback({
+        type: "ok",
+        text: `Excel exportado: ${saved.numero} — ${saved.clienteNome}.`,
+      });
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Não foi possível exportar o Excel.",
       });
     }
   }
@@ -536,23 +655,16 @@ function OrcamentosPage() {
             <div className="grid gap-md sm:grid-cols-2">
               <label className="block text-label-md text-on-surface-variant">
                 Empresa Omie
-                <select
-                  value={omieAppId}
-                  disabled={locked}
-                  onChange={(event) => {
-                    setOmieAppId(event.target.value);
-                    setSelectedClient(null);
-                    setClientQuery("");
-                    setCart([]);
-                  }}
-                  className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md disabled:opacity-60"
-                >
-                  {apps.map((app) => (
-                    <option key={app.id} value={app.id}>
-                      {app.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="mt-xs w-full rounded-lg border border-outline-variant bg-surface-container-low px-sm py-sm text-body-md text-on-surface">
+                  {bootstrap.empresaRazaoSocial ||
+                    apps.find((app) => app.id === omieAppId)?.name ||
+                    "Belfer"}
+                  {bootstrap.empresaCnpj ? (
+                    <span className="mt-xs block text-label-md text-on-surface-variant">
+                      CNPJ {bootstrap.empresaCnpj}
+                    </span>
+                  ) : null}
+                </div>
               </label>
               <label className="block text-label-md text-on-surface-variant">
                 Previsão
@@ -614,6 +726,7 @@ function OrcamentosPage() {
                             {client.nome}
                             <span className="ml-xs text-label-md text-on-surface-variant">
                               #{client.codigo}
+                              {client.cnpjCpf ? ` · ${client.cnpjCpf}` : ""}
                             </span>
                           </button>
                         </li>
@@ -641,6 +754,23 @@ function OrcamentosPage() {
                 <p className="text-title-md text-on-surface">Itens do orçamento</p>
                 <p className="text-label-md text-on-surface-variant">Total {formatMoney(total)}</p>
               </div>
+              {cart.length > 0 && (belowCmcCount > 0 || belowSuggestedCount > 0) ? (
+                <div
+                  className={`mb-sm rounded-lg border px-md py-sm text-body-md ${
+                    belowCmcCount > 0
+                      ? "border-red-300 bg-red-50 text-red-900"
+                      : "border-amber-300 bg-amber-50 text-amber-950"
+                  }`}
+                >
+                  {belowCmcCount > 0
+                    ? `Atenção: ${belowCmcCount} item(ns) com valor unitário abaixo do CMC.`
+                    : null}
+                  {belowCmcCount > 0 && belowSuggestedCount > 0 ? " " : null}
+                  {belowSuggestedCount > 0
+                    ? `${belowCmcCount > 0 ? "Também " : ""}${belowSuggestedCount} item(ns) abaixo do preço sugerido.`
+                    : null}
+                </div>
+              ) : null}
               {cart.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-outline-variant px-md py-lg text-center text-body-md text-on-surface-variant">
                   Adicione produtos na lista ao lado.
@@ -653,12 +783,19 @@ function OrcamentosPage() {
                         <th className="px-sm py-xs">Produto</th>
                         <th className="px-sm py-xs">Qtd</th>
                         <th className="px-sm py-xs">Unitário</th>
+                        <th className="px-sm py-xs">CMC</th>
                         <th className="px-sm py-xs">Subtotal</th>
                         <th className="px-sm py-xs" />
                       </tr>
                     </thead>
                     <tbody>
-                      {cart.map((item) => (
+                      {cart.map((item) => {
+                        const cmcEfetivo = effectiveCmc(item.cmc, item.cmcInterno);
+                        const sugerido = suggestedPriceFromCmc(cmcEfetivo, item.markup ?? undefined);
+                        const belowCmc = isUnitBelowCmc(item.valorUnitario, cmcEfetivo);
+                        const belowSuggested =
+                          !belowCmc && isUnitBelowSuggested(item.valorUnitario, sugerido);
+                        return (
                         <tr key={item.key} className="border-t border-outline-variant">
                           <td className="px-sm py-xs">
                             <p>{item.descricao}</p>
@@ -707,8 +844,25 @@ function OrcamentosPage() {
                                   ),
                                 );
                               }}
-                              className="w-28 rounded border border-outline-variant bg-surface px-xs py-xs disabled:opacity-60"
+                              className={`w-28 rounded border bg-surface px-xs py-xs disabled:opacity-60 ${
+                                belowCmc
+                                  ? "border-red-400 text-red-700 font-semibold"
+                                  : belowSuggested
+                                    ? "border-amber-400 text-amber-800 font-semibold"
+                                    : "border-outline-variant"
+                              }`}
                             />
+                            {belowCmc ? (
+                              <p className="mt-xs text-label-md text-red-700">Abaixo do CMC</p>
+                            ) : belowSuggested ? (
+                              <p className="mt-xs text-label-md text-amber-800">Abaixo do sugerido</p>
+                            ) : null}
+                          </td>
+                          <td className="px-sm py-xs text-label-md text-on-surface-variant">
+                            <div>{cmcEfetivo != null ? formatMoney(cmcEfetivo) : "—"}</div>
+                            {sugerido != null ? (
+                              <div className="text-on-surface-variant/80">Sug. {formatMoney(sugerido)}</div>
+                            ) : null}
                           </td>
                           <td className="px-sm py-xs">{formatMoney(item.quantidade * item.valorUnitario)}</td>
                           <td className="px-sm py-xs">
@@ -723,7 +877,8 @@ function OrcamentosPage() {
                             ) : null}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -766,12 +921,21 @@ function OrcamentosPage() {
               </button>
               <button
                 type="button"
-                disabled={cart.length === 0 || saving}
+                disabled={cart.length === 0 || saving || !selectedClient}
                 onClick={handleGeneratePdf}
                 className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
               >
                 <Icon name="picture_as_pdf" className="text-[18px]" />
                 Gerar PDF
+              </button>
+              <button
+                type="button"
+                disabled={cart.length === 0 || saving || !selectedClient}
+                onClick={handleExportExcel}
+                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
+              >
+                <Icon name="table_view" className="text-[18px]" />
+                Exportar Excel
               </button>
               <button
                 type="button"
@@ -816,7 +980,26 @@ function OrcamentosPage() {
                         {product.unidade ? ` · ${product.unidade}` : ""}
                         {" · "}
                         {product.valorUnitario != null ? formatMoney(product.valorUnitario) : "sem preço"}
+                        {product.cmcEfetivo != null ? ` · CMC ${formatMoney(product.cmcEfetivo)}` : ""}
                       </p>
+                      {product.valorUnitario != null &&
+                      isUnitBelowCmc(product.valorUnitario, product.cmcEfetivo) ? (
+                        <p className="text-label-md font-semibold text-red-700">
+                          Unitário abaixo do CMC
+                          {product.precoSugerido != null
+                            ? ` · sug. ${formatMoney(product.precoSugerido)}`
+                            : ""}
+                        </p>
+                      ) : product.valorUnitario != null &&
+                        isUnitBelowSuggested(product.valorUnitario, product.precoSugerido) ? (
+                        <p className="text-label-md font-semibold text-amber-800">
+                          Abaixo do sugerido ({formatMoney(product.precoSugerido!)})
+                        </p>
+                      ) : product.precoSugerido != null ? (
+                        <p className="text-label-md text-on-surface-variant">
+                          sug. {formatMoney(product.precoSugerido)}
+                        </p>
+                      ) : null}
                     </div>
                     <button
                       type="button"
@@ -926,18 +1109,20 @@ function OrcamentosPage() {
                               Omie {quote.numeroPedido}
                             </span>
                           ) : null}
-                          <button
-                            type="button"
-                            disabled={deletingQuoteId === quote.id}
-                            onClick={() => handleDeleteQuote(quote)}
-                            className="inline-flex items-center gap-xs rounded-lg border border-red-200 bg-red-50 px-sm py-xs text-label-md text-red-700 hover:bg-red-100 disabled:opacity-50"
-                          >
-                            <Icon
-                              name={deletingQuoteId === quote.id ? "hourglass_empty" : "delete"}
-                              className="text-[16px]"
-                            />
-                            {deletingQuoteId === quote.id ? "..." : "Excluir"}
-                          </button>
+                          {canDeleteQuotes ? (
+                            <button
+                              type="button"
+                              disabled={deletingQuoteId === quote.id}
+                              onClick={() => handleDeleteQuote(quote)}
+                              className="inline-flex items-center gap-xs rounded-lg border border-red-200 bg-red-50 px-sm py-xs text-label-md text-red-700 hover:bg-red-100 disabled:opacity-50"
+                            >
+                              <Icon
+                                name={deletingQuoteId === quote.id ? "hourglass_empty" : "delete"}
+                                className="text-[16px]"
+                              />
+                              {deletingQuoteId === quote.id ? "..." : "Excluir"}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

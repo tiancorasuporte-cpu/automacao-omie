@@ -3,11 +3,12 @@ import { useMemo, useState } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { FilterChips, MobileSearch } from "@/components/FilterBar";
-import { createUserFn, listUsersFn, setUserActiveFn, updateUserModulesFn } from "@/lib/accounts";
+import { createUserFn, listUsersFn, setUserActiveFn, setUserPasswordFn, updateUserModulesFn } from "@/lib/accounts";
 import { APP_NAME } from "@/lib/brand";
-import { APP_MODULES, moduleLabel, type AppModuleId } from "@/lib/modules";
-import { roleLabel, requireAdmin } from "@/lib/require-auth";
+import { APP_MODULES, APP_PERMISSIONS, moduleLabel, type AppModuleId } from "@/lib/modules";
+import { isSuperadmin, roleLabel, requireAdmin } from "@/lib/require-auth";
 import { matchesQuery } from "@/lib/text-search";
+import { Route as RootRoute } from "@/routes/__root";
 
 export const Route = createFileRoute("/users")({
   beforeLoad: requireAdmin,
@@ -18,6 +19,13 @@ export const Route = createFileRoute("/users")({
   component: UsersPage,
 });
 
+function sanitizeOperatorModules(next: AppModuleId[]): AppModuleId[] {
+  if (!next.includes("orcamentos") && next.includes("orcamentos_excluir")) {
+    return next.filter((id) => id !== "orcamentos_excluir");
+  }
+  return next;
+}
+
 function ModulesPicker({
   value,
   onChange,
@@ -25,33 +33,67 @@ function ModulesPicker({
   value: AppModuleId[];
   onChange: (next: AppModuleId[]) => void;
 }) {
+  function toggle(id: AppModuleId, checked: boolean) {
+    if (checked) onChange([...value, id]);
+    else onChange(value.filter((item) => item !== id));
+  }
+
   return (
-    <div className="mt-base grid gap-sm sm:grid-cols-2">
-      {APP_MODULES.map((module) => {
-        const checked = value.includes(module.id);
-        return (
-          <label
-            key={module.id}
-            className="flex items-center gap-sm rounded-lg border border-outline-variant px-sm py-sm text-body-md text-on-surface"
-          >
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={(event) => {
-                if (event.target.checked) onChange([...value, module.id]);
-                else onChange(value.filter((id) => id !== module.id));
-              }}
-            />
-            {module.label}
-          </label>
-        );
-      })}
+    <div className="mt-base space-y-md">
+      <div className="grid gap-sm sm:grid-cols-2">
+        {APP_MODULES.map((module) => {
+          const checked = value.includes(module.id);
+          return (
+            <label
+              key={module.id}
+              className="flex items-center gap-sm rounded-lg border border-outline-variant px-sm py-sm text-body-md text-on-surface"
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={(event) => toggle(module.id, event.target.checked)}
+              />
+              {module.label}
+            </label>
+          );
+        })}
+      </div>
+      <div>
+        <p className="mb-sm text-label-md text-on-surface-variant">Permissões extras</p>
+        <div className="grid gap-sm sm:grid-cols-2">
+          {APP_PERMISSIONS.map((permission) => {
+            const checked = value.includes(permission.id);
+            const needsOrcamentos =
+              permission.id === "orcamentos_excluir" && !value.includes("orcamentos");
+            return (
+              <label
+                key={permission.id}
+                className={`flex flex-col gap-xs rounded-lg border border-outline-variant px-sm py-sm text-body-md text-on-surface ${
+                  needsOrcamentos ? "opacity-60" : ""
+                }`}
+              >
+                <span className="flex items-center gap-sm">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={needsOrcamentos}
+                    onChange={(event) => toggle(permission.id, event.target.checked)}
+                  />
+                  {permission.label}
+                </span>
+                <span className="pl-6 text-label-md text-on-surface-variant">{permission.hint}</span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
 
 function UsersPage() {
   const loaded = Route.useLoaderData();
+  const { user: currentUser } = RootRoute.useRouteContext();
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
@@ -61,9 +103,17 @@ function UsersPage() {
   const [modules, setModules] = useState<AppModuleId[]>(APP_MODULES.map((m) => m.id));
   const [editingModulesId, setEditingModulesId] = useState<number | null>(null);
   const [draftModules, setDraftModules] = useState<AppModuleId[]>([]);
+  const [passwordUserId, setPasswordUserId] = useState<number | null>(null);
+  const [newPassword, setNewPassword] = useState("");
   const users = loaded.ok ? loaded.users : [];
   const { query } = useShellSearch();
   const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "operator" | "superadmin">("all");
+
+  function canResetPassword(target: (typeof users)[number]) {
+    if (!currentUser) return false;
+    if (isSuperadmin(currentUser)) return true;
+    return target.role === "operator";
+  }
 
   const visible = useMemo(() => {
     return users.filter((user) => {
@@ -168,9 +218,12 @@ function UsersPage() {
                 <fieldset className="md:col-span-2 block text-label-md text-on-surface-variant">
                   <legend>Acessos do operador</legend>
                   <p className="mt-xs text-body-md text-on-surface-variant">
-                    Marque os módulos que este operador poderá ver no menu.
+                    Marque os módulos do menu e, se quiser, a permissão de excluir orçamentos.
                   </p>
-                  <ModulesPicker value={modules} onChange={setModules} />
+                  <ModulesPicker
+                    value={modules}
+                    onChange={(next) => setModules(sanitizeOperatorModules(next))}
+                  />
                 </fieldset>
               ) : (
                 <p className="md:col-span-2 text-body-md text-on-surface-variant">
@@ -244,12 +297,28 @@ function UsersPage() {
                           onClick={() => {
                             setEditingModulesId(user.id);
                             setDraftModules([...user.modules]);
+                            setPasswordUserId(null);
                             setError(null);
                             setMessage(null);
                           }}
                           className="rounded-lg border border-outline-variant px-sm py-sm text-label-md text-primary"
                         >
                           Editar acessos
+                        </button>
+                      ) : null}
+                      {canResetPassword(user) ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPasswordUserId(user.id);
+                            setNewPassword("");
+                            setEditingModulesId(null);
+                            setError(null);
+                            setMessage(null);
+                          }}
+                          className="rounded-lg border border-outline-variant px-sm py-sm text-label-md text-primary"
+                        >
+                          Alterar senha
                         </button>
                       ) : null}
                       {user.role !== "superadmin" ? (
@@ -282,10 +351,67 @@ function UsersPage() {
                     </div>
                   </div>
 
+                  {passwordUserId === user.id ? (
+                    <div className="w-full rounded-lg border border-outline-variant bg-surface px-md py-md">
+                      <label className="block text-label-md text-on-surface-variant">
+                        Nova senha para {user.name}
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          value={newPassword}
+                          onChange={(event) => setNewPassword(event.target.value)}
+                          placeholder="Mínimo 4 caracteres"
+                          className={fieldClass}
+                        />
+                      </label>
+                      <div className="mt-sm flex flex-wrap gap-sm">
+                        <button
+                          type="button"
+                          disabled={busyId === user.id || newPassword.trim().length < 4}
+                          onClick={async () => {
+                            setBusyId(user.id);
+                            setError(null);
+                            setMessage(null);
+                            try {
+                              const result = await setUserPasswordFn({
+                                data: { id: user.id, password: newPassword.trim() },
+                              });
+                              if (!result.ok) {
+                                setError(result.error);
+                                return;
+                              }
+                              setMessage(`Senha de ${user.name} atualizada.`);
+                              setPasswordUserId(null);
+                              setNewPassword("");
+                            } finally {
+                              setBusyId(null);
+                            }
+                          }}
+                          className="rounded-lg bg-primary px-sm py-sm text-label-md text-on-primary disabled:opacity-60"
+                        >
+                          Salvar senha
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPasswordUserId(null);
+                            setNewPassword("");
+                          }}
+                          className="rounded-lg border border-outline-variant px-sm py-sm text-label-md text-primary"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
                   {editingModulesId === user.id ? (
                     <div className="rounded-lg border border-outline-variant bg-surface px-md py-sm">
                       <p className="text-label-md text-on-surface-variant">Acessos de {user.name}</p>
-                      <ModulesPicker value={draftModules} onChange={setDraftModules} />
+                      <ModulesPicker
+                        value={draftModules}
+                        onChange={(next) => setDraftModules(sanitizeOperatorModules(next))}
+                      />
                       <div className="mt-sm flex flex-wrap gap-sm">
                         <button
                           type="button"

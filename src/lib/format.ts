@@ -12,6 +12,19 @@ export function formatRelative(iso: string | null | undefined, now = Date.now())
   return days === 1 ? "há 1 dia" : `há ${days} dias`;
 }
 
+/** Formata CNPJ (14) ou CPF (11); mantém o original se não bater. */
+export function formatCnpjCpf(value: string | null | undefined) {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  if (digits.length === 14) {
+    return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+  }
+  if (digits.length === 11) {
+    return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, "$1.$2.$3-$4");
+  }
+  const trimmed = String(value ?? "").trim();
+  return trimmed || null;
+}
+
 const APP_TIMEZONE = "America/Sao_Paulo";
 
 export function formatWhen(iso: string | null | undefined) {

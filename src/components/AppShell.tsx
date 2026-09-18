@@ -31,7 +31,15 @@ export function useShellSearch() {
 }
 
 const NAV: Array<{
-  to: "/dashboard" | "/conversas" | "/vencimentos" | "/orcamentos" | "/notificacoes" | "/settings" | "/users";
+  to:
+    | "/dashboard"
+    | "/conversas"
+    | "/vencimentos"
+    | "/orcamentos"
+    | "/produtos"
+    | "/notificacoes"
+    | "/settings"
+    | "/users";
   label: string;
   icon: string;
   adminOnly?: boolean;
@@ -41,6 +49,7 @@ const NAV: Array<{
   { to: "/conversas", label: "Conversas", icon: "chat", module: "conversas" },
   { to: "/vencimentos", label: "Vencimentos", icon: "event", module: "vencimentos" },
   { to: "/orcamentos", label: "Orçamentos", icon: "request_quote", module: "orcamentos" },
+  { to: "/produtos", label: "Produtos", icon: "inventory_2", module: "produtos" },
   { to: "/notificacoes", label: "Notificações", icon: "history", module: "notificacoes" },
   { to: "/settings", label: "Configurações", icon: "settings", adminOnly: true },
   { to: "/users", label: "Usuários", icon: "manage_accounts", adminOnly: true },

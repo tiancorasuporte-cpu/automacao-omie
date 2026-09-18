@@ -217,12 +217,27 @@ export async function ensureSchema() {
         descricao varchar(255) not null,
         unidade varchar(20),
         valor_unitario numeric(15, 4),
+        cmc numeric(15, 4),
+        cmc_interno numeric(15, 4),
+        markup numeric(8, 4) not null default 1.65,
         ncm varchar(20),
         inactive boolean not null default false,
         synced_at timestamptz not null default now(),
         unique (omie_app_id, codigo_produto)
       )
     `;
+  }
+  if ((await columnExists("omie_products", "cms")) && !(await columnExists("omie_products", "cmc"))) {
+    await sql.unsafe("alter table omie_products rename column cms to cmc");
+  }
+  if (!(await columnExists("omie_products", "cmc"))) {
+    await sql.unsafe("alter table omie_products add column cmc numeric(15, 4)");
+  }
+  if (!(await columnExists("omie_products", "cmc_interno"))) {
+    await sql.unsafe("alter table omie_products add column cmc_interno numeric(15, 4)");
+  }
+  if (!(await columnExists("omie_products", "markup"))) {
+    await sql.unsafe("alter table omie_products add column markup numeric(8, 4) not null default 1.65");
   }
   if (!(await indexExists("omie_products_descricao_idx"))) {
     await sql.unsafe(

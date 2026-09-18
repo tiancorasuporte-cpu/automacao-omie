@@ -3,6 +3,7 @@ import { redirect } from "@tanstack/react-router";
 import { getCurrentUser } from "@/lib/auth";
 import {
   APP_MODULES,
+  hasPermission,
   pathForModule,
   type AppModuleId,
 } from "@/lib/modules";
@@ -29,7 +30,17 @@ export function canAccessModule(
 ) {
   if (!user) return false;
   if (isAdmin(user)) return true;
-  return (user.modules ?? []).includes(moduleId);
+  const modules = user.modules ?? [];
+  if (modules.includes(moduleId)) return true;
+  // Operadores com orçamentos também veem a aba Produtos (CMC/markup).
+  if (moduleId === "produtos" && modules.includes("orcamentos")) return true;
+  return false;
+}
+
+export function canDeleteOrcamento(user: Pick<AppUser, "role" | "modules"> | null | undefined) {
+  if (!user) return false;
+  if (isAdmin(user)) return true;
+  return hasPermission(user.modules, "orcamentos_excluir");
 }
 
 export function firstAccessiblePath(user: Pick<AppUser, "role" | "modules">) {

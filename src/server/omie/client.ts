@@ -43,6 +43,36 @@ export function listOmieApps(): OmieAppConfig[] {
     .filter((app) => app.appKey && app.appSecret);
 }
 
+/** App usado em Produtos/Orçamentos: só Belfer (ou `OMIE_ORCAMENTOS_APP`). */
+export function listOrcamentosOmieApps(): OmieAppConfig[] {
+  const all = listOmieApps();
+  const forced = (process.env["OMIE_ORCAMENTOS_APP"] ?? "").trim().toLowerCase();
+  if (forced) {
+    return all.filter(
+      (app) => app.id.toLowerCase() === forced || app.name.toLowerCase() === forced,
+    );
+  }
+  return all.filter((app) => {
+    const id = app.id.toLowerCase();
+    const name = app.name.toLowerCase();
+    return id.includes("belfer") || name.includes("belfer");
+  });
+}
+
+export function getOrcamentosOmieApp(): OmieAppConfig | null {
+  return listOrcamentosOmieApps()[0] ?? null;
+}
+
+export function requireOrcamentosOmieApp(): OmieAppConfig {
+  const app = getOrcamentosOmieApp();
+  if (!app) {
+    throw new Error(
+      'Empresa Belfer não configurada. Inclua o app Belfer em OMIE_APPS (ou defina OMIE_ORCAMENTOS_APP).',
+    );
+  }
+  return app;
+}
+
 export function formatOmieDate(date: Date) {
   const day = String(date.getDate()).padStart(2, "0");
   const month = String(date.getMonth() + 1).padStart(2, "0");

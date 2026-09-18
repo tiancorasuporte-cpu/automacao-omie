@@ -21,14 +21,28 @@ const draftSchema = z.object({
 });
 
 export const getOrcamentosBootstrapFn = createServerFn({ method: "GET" }).handler(async () => {
-  const { requireModule } = await import("@/lib/require-auth");
-  await requireModule("orcamentos");
-  const { listOmieApps } = await import("@/server/omie/client");
+  const { requireModule, canDeleteOrcamento } = await import("@/lib/require-auth");
+  const { user } = await requireModule("orcamentos");
+  const { listOrcamentosOmieApps, requireOrcamentosOmieApp } = await import("@/server/omie/client");
   const { countOmieProducts } = await import("@/db/products");
   const { listQuotes } = await import("@/db/quotes");
-  const apps = listOmieApps().map(({ id, name }) => ({ id, name }));
-  const [productCount, quotes] = await Promise.all([countOmieProducts(), listQuotes(40)]);
-  return { apps, productCount, quotes };
+  const { getOmieEmpresaInfo } = await import("@/server/omie/quotes");
+  const apps = listOrcamentosOmieApps().map(({ id, name }) => ({ id, name }));
+  const app = requireOrcamentosOmieApp();
+  const [productCount, quotes, empresa] = await Promise.all([
+    countOmieProducts(app.id),
+    listQuotes(40, app.id),
+    getOmieEmpresaInfo(app),
+  ]);
+  return {
+    apps,
+    productCount,
+    quotes,
+    omieAppId: app.id,
+    empresaRazaoSocial: empresa.razaoSocial,
+    empresaCnpj: empresa.cnpj,
+    canDeleteQuotes: canDeleteOrcamento(user),
+  };
 });
 
 export const syncOmieProductsFn = createServerFn({ method: "POST" }).handler(async () => {
@@ -51,9 +65,11 @@ export const searchOmieProductsFn = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const { requireModule } = await import("@/lib/require-auth");
     await requireModule("orcamentos");
+    const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
     const { listOmieProducts } = await import("@/db/products");
+    const app = requireOrcamentosOmieApp();
     return listOmieProducts({
-      ...(data.omieAppId ? { omieAppId: data.omieAppId } : {}),
+      omieAppId: app.id,
       ...(data.query ? { query: data.query } : {}),
       limit: data.limit ?? 60,
       activeOnly: true,
@@ -64,7 +80,7 @@ export const searchOmieClientsFn = createServerFn({ method: "GET" })
   .validator((input) =>
     z
       .object({
-        omieAppId: z.string().trim().min(1),
+        omieAppId: z.string().trim().optional(),
         query: z.string().trim().min(2),
       })
       .parse(input ?? {}),
@@ -72,10 +88,9 @@ export const searchOmieClientsFn = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const { requireModule } = await import("@/lib/require-auth");
     await requireModule("orcamentos");
-    const { listOmieApps } = await import("@/server/omie/client");
+    const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
     const { searchOmieClients } = await import("@/server/omie/quotes");
-    const app = listOmieApps().find((entry) => entry.id === data.omieAppId);
-    if (!app) return [];
+    const app = requireOrcamentosOmieApp();
     try {
       return await searchOmieClients(app, data.query);
     } catch {
@@ -94,9 +109,9 @@ function normalizeItems(items: z.infer<typeof lineSchema>[]) {
   }));
 }
 
-function toSaveInput(data: z.infer<typeof draftSchema>, createdBy: number) {
+function toSaveInput(data: z.infer<typeof draftSchema>, createdBy: number, omieAppId: string) {
   return {
-    omieAppId: data.omieAppId,
+    omieAppId,
     clientCode: data.clientCode,
     clientName: data.clientName ?? null,
     observacao: data.observacao ?? null,
@@ -112,9 +127,11 @@ export const saveOrcamentoFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { requireModule } = await import("@/lib/require-auth");
     const { user } = await requireModule("orcamentos");
+    const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
     const { saveLocalOrcamento } = await import("@/server/omie/quotes");
+    const app = requireOrcamentosOmieApp();
     try {
-      const result = await saveLocalOrcamento(toSaveInput(data, user.id));
+      const result = await saveLocalOrcamento(toSaveInput(data, user.id, app.id));
       return { ok: true as const, ...result };
     } catch (error) {
       return {
@@ -129,11 +146,44 @@ export const getOrcamentoFn = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const { requireModule } = await import("@/lib/require-auth");
     await requireModule("orcamentos");
+    const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
     const { getQuoteById, getQuoteItems } = await import("@/db/quotes");
+    const { listOmieProducts } = await import("@/db/products");
+    const app = requireOrcamentosOmieApp();
     const quote = await getQuoteById(data.quoteId);
     if (!quote) return { ok: false as const, error: "Orçamento não encontrado." };
+    if (quote.omieAppId !== app.id) {
+      return { ok: false as const, error: "Orçamento não pertence à empresa Belfer." };
+    }
+    const { getCliente } = await import("@/server/omie/clients");
+    const clienteOmie = await getCliente(app, quote.clientCode).catch(() => null);
     const items = await getQuoteItems(data.quoteId);
-    return { ok: true as const, quote, items };
+    const catalog = await listOmieProducts({
+      omieAppId: app.id,
+      activeOnly: false,
+      limit: 500,
+    });
+    const byCode = new Map(catalog.map((product) => [product.codigoProduto, product]));
+    return {
+      ok: true as const,
+      quote,
+      clienteCnpj: clienteOmie?.cnpj_cpf ?? null,
+      clienteNomeCompleto:
+        clienteOmie?.razao_social ||
+        clienteOmie?.nome_fantasia ||
+        quote.clientName ||
+        null,
+      items: items.map((item) => {
+        const product = byCode.get(item.codigoProduto);
+        return {
+          ...item,
+          cmc: product?.cmc ?? null,
+          cmcInterno: product?.cmcInterno ?? null,
+          cmcEfetivo: product?.cmcEfetivo ?? null,
+          markup: product?.markup ?? null,
+        };
+      }),
+    };
   });
 
 export const sendOrcamentoToOmieFn = createServerFn({ method: "POST" })
@@ -163,8 +213,14 @@ export const deleteOrcamentoFn = createServerFn({ method: "POST" })
       .parse(input ?? {}),
   )
   .handler(async ({ data }) => {
-    const { requireModule } = await import("@/lib/require-auth");
-    await requireModule("orcamentos");
+    const { requireModule, canDeleteOrcamento } = await import("@/lib/require-auth");
+    const { user } = await requireModule("orcamentos");
+    if (!canDeleteOrcamento(user)) {
+      return {
+        ok: false as const,
+        error: "Seu usuário não tem permissão para excluir orçamentos.",
+      };
+    }
     const { deleteOrcamento } = await import("@/server/omie/quotes");
     try {
       const result = await deleteOrcamento({
@@ -185,9 +241,11 @@ export const createOrcamentoFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { requireModule } = await import("@/lib/require-auth");
     const { user } = await requireModule("orcamentos");
+    const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
     const { createOmieOrcamento } = await import("@/server/omie/quotes");
+    const app = requireOrcamentosOmieApp();
     try {
-      const result = await createOmieOrcamento(toSaveInput(data, user.id));
+      const result = await createOmieOrcamento(toSaveInput(data, user.id, app.id));
       return {
         ok: true as const,
         quoteId: result.quoteId,

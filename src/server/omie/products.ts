@@ -1,11 +1,71 @@
 import "@tanstack/react-start/server-only";
 
-import { upsertOmieProduct } from "@/db/products";
-import { listOmieApps, omiePaginate, parseAmount, type OmieAppConfig } from "@/server/omie/client";
+import { updateOmieProductCmc, upsertOmieProduct } from "@/db/products";
+import {
+  formatOmieDate,
+  omieCall,
+  omiePaginate,
+  parseAmount,
+  type OmieAppConfig,
+} from "@/server/omie/client";
 
 function productInactive(raw: Record<string, unknown>) {
   const flag = String(raw["inativo"] ?? raw["inactive"] ?? "N").trim().toUpperCase();
   return flag === "S" || flag === "1" || flag === "TRUE";
+}
+
+function extractCmcFromProduct(raw: Record<string, unknown>) {
+  return parseAmount(
+    raw["nCMC"] ??
+      raw["ncmc"] ??
+      raw["cmc"] ??
+      raw["valor_custo"] ??
+      raw["custo_unitario"] ??
+      raw["nValorCusto"],
+  );
+}
+
+/** Busca o CMC (Custo Médio Contábil) da Omie via ListarPosEstoque (`nCMC`). */
+export async function syncProductCmcFromStock(app: OmieAppConfig) {
+  const byProduct = new Map<number, number>();
+  let page = 1;
+  let totalPages = 1;
+  const dataPosicao = formatOmieDate(new Date());
+
+  while (page <= totalPages) {
+    const response = await omieCall<{
+      nPagina?: number;
+      nTotPaginas?: number;
+      produtos?: Record<string, unknown>[];
+    }>(app, "/estoque/consulta/", "ListarPosEstoque", {
+      nPagina: page,
+      nRegPorPagina: 100,
+      dDataPosicao: dataPosicao,
+      cExibeTodos: "S",
+      lista_local_estoque: "TODOS",
+    });
+
+    totalPages = Math.max(1, Number(response.nTotPaginas ?? 1));
+    for (const raw of response.produtos ?? []) {
+      const codigoProduto = Number(raw["nCodProd"] ?? raw["ncodprod"] ?? 0);
+      if (!codigoProduto) continue;
+      const cmc = parseAmount(raw["nCMC"] ?? raw["ncmc"] ?? raw["cmc"]);
+      if (cmc == null || cmc < 0) continue;
+      const current = byProduct.get(codigoProduto);
+      if (current == null || (cmc > 0 && cmc > current) || (current <= 0 && cmc >= 0)) {
+        byProduct.set(codigoProduto, cmc);
+      }
+    }
+    page += 1;
+  }
+
+  let updated = 0;
+  for (const [codigoProduto, cmc] of byProduct) {
+    if (cmc <= 0) continue;
+    await updateOmieProductCmc(app.id, codigoProduto, cmc);
+    updated += 1;
+  }
+  return { updated, scanned: byProduct.size };
 }
 
 export async function syncOmieProductsForApp(app: OmieAppConfig) {
@@ -21,7 +81,6 @@ export async function syncOmieProductsForApp(app: OmieAppConfig) {
       pagina: page,
       registros_por_pagina: 100,
       apenas_importado_api: "N",
-      // Sem este filtro a Omie devolve 0 produtos em vários apps.
       filtrar_apenas_omiepdv: "N",
     }),
     (response) => ({
@@ -46,25 +105,54 @@ export async function syncOmieProductsForApp(app: OmieAppConfig) {
       descricao: descricao.slice(0, 255),
       unidade: String(raw["unidade"] ?? "UN").trim() || "UN",
       valorUnitario: parseAmount(raw["valor_unitario"] ?? raw["nPrecoUnitario"] ?? raw["preco_unitario"]),
+      cmc: extractCmcFromProduct(raw),
       ncm: String(raw["ncm"] ?? "").trim() || null,
       inactive: productInactive(raw),
     });
     count += 1;
   }
 
-  return count;
+  let cmcUpdated = 0;
+  let cmcError: string | undefined;
+  try {
+    const cmcResult = await syncProductCmcFromStock(app);
+    cmcUpdated = cmcResult.updated;
+  } catch (error) {
+    cmcError = error instanceof Error ? error.message : "Falha ao buscar CMC no estoque Omie.";
+  }
+
+  return { count, cmcUpdated, cmcError };
 }
 
 export async function syncAllOmieProducts() {
-  const apps = listOmieApps();
+  const { listOrcamentosOmieApps } = await import("@/server/omie/client");
+  const apps = listOrcamentosOmieApps();
+  if (!apps.length) {
+    throw new Error(
+      'Empresa Belfer não configurada. Inclua o app Belfer em OMIE_APPS (ou defina OMIE_ORCAMENTOS_APP).',
+    );
+  }
   let total = 0;
-  const perApp: Array<{ appId: string; count: number; error?: string }> = [];
+  let cmcTotal = 0;
+  const perApp: Array<{
+    appId: string;
+    count: number;
+    cmcUpdated?: number;
+    cmcError?: string;
+    error?: string;
+  }> = [];
 
   for (const app of apps) {
     try {
-      const count = await syncOmieProductsForApp(app);
-      total += count;
-      perApp.push({ appId: app.id, count });
+      const result = await syncOmieProductsForApp(app);
+      total += result.count;
+      cmcTotal += result.cmcUpdated;
+      perApp.push({
+        appId: app.id,
+        count: result.count,
+        cmcUpdated: result.cmcUpdated,
+        ...(result.cmcError ? { cmcError: result.cmcError } : {}),
+      });
     } catch (error) {
       perApp.push({
         appId: app.id,
@@ -74,5 +162,5 @@ export async function syncAllOmieProducts() {
     }
   }
 
-  return { total, perApp };
+  return { total, cmcTotal, perApp };
 }
