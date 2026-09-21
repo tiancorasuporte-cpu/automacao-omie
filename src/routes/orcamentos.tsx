@@ -16,6 +16,7 @@ import { APP_NAME } from "@/lib/brand";
 import {
   createOrcamentoFn,
   deleteOrcamentoFn,
+  getOrcamentoEmpresaFn,
   getOrcamentoFn,
   getOrcamentosBootstrapFn,
   saveOrcamentoFn,
@@ -495,14 +496,26 @@ function OrcamentosPage() {
         setSaving(false);
       }
     }
+
+    let empresaNome =
+      bootstrap.empresaRazaoSocial || apps.find((app) => app.id === omieAppId)?.name || APP_NAME;
+    let empresaCnpj = bootstrap.empresaCnpj ?? null;
+    try {
+      const empresa = await getOrcamentoEmpresaFn();
+      if (empresa.razaoSocial?.trim()) empresaNome = empresa.razaoSocial.trim();
+      if (empresa.cnpj?.trim()) empresaCnpj = empresa.cnpj.trim();
+    } catch {
+      // mantém bootstrap
+    }
+
     return {
       numero,
       elaborador,
       clienteNome: selectedClient?.nome ?? "Cliente não informado",
       clienteCodigo: selectedClient?.codigo ?? null,
       clienteCnpj: selectedClient?.cnpjCpf ?? null,
-      empresaNome: bootstrap.empresaRazaoSocial || apps.find((app) => app.id === omieAppId)?.name || APP_NAME,
-      empresaCnpj: bootstrap.empresaCnpj ?? null,
+      empresaNome,
+      empresaCnpj,
     };
   }
 

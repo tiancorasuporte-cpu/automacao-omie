@@ -45,6 +45,20 @@ export const getOrcamentosBootstrapFn = createServerFn({ method: "GET" }).handle
   };
 });
 
+export const getOrcamentoEmpresaFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireModule } = await import("@/lib/require-auth");
+  await requireModule("orcamentos");
+  const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
+  const { getOmieEmpresaInfo } = await import("@/server/omie/quotes");
+  const app = requireOrcamentosOmieApp();
+  const empresa = await getOmieEmpresaInfo(app);
+  return {
+    razaoSocial: empresa.razaoSocial,
+    cnpj: empresa.cnpj,
+    nomeFantasia: empresa.nomeFantasia,
+  };
+});
+
 export const syncOmieProductsFn = createServerFn({ method: "POST" }).handler(async () => {
   const { requireModule } = await import("@/lib/require-auth");
   await requireModule("orcamentos");

@@ -111,40 +111,105 @@ function envEmpresaKey(appId: string, suffix: string) {
   return `OMIE_${appId.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}_${suffix}`;
 }
 
+function looksLikeShortAppLabel(value: string) {
+  const v = value.trim();
+  if (!v) return true;
+  // Nome curto do .env (ex.: "Belfer") — não serve como razão social no PDF.
+  return v.length < 20 && !/\b(LTDA|EIRELI|ME|EPP|SA|S\/A)\b/i.test(v);
+}
+
+function belferFallback(app: OmieAppConfig): OmieEmpresaInfo | null {
+  const id = app.id.toLowerCase();
+  const name = app.name.toLowerCase();
+  if (!id.includes("belfer") && !name.includes("belfer")) return null;
+  return {
+    razaoSocial: "AUTOMACAO E SEGURANCA ELETRONICA BELFER LTDA",
+    nomeFantasia: "Belfer",
+    cnpj: "15.699.646/0001-86",
+  };
+}
+
+function pickEmpresaRow(rows: Record<string, unknown>[]) {
+  if (!rows.length) return null;
+  return (
+    rows.find((row) => String(row["inativa"] ?? row["inativo"] ?? "N").toUpperCase() !== "S") ??
+    rows[0] ??
+    null
+  );
+}
+
+function parseEmpresaRow(row: Record<string, unknown>, app: OmieAppConfig, fromEnv: OmieEmpresaInfo) {
+  const razao =
+    String(row["razao_social"] ?? row["cRazaoSocial"] ?? row["razaoSocial"] ?? "").trim() ||
+    fromEnv.razaoSocial ||
+    String(row["nome_fantasia"] ?? row["cNomeFantasia"] ?? "").trim() ||
+    app.name;
+  const fantasia =
+    String(row["nome_fantasia"] ?? row["cNomeFantasia"] ?? "").trim() || fromEnv.nomeFantasia;
+  const cnpj =
+    String(row["cnpj"] ?? row["cnpj_cpf"] ?? row["cCnpj"] ?? "").trim() || fromEnv.cnpj;
+  return {
+    razaoSocial: looksLikeShortAppLabel(razao) ? fromEnv.razaoSocial || razao : razao,
+    nomeFantasia: fantasia,
+    cnpj: cnpj || null,
+  } satisfies OmieEmpresaInfo;
+}
+
 /** Razão social + CNPJ da empresa Omie (Belfer). Env: OMIE_{ID}_RAZAO_SOCIAL / _CNPJ. */
 export async function getOmieEmpresaInfo(app: OmieAppConfig): Promise<OmieEmpresaInfo> {
+  const fallback = belferFallback(app) ?? {
+    razaoSocial: app.name,
+    nomeFantasia: app.name,
+    cnpj: null as string | null,
+  };
   const fromEnvRazao = (process.env[envEmpresaKey(app.id, "RAZAO_SOCIAL")] ?? "").trim();
   const fromEnvCnpj = (process.env[envEmpresaKey(app.id, "CNPJ")] ?? "").trim();
+  const fromEnv: OmieEmpresaInfo = {
+    razaoSocial: fromEnvRazao || fallback.razaoSocial,
+    nomeFantasia: fallback.nomeFantasia,
+    cnpj: fromEnvCnpj || fallback.cnpj,
+  };
 
   try {
-    const response = await omieCall<{
-      empresas_cadastro?: Record<string, unknown>[];
-    }>(app, "/geral/empresas/", "ListarEmpresas", {
+    const response = await omieCall<Record<string, unknown>>(app, "/geral/empresas/", "ListarEmpresas", {
       pagina: 1,
-      registros_por_pagina: 20,
+      registros_por_pagina: 50,
       apenas_importado_api: "N",
     });
-    const rows = response.empresas_cadastro ?? [];
-    const active =
-      rows.find((row) => String(row["inativa"] ?? "N").toUpperCase() !== "S") ?? rows[0];
+    const rows = (
+      response["empresas_cadastro"] ??
+      response["lista_empresas"] ??
+      response["empresas"] ??
+      []
+    ) as Record<string, unknown>[];
+    const active = pickEmpresaRow(Array.isArray(rows) ? rows : []);
     if (active) {
-      const razaoSocial =
-        String(active["razao_social"] ?? "").trim() ||
-        fromEnvRazao ||
-        String(active["nome_fantasia"] ?? "").trim() ||
-        app.name;
-      const nomeFantasia = String(active["nome_fantasia"] ?? "").trim() || null;
-      const cnpj = String(active["cnpj"] ?? "").trim() || fromEnvCnpj || null;
-      return { razaoSocial, nomeFantasia, cnpj };
+      const parsed = parseEmpresaRow(active, app, fromEnv);
+      if (!looksLikeShortAppLabel(parsed.razaoSocial)) return parsed;
     }
   } catch {
-    // fallback env / nome curto
+    // tenta ConsultarEmpresa abaixo
+  }
+
+  try {
+    const response = await omieCall<Record<string, unknown>>(app, "/geral/empresas/", "ConsultarEmpresa", {
+      codigo_empresa: 1,
+    });
+    const row = (response["empresas_cadastro"] ?? response) as Record<string, unknown>;
+    if (row && (row["razao_social"] || row["cnpj"])) {
+      const parsed = parseEmpresaRow(row, app, fromEnv);
+      if (!looksLikeShortAppLabel(parsed.razaoSocial)) return parsed;
+    }
+  } catch {
+    // fallback env / Belfer conhecido
   }
 
   return {
-    razaoSocial: fromEnvRazao || app.name,
-    nomeFantasia: app.name,
-    cnpj: fromEnvCnpj || null,
+    razaoSocial: looksLikeShortAppLabel(fromEnv.razaoSocial)
+      ? fallback.razaoSocial
+      : fromEnv.razaoSocial,
+    nomeFantasia: fromEnv.nomeFantasia,
+    cnpj: fromEnv.cnpj,
   };
 }
 
