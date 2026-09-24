@@ -12,9 +12,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { APP_NAME } from "@/lib/brand";
 import {
+  createMonthlyServiceFn,
   createOrcamentoFn,
+  deactivateMonthlyServiceFn,
   deleteOrcamentoFn,
   getOrcamentoEmpresaFn,
   getOrcamentoFn,
@@ -23,6 +33,7 @@ import {
   searchOmieClientsFn,
   searchOmieProductsFn,
   sendOrcamentoToOmieFn,
+  syncOmieClientsFn,
   syncOmieProductsFn,
 } from "@/lib/orcamentos";
 import { openOrcamentoPdf } from "@/lib/orcamento-pdf";
@@ -52,6 +63,14 @@ type CartItem = {
   ncm: string | null;
 };
 
+type QuoteServicoMensal = {
+  key: string;
+  monthlyServiceId: number | null;
+  nome: string;
+  valor: number;
+  quantidade: number;
+};
+
 function formatMoney(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
@@ -75,12 +94,17 @@ function OrcamentosPage() {
   const [apps] = useState(bootstrap.apps);
   const [quotes, setQuotes] = useState(bootstrap.quotes);
   const [productCount, setProductCount] = useState(bootstrap.productCount);
+  const [clientCount, setClientCount] = useState(bootstrap.clientCount ?? 0);
   const [omieAppId] = useState(bootstrap.omieAppId ?? bootstrap.apps[0]?.id ?? "");
   const canDeleteQuotes = bootstrap.canDeleteQuotes === true;
+  const canManageMonthlyServices = bootstrap.canManageMonthlyServices === true;
   const [editingQuoteId, setEditingQuoteId] = useState<number | null>(null);
   const [numeroInterno, setNumeroInterno] = useState<string | null>(null);
   const [criadoPor, setCriadoPor] = useState<string | null>(null);
   const [quoteStatus, setQuoteStatus] = useState<string | null>(null);
+  const [omiePedidoCode, setOmiePedidoCode] = useState<number | null>(null);
+  const [numeroPedidoOmie, setNumeroPedidoOmie] = useState<string | null>(null);
+  const [copiedOmieCode, setCopiedOmieCode] = useState(false);
   const [clientQuery, setClientQuery] = useState("");
   const [clientResults, setClientResults] = useState<
     Array<{ codigo: number; nome: string; cnpjCpf: string | null }>
@@ -109,10 +133,21 @@ function OrcamentosPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [observacao, setObservacao] = useState("");
   const [dataPrevisao, setDataPrevisao] = useState(todayIso());
+  const [monthlyServices, setMonthlyServices] = useState(bootstrap.monthlyServices ?? []);
+  const [comServicoMensal, setComServicoMensal] = useState(false);
+  const [quoteServicosMensais, setQuoteServicosMensais] = useState<QuoteServicoMensal[]>([]);
+  const [addServicoId, setAddServicoId] = useState("");
+  const [catalogDialogOpen, setCatalogDialogOpen] = useState(false);
+  const [novoServicoNome, setNovoServicoNome] = useState("");
+  const [novoServicoValor, setNovoServicoValor] = useState("");
+  const [novoServicoCusto, setNovoServicoCusto] = useState("");
+  const [savingServico, setSavingServico] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [syncingClients, setSyncingClients] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [loadingQuote, setLoadingQuote] = useState(false);
+  const [duplicatingQuoteId, setDuplicatingQuoteId] = useState<number | null>(null);
   const [deletingQuoteId, setDeletingQuoteId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<(typeof bootstrap.quotes)[number] | null>(null);
   const [searchingClients, setSearchingClients] = useState(false);
@@ -125,6 +160,15 @@ function OrcamentosPage() {
   const total = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantidade * item.valorUnitario, 0),
     [cart],
+  );
+
+  const totalServicosMensais = useMemo(
+    () =>
+      quoteServicosMensais.reduce(
+        (sum, service) => sum + service.quantidade * service.valor,
+        0,
+      ),
+    [quoteServicosMensais],
   );
 
   const belowCmcCount = useMemo(
@@ -206,6 +250,34 @@ function OrcamentosPage() {
     const boot = await getOrcamentosBootstrapFn();
     setQuotes(boot.quotes);
     setProductCount(boot.productCount);
+    setClientCount(boot.clientCount ?? 0);
+    setMonthlyServices(boot.monthlyServices ?? []);
+  }
+
+  function resetServicoMensal() {
+    setComServicoMensal(false);
+    setQuoteServicosMensais([]);
+    setAddServicoId("");
+  }
+
+  function addServicoFromCatalog(id: number, catalog = monthlyServices) {
+    const service = catalog.find((entry) => entry.id === id);
+    if (!service) return;
+    setQuoteServicosMensais((prev) => {
+      if (prev.some((entry) => entry.monthlyServiceId === service.id)) return prev;
+      return [
+        ...prev,
+        {
+          key: `ms-${service.id}-${Date.now()}`,
+          monthlyServiceId: service.id,
+          nome: service.nome,
+          valor: service.valor,
+          quantidade: 1,
+        },
+      ];
+    });
+    setComServicoMensal(true);
+    setAddServicoId("");
   }
 
   function resetForm() {
@@ -213,11 +285,37 @@ function OrcamentosPage() {
     setNumeroInterno(null);
     setCriadoPor(null);
     setQuoteStatus(null);
+    setOmiePedidoCode(null);
+    setNumeroPedidoOmie(null);
+    setCopiedOmieCode(false);
     setSelectedClient(null);
     setClientQuery("");
     setCart([]);
     setObservacao("");
     setDataPrevisao(todayIso());
+    resetServicoMensal();
+  }
+
+  async function copyOmieCodigo(value: string) {
+    const text = value.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedOmieCode(true);
+      setFeedback({ type: "ok", text: `Código Omie ${text} copiado.` });
+      window.setTimeout(() => setCopiedOmieCode(false), 2000);
+    } catch {
+      setFeedback({ type: "error", text: "Não foi possível copiar o código Omie." });
+    }
+  }
+
+  function omieCodigoLabel(quote: { numeroPedido?: string | null; omiePedidoCode?: number | null }) {
+    const numero = quote.numeroPedido?.trim();
+    if (numero) return numero;
+    if (quote.omiePedidoCode != null && quote.omiePedidoCode > 0) {
+      return String(quote.omiePedidoCode);
+    }
+    return null;
   }
 
   async function handleSyncProducts() {
@@ -245,6 +343,30 @@ function OrcamentosPage() {
       });
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleSyncClients() {
+    setSyncingClients(true);
+    setFeedback(null);
+    try {
+      const result = await syncOmieClientsFn();
+      setClientCount(result.total);
+      const errors = result.perApp.filter((entry) => entry.error);
+      setFeedback({
+        type: errors.length ? "error" : "ok",
+        text: errors.length
+          ? `Sync parcial: ${result.total} clientes. ${errors.map((e) => `${e.appId}: ${e.error}`).join(" · ")}`
+          : `${result.total} clientes sincronizados da Omie.`,
+      });
+      await router.invalidate();
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao sincronizar clientes.",
+      });
+    } finally {
+      setSyncingClients(false);
     }
   }
 
@@ -281,6 +403,9 @@ function OrcamentosPage() {
     if (!omieAppId || !selectedClient || cart.length === 0) {
       throw new Error("Selecione empresa, cliente e ao menos um produto.");
     }
+    if (comServicoMensal && quoteServicosMensais.length === 0) {
+      throw new Error("Adicione ao menos um serviço mensal ou desmarque a opção.");
+    }
     return {
       quoteId: editingQuoteId,
       omieAppId,
@@ -288,6 +413,15 @@ function OrcamentosPage() {
       clientName: selectedClient.nome,
       observacao: observacao || null,
       dataPrevisao,
+      comServicoMensal,
+      servicosMensais: comServicoMensal
+        ? quoteServicosMensais.map((service) => ({
+            monthlyServiceId: service.monthlyServiceId,
+            nome: service.nome.trim(),
+            valor: service.valor,
+            quantidade: service.quantidade,
+          }))
+        : [],
       items: cart.map((item) => ({
         codigoProduto: item.codigoProduto,
         descricao: item.descricao,
@@ -297,6 +431,87 @@ function OrcamentosPage() {
         ncm: item.ncm,
       })),
     };
+  }
+
+  async function handleCreateMonthlyService() {
+    const nome = novoServicoNome.trim();
+    const valor = Number(String(novoServicoValor).replace(",", "."));
+    const custoRaw = String(novoServicoCusto).trim();
+    const custo = custoRaw === "" ? 0 : Number(custoRaw.replace(",", "."));
+    if (!nome) {
+      setFeedback({ type: "error", text: "Informe o nome do serviço mensal." });
+      return;
+    }
+    if (!Number.isFinite(valor) || valor < 0) {
+      setFeedback({ type: "error", text: "Informe um valor válido para o serviço mensal." });
+      return;
+    }
+    if (!Number.isFinite(custo) || custo < 0) {
+      setFeedback({ type: "error", text: "Informe um custo válido para o serviço mensal." });
+      return;
+    }
+    setSavingServico(true);
+    setFeedback(null);
+    try {
+      const result = await createMonthlyServiceFn({ data: { nome, valor, custo } });
+      if (!result.ok) {
+        setFeedback({ type: "error", text: result.error });
+        return;
+      }
+      setMonthlyServices((prev) =>
+        [...prev.filter((entry) => entry.id !== result.service.id), result.service].sort((a, b) =>
+          a.nome.localeCompare(b.nome, "pt-BR"),
+        ),
+      );
+      setNovoServicoNome("");
+      setNovoServicoValor("");
+      setNovoServicoCusto("");
+      setQuoteServicosMensais((prev) => {
+        if (prev.some((entry) => entry.monthlyServiceId === result.service.id)) return prev;
+        return [
+          ...prev,
+          {
+            key: `ms-${result.service.id}-${Date.now()}`,
+            monthlyServiceId: result.service.id,
+            nome: result.service.nome,
+            valor: result.service.valor,
+            quantidade: 1,
+          },
+        ];
+      });
+      setComServicoMensal(true);
+      setFeedback({ type: "ok", text: `Serviço mensal "${result.service.nome}" cadastrado.` });
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao cadastrar serviço mensal.",
+      });
+    } finally {
+      setSavingServico(false);
+    }
+  }
+
+  async function handleDeactivateMonthlyService(id: number) {
+    if (locked) return;
+    setSavingServico(true);
+    setFeedback(null);
+    try {
+      const result = await deactivateMonthlyServiceFn({ data: { id } });
+      if (!result.ok) {
+        setFeedback({ type: "error", text: result.error });
+        return;
+      }
+      setMonthlyServices((prev) => prev.filter((entry) => entry.id !== id));
+      setQuoteServicosMensais((prev) => prev.filter((entry) => entry.monthlyServiceId !== id));
+      setFeedback({ type: "ok", text: "Serviço mensal removido do catálogo." });
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao remover serviço mensal.",
+      });
+    } finally {
+      setSavingServico(false);
+    }
   }
 
   async function handleSave() {
@@ -338,6 +553,8 @@ function OrcamentosPage() {
       setEditingQuoteId(result.quoteId);
       setNumeroInterno(result.numeroInterno);
       setQuoteStatus("sent");
+      setOmiePedidoCode(result.omiePedidoCode ?? null);
+      setNumeroPedidoOmie(result.numeroPedido ?? null);
       setFeedback({
         type: "ok",
         text: `Orçamento ${result.numeroInterno} enviado à Omie${result.numeroPedido ? ` (nº ${result.numeroPedido})` : ""}. Total ${formatMoney(result.total)}.`,
@@ -362,7 +579,11 @@ function OrcamentosPage() {
         setFeedback({ type: "error", text: result.error });
         return;
       }
-      if (editingQuoteId === quoteId) setQuoteStatus("sent");
+      if (editingQuoteId === quoteId) {
+        setQuoteStatus("sent");
+        setOmiePedidoCode(result.omiePedidoCode ?? null);
+        setNumeroPedidoOmie(result.numeroPedido ?? null);
+      }
       setFeedback({
         type: "ok",
         text: `Orçamento ${result.numeroInterno} enviado à Omie${result.numeroPedido ? ` (nº ${result.numeroPedido})` : ""}.`,
@@ -432,6 +653,9 @@ function OrcamentosPage() {
       setNumeroInterno(quote.numeroInterno);
       setCriadoPor(quote.createdByName);
       setQuoteStatus(quote.status);
+      setOmiePedidoCode(quote.omiePedidoCode);
+      setNumeroPedidoOmie(quote.numeroPedido);
+      setCopiedOmieCode(false);
       setSelectedClient({
         codigo: quote.clientCode,
         nome: result.clienteNomeCompleto ?? quote.clientName ?? `Cliente ${quote.clientCode}`,
@@ -442,6 +666,29 @@ function OrcamentosPage() {
       );
       setObservacao(quote.observacao ?? "");
       setDataPrevisao(quote.dataPrevisao ?? todayIso());
+      const loadedServicos =
+        result.servicosMensais?.length > 0
+          ? result.servicosMensais.map((service) => ({
+              key: `ms-${service.id}`,
+              monthlyServiceId: service.monthlyServiceId,
+              nome: service.nome,
+              valor: service.valor,
+              quantidade: service.quantidade > 0 ? service.quantidade : 1,
+            }))
+          : quote.servicoMensalNome
+            ? [
+                {
+                  key: `legacy-${quote.id}`,
+                  monthlyServiceId: quote.servicoMensalId,
+                  nome: quote.servicoMensalNome,
+                  valor: quote.servicoMensalValor ?? 0,
+                  quantidade: 1,
+                },
+              ]
+            : [];
+      setQuoteServicosMensais(loadedServicos);
+      setComServicoMensal(loadedServicos.length > 0);
+      setAddServicoId("");
       setCart(
         items.map((item) => ({
           key: `${item.id}-${item.codigoProduto}`,
@@ -468,6 +715,81 @@ function OrcamentosPage() {
       });
     } finally {
       setLoadingQuote(false);
+    }
+  }
+
+  async function handleDuplicateQuote(quoteId: number) {
+    setDuplicatingQuoteId(quoteId);
+    setFeedback(null);
+    try {
+      const result = await getOrcamentoFn({ data: { quoteId } });
+      if (!result.ok) {
+        setFeedback({ type: "error", text: result.error });
+        return;
+      }
+      const { quote, items } = result;
+      if (!items.length) {
+        setFeedback({ type: "error", text: "Orçamento sem itens para duplicar." });
+        return;
+      }
+
+      const loadedServicos =
+        result.servicosMensais?.length > 0
+          ? result.servicosMensais.map((service) => ({
+              monthlyServiceId: service.monthlyServiceId,
+              nome: service.nome,
+              valor: service.valor,
+              quantidade: service.quantidade > 0 ? service.quantidade : 1,
+            }))
+          : quote.servicoMensalNome
+            ? [
+                {
+                  monthlyServiceId: quote.servicoMensalId,
+                  nome: quote.servicoMensalNome,
+                  valor: quote.servicoMensalValor ?? 0,
+                  quantidade: 1,
+                },
+              ]
+            : [];
+
+      const saved = await saveOrcamentoFn({
+        data: {
+          quoteId: null,
+          omieAppId: quote.omieAppId || omieAppId,
+          clientCode: quote.clientCode,
+          clientName: result.clienteNomeCompleto ?? quote.clientName,
+          observacao: quote.observacao,
+          dataPrevisao: todayIso(),
+          comServicoMensal: loadedServicos.length > 0,
+          servicosMensais: loadedServicos,
+          items: items.map((item) => ({
+            codigoProduto: item.codigoProduto,
+            descricao: item.descricao,
+            unidade: item.unidade,
+            quantidade: item.quantidade,
+            valorUnitario: item.valorUnitario,
+            ncm: item.ncm,
+          })),
+        },
+      });
+      if (!saved.ok) {
+        setFeedback({ type: "error", text: saved.error });
+        return;
+      }
+
+      await refreshQuotes();
+      await handleLoadQuote(saved.quoteId);
+      setFeedback({
+        type: "ok",
+        text: `Orçamento duplicado como ${saved.numeroInterno} (rascunho).`,
+      });
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao duplicar orçamento.",
+      });
+    } finally {
+      setDuplicatingQuoteId(null);
     }
   }
 
@@ -545,6 +867,13 @@ function OrcamentosPage() {
         observacao,
         showLineValues,
         showTotal,
+        servicosMensais: comServicoMensal
+          ? quoteServicosMensais.map((s) => ({
+              nome: s.nome,
+              valor: s.valor,
+              quantidade: s.quantidade,
+            }))
+          : [],
         items: cart.map((item) => ({
           descricao: item.descricao,
           codigoProduto: item.codigoProduto,
@@ -587,6 +916,13 @@ function OrcamentosPage() {
         observacao,
         showLineValues,
         showTotal,
+        servicosMensais: comServicoMensal
+          ? quoteServicosMensais.map((s) => ({
+              nome: s.nome,
+              valor: s.valor,
+              quantidade: s.quantidade,
+            }))
+          : [],
         items: cart.map((item) => ({
           descricao: item.descricao,
           codigoProduto: item.codigoProduto,
@@ -631,6 +967,15 @@ function OrcamentosPage() {
             ) : null}
             <button
               type="button"
+              disabled={syncingClients || apps.length === 0}
+              onClick={handleSyncClients}
+              className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md text-primary disabled:opacity-50"
+            >
+              <Icon name={syncingClients ? "hourglass_empty" : "sync"} className="text-[18px]" />
+              {syncingClients ? "Sincronizando..." : `Sync clientes (${clientCount})`}
+            </button>
+            <button
+              type="button"
               disabled={syncing || apps.length === 0}
               onClick={handleSyncProducts}
               className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50"
@@ -642,12 +987,31 @@ function OrcamentosPage() {
         </div>
 
         {numeroInterno ? (
-          <div className="rounded-lg border border-outline-variant bg-surface-container-low px-md py-sm text-body-md text-on-surface">
-            Editando <strong>{numeroInterno}</strong>
-            {selectedClient ? ` — ${selectedClient.nome}` : ""}
-            {criadoPor ? ` · por ${criadoPor}` : ""}
-            {quoteStatus ? ` · ${statusLabel(quoteStatus)}` : ""}
-            {locked ? " · somente leitura (já enviado)" : ""}
+          <div className="flex flex-wrap items-center justify-between gap-sm rounded-lg border border-outline-variant bg-surface-container-low px-md py-sm text-body-md text-on-surface">
+            <div>
+              Editando <strong>{numeroInterno}</strong>
+              {selectedClient ? ` — ${selectedClient.nome}` : ""}
+              {criadoPor ? ` · por ${criadoPor}` : ""}
+              {quoteStatus ? ` · ${statusLabel(quoteStatus)}` : ""}
+              {locked ? " · somente leitura (já enviado)" : ""}
+              {omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode })
+                ? ` · Omie ${omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode })}`
+                : ""}
+            </div>
+            {omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode }) ? (
+              <button
+                type="button"
+                onClick={() =>
+                  copyOmieCodigo(
+                    omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode })!,
+                  )
+                }
+                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-surface px-sm py-xs text-label-md text-primary"
+              >
+                <Icon name={copiedOmieCode ? "check" : "content_copy"} className="text-[16px]" />
+                {copiedOmieCode ? "Copiado" : "Copiar cód. Omie"}
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -717,7 +1081,11 @@ function OrcamentosPage() {
                   <input
                     value={clientQuery}
                     onChange={(event) => setClientQuery(event.target.value)}
-                    placeholder="Buscar razão social (mín. 2 letras)"
+                    placeholder={
+                      clientCount > 0
+                        ? "Buscar cliente sincronizado (mín. 2 letras)"
+                        : "Buscar razão social (mín. 2 letras) ou sync clientes"
+                    }
                     className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
                   />
                   {searchingClients ? (
@@ -761,6 +1129,273 @@ function OrcamentosPage() {
                 placeholder="Opcional"
               />
             </label>
+
+            <div className="rounded-lg border border-outline-variant bg-surface-container-low p-md space-y-sm">
+              <div className="flex flex-col gap-sm sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-title-md text-on-surface">Serviços mensais</p>
+                  <p className="text-label-md text-on-surface-variant">
+                    Opcional · no PDF/Excel e nas observações da Omie
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-sm">
+                  {!locked && canManageMonthlyServices ? (
+                    <button
+                      type="button"
+                      onClick={() => setCatalogDialogOpen(true)}
+                      className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md text-primary"
+                    >
+                      <Icon name="add" className="text-[18px]" />
+                      Cadastrar
+                    </button>
+                  ) : null}
+                  <label className="inline-flex items-center gap-xs text-label-md text-on-surface">
+                    <input
+                      type="checkbox"
+                      checked={comServicoMensal}
+                      disabled={locked}
+                      onChange={(event) => {
+                        const checked = event.target.checked;
+                        setComServicoMensal(checked);
+                        if (!checked) {
+                          setQuoteServicosMensais([]);
+                          setAddServicoId("");
+                        }
+                      }}
+                      className="size-4 accent-primary"
+                    />
+                    Incluir no orçamento
+                  </label>
+                </div>
+              </div>
+
+              {comServicoMensal ? (
+                <div className="space-y-sm">
+                  {quoteServicosMensais.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-outline-variant px-md py-sm text-body-md text-on-surface-variant">
+                      Nenhum serviço adicionado. Escolha abaixo ou cadastre um novo.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="overflow-x-auto rounded-lg border border-outline-variant bg-surface">
+                        <table className="min-w-full text-left text-body-md">
+                          <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                            <tr>
+                              <th className="px-sm py-xs">Serviço</th>
+                              <th className="px-sm py-xs w-20">Qtd</th>
+                              <th className="px-sm py-xs w-32">Unitário</th>
+                              <th className="px-sm py-xs w-32">Subtotal</th>
+                              <th className="px-sm py-xs w-20" />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {quoteServicosMensais.map((service) => (
+                              <tr key={service.key} className="border-t border-outline-variant">
+                                <td className="px-sm py-xs">
+                                  <p className="text-on-surface">{service.nome}</p>
+                                  <p className="text-label-md text-on-surface-variant">R$/mês</p>
+                                </td>
+                                <td className="px-sm py-xs">
+                                  <input
+                                    type="number"
+                                    min={0.001}
+                                    step="any"
+                                    disabled={locked}
+                                    value={service.quantidade}
+                                    onChange={(event) => {
+                                      const value = Number(event.target.value);
+                                      setQuoteServicosMensais((prev) =>
+                                        prev.map((row) =>
+                                          row.key === service.key
+                                            ? {
+                                                ...row,
+                                                quantidade:
+                                                  Number.isFinite(value) && value > 0 ? value : 1,
+                                              }
+                                            : row,
+                                        ),
+                                      );
+                                    }}
+                                    className="w-16 rounded border border-outline-variant bg-surface px-xs py-xs disabled:opacity-60"
+                                  />
+                                </td>
+                                <td className="px-sm py-xs">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    disabled={locked}
+                                    value={service.valor}
+                                    onChange={(event) => {
+                                      const value = Number(event.target.value);
+                                      setQuoteServicosMensais((prev) =>
+                                        prev.map((row) =>
+                                          row.key === service.key
+                                            ? {
+                                                ...row,
+                                                valor:
+                                                  Number.isFinite(value) && value >= 0 ? value : 0,
+                                              }
+                                            : row,
+                                        ),
+                                      );
+                                    }}
+                                    className="w-28 rounded border border-outline-variant bg-surface px-xs py-xs disabled:opacity-60"
+                                  />
+                                </td>
+                                <td className="px-sm py-xs whitespace-nowrap">
+                                  {formatMoney(service.quantidade * service.valor)}
+                                </td>
+                                <td className="px-sm py-xs">
+                                  {!locked ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setQuoteServicosMensais((prev) =>
+                                          prev.filter((row) => row.key !== service.key),
+                                        )
+                                      }
+                                      className="text-label-md text-red-700"
+                                    >
+                                      Remover
+                                    </button>
+                                  ) : null}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="flex justify-end px-sm text-body-md font-semibold text-on-surface">
+                        Total serviços mensais: {formatMoney(totalServicosMensais)}/mês
+                      </div>
+                    </>
+                  )}
+
+                  {!locked ? (
+                    <label className="block text-label-md text-on-surface-variant">
+                      Adicionar serviço
+                      <select
+                        value={addServicoId}
+                        onChange={(event) => {
+                          const id = Number(event.target.value);
+                          if (Number.isFinite(id) && id > 0) addServicoFromCatalog(id);
+                        }}
+                        className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+                      >
+                        <option value="">
+                          {monthlyServices.length === 0
+                            ? canManageMonthlyServices
+                              ? "Cadastre um serviço primeiro"
+                              : "Nenhum serviço cadastrado"
+                            : "Selecione para adicionar..."}
+                        </option>
+                        {monthlyServices
+                          .filter(
+                            (service) =>
+                              !quoteServicosMensais.some(
+                                (entry) => entry.monthlyServiceId === service.id,
+                              ),
+                          )
+                          .map((service) => (
+                            <option key={service.id} value={service.id}>
+                              {service.nome} ({formatMoney(service.valor)}/mês)
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            <Dialog open={catalogDialogOpen} onOpenChange={setCatalogDialogOpen}>
+              <DialogContent className="overflow-hidden">
+                <DialogHeader>
+                  <DialogTitle>Serviços mensais</DialogTitle>
+                  <DialogDescription>
+                    Cadastre o catálogo. O custo fica só aqui; no orçamento entra o valor de venda.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-sm">
+                  <div className="flex flex-col gap-sm">
+                    <input
+                      value={novoServicoNome}
+                      onChange={(event) => setNovoServicoNome(event.target.value)}
+                      placeholder="Nome (ex.: Monitoramento)"
+                      className="w-full min-w-0 rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={novoServicoValor}
+                      onChange={(event) => setNovoServicoValor(event.target.value)}
+                      placeholder="Valor de venda (R$/mês)"
+                      className="w-full min-w-0 rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={novoServicoCusto}
+                      onChange={(event) => setNovoServicoCusto(event.target.value)}
+                      placeholder="Preço de custo (R$/mês)"
+                      className="w-full min-w-0 rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+                    />
+                  </div>
+                  {monthlyServices.length > 0 ? (
+                    <ul className="max-h-56 space-y-xs overflow-auto">
+                      {monthlyServices.map((service) => (
+                        <li
+                          key={service.id}
+                          className="flex min-w-0 items-center justify-between gap-sm rounded-lg border border-outline-variant px-sm py-xs text-body-md"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{service.nome}</span>
+                            <span className="text-label-md text-on-surface-variant">
+                              Venda {formatMoney(service.valor)}/mês
+                              {" · "}
+                              Custo {formatMoney(service.custo ?? 0)}/mês
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            disabled={savingServico}
+                            onClick={() => handleDeactivateMonthlyService(service.id)}
+                            className="shrink-0 text-label-md text-red-700 disabled:opacity-50"
+                          >
+                            Remover
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-body-md text-on-surface-variant">
+                      Nenhum serviço cadastrado ainda.
+                    </p>
+                  )}
+                </div>
+                <DialogFooter className="gap-sm">
+                  <button
+                    type="button"
+                    onClick={() => setCatalogDialogOpen(false)}
+                    className="rounded-lg border border-outline-variant px-md py-sm text-label-md text-on-surface"
+                  >
+                    Fechar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={savingServico}
+                    onClick={handleCreateMonthlyService}
+                    className="inline-flex items-center justify-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50"
+                  >
+                    <Icon name="add" className="text-[18px]" />
+                    {savingServico ? "Salvando..." : "Cadastrar"}
+                  </button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             <div>
               <div className="mb-xs flex items-center justify-between gap-sm">
@@ -1107,6 +1742,19 @@ function OrcamentosPage() {
                             />
                             {quote.status === "sent" ? "Ver" : "Editar"}
                           </button>
+                          <button
+                            type="button"
+                            disabled={duplicatingQuoteId === quote.id || loadingQuote}
+                            onClick={() => handleDuplicateQuote(quote.id)}
+                            className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
+                            title="Duplicar orçamento"
+                          >
+                            <Icon
+                              name={duplicatingQuoteId === quote.id ? "hourglass_empty" : "file_copy"}
+                              className="text-[16px]"
+                            />
+                            {duplicatingQuoteId === quote.id ? "..." : "Duplicar"}
+                          </button>
                           {quote.status !== "sent" ? (
                             <button
                               type="button"
@@ -1117,10 +1765,16 @@ function OrcamentosPage() {
                               <Icon name={sending ? "hourglass_empty" : "send"} className="text-[16px]" />
                               Omie
                             </button>
-                          ) : quote.numeroPedido ? (
-                            <span className="rounded-lg border border-outline-variant px-sm py-xs text-label-md text-on-surface-variant">
-                              Omie {quote.numeroPedido}
-                            </span>
+                          ) : omieCodigoLabel(quote) ? (
+                            <button
+                              type="button"
+                              onClick={() => copyOmieCodigo(omieCodigoLabel(quote)!)}
+                              className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high"
+                              title="Copiar código Omie"
+                            >
+                              <Icon name="content_copy" className="text-[16px]" />
+                              Omie {omieCodigoLabel(quote)}
+                            </button>
                           ) : null}
                           {canDeleteQuotes ? (
                             <button

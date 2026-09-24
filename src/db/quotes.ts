@@ -31,6 +31,9 @@ export type Quote = {
   createdByName: string | null;
   createdAt: string;
   updatedAt: string;
+  servicoMensalId: number | null;
+  servicoMensalNome: string | null;
+  servicoMensalValor: number | null;
 };
 
 export type QuoteItem = {
@@ -42,6 +45,23 @@ export type QuoteItem = {
   quantidade: number;
   valorUnitario: number;
   ncm: string | null;
+};
+
+export type QuoteMonthlyServiceInput = {
+  monthlyServiceId?: number | null;
+  nome: string;
+  valor: number;
+  quantidade?: number;
+};
+
+export type QuoteMonthlyService = {
+  id: number;
+  quoteId: number;
+  monthlyServiceId: number | null;
+  nome: string;
+  valor: number;
+  quantidade: number;
+  sortOrder: number;
 };
 
 function toNumber(value: unknown) {
@@ -70,6 +90,10 @@ function mapQuote(r: Record<string, unknown>): Quote {
     createdByName: r["created_by_name"] == null ? null : String(r["created_by_name"]),
     createdAt: String(r["created_at"] ?? ""),
     updatedAt: String(r["updated_at"] ?? ""),
+    servicoMensalId: r["servico_mensal_id"] == null ? null : toNumber(r["servico_mensal_id"]),
+    servicoMensalNome: r["servico_mensal_nome"] == null ? null : String(r["servico_mensal_nome"]),
+    servicoMensalValor:
+      r["servico_mensal_valor"] == null ? null : toNumber(r["servico_mensal_valor"]),
   };
 }
 
@@ -107,17 +131,22 @@ export async function createQuoteRecord(input: {
   status?: string;
   createdBy?: number | null;
   items: QuoteItemInput[];
+  servicosMensais?: QuoteMonthlyServiceInput[];
 }) {
   const db = await getDb();
   const numeroInterno = input.numeroInterno?.trim() || (await nextNumeroInterno());
+  const firstServico = input.servicosMensais?.[0] ?? null;
   const rows = (await db`
     insert into quotes (
       omie_app_id, omie_app_name, client_code, client_name,
-      numero_interno, data_previsao, observacao, total, status, created_by, updated_at
+      numero_interno, data_previsao, observacao, total, status, created_by, updated_at,
+      servico_mensal_id, servico_mensal_nome, servico_mensal_valor
     ) values (
       ${input.omieAppId}, ${input.omieAppName}, ${input.clientCode}, ${input.clientName ?? null},
       ${numeroInterno}, ${input.dataPrevisao ?? null}, ${input.observacao ?? null},
-      ${input.total}, ${input.status ?? "draft"}, ${input.createdBy ?? null}, now()
+      ${input.total}, ${input.status ?? "draft"}, ${input.createdBy ?? null}, now(),
+      ${firstServico?.monthlyServiceId ?? null}, ${firstServico?.nome ?? null},
+      ${firstServico?.valor ?? null}
     )
     returning id, numero_interno
   `) as Array<{ id: number; numero_interno: string }>;
@@ -137,6 +166,7 @@ export async function createQuoteRecord(input: {
       )
     `;
   }
+  await replaceQuoteMonthlyServices(quoteId, input.servicosMensais ?? []);
 
   return { quoteId, numeroInterno: savedNumero };
 }
@@ -156,6 +186,54 @@ export async function replaceQuoteItems(quoteId: number, items: QuoteItemInput[]
   }
 }
 
+export async function getQuoteMonthlyServices(quoteId: number) {
+  const db = await getDb();
+  const rows = (await db`
+    select id, quote_id, monthly_service_id, nome, valor, quantidade, sort_order
+    from quote_monthly_services
+    where quote_id = ${quoteId}
+    order by sort_order asc, id asc
+  `) as Array<Record<string, unknown>>;
+  return rows.map(
+    (r): QuoteMonthlyService => ({
+      id: toNumber(r["id"]),
+      quoteId: toNumber(r["quote_id"]),
+      monthlyServiceId: r["monthly_service_id"] == null ? null : toNumber(r["monthly_service_id"]),
+      nome: String(r["nome"] ?? ""),
+      valor: toNumber(r["valor"]),
+      quantidade: Math.max(toNumber(r["quantidade"]) || 1, 0.001),
+      sortOrder: toNumber(r["sort_order"]),
+    }),
+  );
+}
+
+export async function replaceQuoteMonthlyServices(
+  quoteId: number,
+  services: QuoteMonthlyServiceInput[],
+) {
+  const db = await getDb();
+  await db`delete from quote_monthly_services where quote_id = ${quoteId}`;
+  let order = 0;
+  for (const service of services) {
+    const nome = service.nome.trim();
+    if (!nome) continue;
+    const valor = Number.isFinite(service.valor) && service.valor >= 0 ? service.valor : 0;
+    const quantidade =
+      service.quantidade != null && Number.isFinite(service.quantidade) && service.quantidade > 0
+        ? service.quantidade
+        : 1;
+    await db`
+      insert into quote_monthly_services (
+        quote_id, monthly_service_id, nome, valor, quantidade, sort_order
+      ) values (
+        ${quoteId}, ${service.monthlyServiceId ?? null}, ${nome.slice(0, 200)}, ${valor},
+        ${quantidade}, ${order}
+      )
+    `;
+    order += 1;
+  }
+}
+
 export async function updateQuoteRecord(
   quoteId: number,
   input: {
@@ -168,6 +246,7 @@ export async function updateQuoteRecord(
     total: number;
     status?: string;
     items: QuoteItemInput[];
+    servicosMensais?: QuoteMonthlyServiceInput[];
   },
 ) {
   const existing = await getQuoteById(quoteId);
@@ -179,6 +258,7 @@ export async function updateQuoteRecord(
   const db = await getDb();
   const nextStatus =
     input.status ?? (existing.status === "error" ? "draft" : existing.status === "sending" ? "draft" : existing.status);
+  const firstServico = input.servicosMensais?.[0] ?? null;
 
   await db`
     update quotes
@@ -192,10 +272,14 @@ export async function updateQuoteRecord(
       total = ${input.total},
       status = ${nextStatus},
       error = null,
+      servico_mensal_id = ${firstServico?.monthlyServiceId ?? null},
+      servico_mensal_nome = ${firstServico?.nome ?? null},
+      servico_mensal_valor = ${firstServico?.valor ?? null},
       updated_at = now()
     where id = ${quoteId}
   `;
   await replaceQuoteItems(quoteId, input.items);
+  await replaceQuoteMonthlyServices(quoteId, input.servicosMensais ?? []);
   return { quoteId, numeroInterno: existing.numeroInterno };
 }
 

@@ -25,6 +25,7 @@ export type OrcamentoPdfOptions = {
   showLineValues: boolean;
   /** Exibe o valor total do orçamento */
   showTotal: boolean;
+  servicosMensais?: Array<{ nome: string; valor: number; quantidade?: number }>;
 };
 
 function escapeHtml(value: string) {
@@ -165,6 +166,26 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
       font-size: 14px;
       font-weight: 700;
     }
+    .mensal {
+      margin-top: 18px;
+      padding: 12px 14px;
+      background: #f0f7fb;
+      border: 1px solid #c5d9e6;
+      border-radius: 8px;
+    }
+    .mensal .value {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      margin-top: 6px;
+    }
+    .mensal .valor {
+      font-size: 14px;
+      font-weight: 700;
+      color: #0b3d5c;
+      white-space: nowrap;
+    }
     @media print {
       .no-print { display: none !important; }
       body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
@@ -238,6 +259,34 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
         }
       </tbody>
     </table>
+
+    ${(() => {
+      const list = (options.servicosMensais ?? []).filter(
+        (s) => s.nome.trim() && Number.isFinite(s.valor),
+      );
+      if (!list.length) return "";
+      const totalMensal = list.reduce((sum, s) => {
+        const qtd = s.quantidade != null && s.quantidade > 0 ? s.quantidade : 1;
+        return sum + qtd * s.valor;
+      }, 0);
+      return `<div class="mensal">
+            <div class="label">Serviços mensais</div>
+            ${list
+              .map((s) => {
+                const qtd = s.quantidade != null && s.quantidade > 0 ? s.quantidade : 1;
+                const subtotal = qtd * s.valor;
+                return `<div class="value">
+              <span>${escapeHtml(s.nome.trim())}${qtd !== 1 ? ` · qtd ${formatQty(qtd)}` : ""}</span>
+              <span class="valor">${formatMoney(subtotal)} / mês</span>
+            </div>`;
+              })
+              .join("")}
+            <div class="value" style="margin-top:10px;border-top:1px solid #c5d9e6;padding-top:8px">
+              <span>Total mensal</span>
+              <span class="valor">${formatMoney(totalMensal)} / mês</span>
+            </div>
+          </div>`;
+    })()}
 
     ${
       options.observacao?.trim()

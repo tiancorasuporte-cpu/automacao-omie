@@ -45,6 +45,7 @@ export type OrcamentoExcelOptions = {
   items: OrcamentoExcelItem[];
   showLineValues: boolean;
   showTotal: boolean;
+  servicosMensais?: Array<{ nome: string; valor: number; quantidade?: number }>;
 };
 
 const DEFAULT_ENCARGOS = 0.16;
@@ -231,6 +232,38 @@ export function buildOrcamentoExcelXml(options: OrcamentoExcelOptions) {
         "Observação",
         "metaLabel",
       )}${cellString(options.observacao.trim(), "metaValue", 6)}</Row>`
+    : "";
+
+  const servicosList = (options.servicosMensais ?? []).filter(
+    (s) => s.nome.trim() && Number.isFinite(s.valor),
+  );
+  const totalServicosMensais = servicosList.reduce((sum, s) => {
+    const qtd = s.quantidade != null && s.quantidade > 0 ? s.quantidade : 1;
+    return sum + qtd * s.valor;
+  }, 0);
+  const servicoXml = servicosList.length
+    ? `<Row/>${servicosList
+        .map((s, index) => {
+          const qtd = s.quantidade != null && s.quantidade > 0 ? s.quantidade : 1;
+          const subtotal = qtd * s.valor;
+          return `<Row ss:AutoFitHeight="0" ss:Height="20">${cellString(
+            index === 0 ? "Serviço mensal" : "",
+            "metaLabel",
+          )}${cellString(s.nome.trim(), "metaValue", 2)}${cellNumber(
+            qtd,
+            "numEven",
+          )}${cellNumber(s.valor, "moneyEven")}${cellNumber(
+            subtotal,
+            "moneyEven",
+          )}${cellString("/ mês", "metaValue")}</Row>`;
+        })
+        .join("\n      ")}<Row ss:AutoFitHeight="0" ss:Height="20">${cellString(
+        "Total mensal",
+        "metaLabel",
+      )}${emptyCells(4)}${cellNumber(totalServicosMensais, "totalMoney")}${cellString(
+        "/ mês",
+        "metaValue",
+      )}</Row>`
     : "";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -480,6 +513,7 @@ export function buildOrcamentoExcelXml(options: OrcamentoExcelOptions) {
       ${headerXml}
       ${rowsXml}
       ${totalXml}
+      ${servicoXml}
       ${obsXml}
     </Table>
     <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">

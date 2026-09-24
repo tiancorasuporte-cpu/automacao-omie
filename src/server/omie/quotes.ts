@@ -5,6 +5,7 @@ import {
   deleteQuoteById,
   getQuoteById,
   getQuoteItems,
+  getQuoteMonthlyServices,
   markQuoteError,
   markQuoteSent,
   updateQuoteRecord,
@@ -20,6 +21,19 @@ import {
 import { clientDisplayName, normalizeCliente } from "@/server/omie/clients";
 
 export type QuoteLineInput = QuoteItemInput;
+
+/** Omie costuma quebrar travessão/NBSP em "¿¿¿"; acentos latinos costumam ok. */
+function sanitizeOmieText(value: string) {
+  return value
+    .replace(/[\u2012-\u2015\u2212]/g, "-") // travessões → hífen
+    .replace(/[\u00a0\u202f\u2007]/g, " ") // espaços especiais
+    .replace(/[^\n\r\t\x20-\x7e\u00a0-\u00ff]/g, ""); // ASCII + Latin-1
+}
+
+function formatMoneyOmie(value: number) {
+  const n = Number.isFinite(value) ? value : 0;
+  return `R$ ${n.toFixed(2).replace(".", ",")}`;
+}
 
 function envKey(prefix: string, suffix: string) {
   return `OMIE_${prefix.toUpperCase().replace(/[^A-Z0-9_]/g, "_")}_${suffix}`;
@@ -66,6 +80,14 @@ async function resolveContaCorrente(app: OmieAppConfig) {
 export async function searchOmieClients(app: OmieAppConfig, query: string) {
   const q = query.trim();
   if (q.length < 2) return [];
+
+  const { searchOmieClientsLocal } = await import("@/db/clients");
+  try {
+    const local = await searchOmieClientsLocal({ omieAppId: app.id, query: q, limit: 40 });
+    if (local.length > 0) return local;
+  } catch {
+    // cai no fallback ao vivo
+  }
 
   const attempts = [{ razao_social: q }, { nome_fantasia: q }];
 
@@ -231,6 +253,12 @@ export async function saveLocalOrcamento(input: {
   dataPrevisao?: string | null;
   createdBy?: number | null;
   items: QuoteLineInput[];
+  servicosMensais?: Array<{
+    monthlyServiceId?: number | null;
+    nome: string;
+    valor: number;
+    quantidade?: number;
+  }>;
 }) {
   const app = listOmieApps().find((entry) => entry.id === input.omieAppId);
   if (!app) throw new Error("Empresa Omie não configurada.");
@@ -238,6 +266,17 @@ export async function saveLocalOrcamento(input: {
   validateItems(input.items);
 
   const total = input.items.reduce((sum, item) => sum + item.quantidade * item.valorUnitario, 0);
+  const servicosMensais = (input.servicosMensais ?? [])
+    .map((service) => ({
+      monthlyServiceId: service.monthlyServiceId ?? null,
+      nome: service.nome.trim(),
+      valor: service.valor,
+      quantidade:
+        service.quantidade != null && Number.isFinite(service.quantidade) && service.quantidade > 0
+          ? service.quantidade
+          : 1,
+    }))
+    .filter((service) => service.nome.length > 0);
   const payload = {
     omieAppId: app.id,
     omieAppName: app.name,
@@ -247,6 +286,7 @@ export async function saveLocalOrcamento(input: {
     observacao: input.observacao ?? null,
     total,
     status: "draft",
+    servicosMensais,
     items: input.items.map((item) => ({
       codigoProduto: item.codigoProduto,
       descricao: item.descricao,
@@ -284,11 +324,6 @@ async function pushQuoteToOmie(quoteId: number) {
 
   const categoria = await resolveCategoria(app);
   const contaCorrente = await resolveContaCorrente(app);
-  if (!contaCorrente) {
-    throw new Error(
-      "Nenhuma conta corrente encontrada. Configure OMIE_<EMPRESA>_ORCAMENTO_CONTA_CORRENTE no .env.",
-    );
-  }
 
   // Códigos só para a API Omie (máx. 30 no item) — sem vínculo com o nº interno nosso.
   const integrationCode = `a${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.slice(
@@ -300,7 +335,49 @@ async function pushQuoteToOmie(quoteId: number) {
       ? `${quote.dataPrevisao.slice(8, 10)}/${quote.dataPrevisao.slice(5, 7)}/${quote.dataPrevisao.slice(0, 4)}`
       : formatOmieDate(new Date());
 
-  const observacaoOmie = quote.observacao?.trim().slice(0, 500) || "";
+  const observacaoParts: string[] = [];
+  if (quote.observacao?.trim()) {
+    observacaoParts.push(quote.observacao.trim());
+  }
+  let servicosMensais = await getQuoteMonthlyServices(quoteId);
+  // Fallback para orçamentos antigos que só tinham as colunas legadas.
+  if (
+    servicosMensais.length === 0 &&
+    quote.servicoMensalNome?.trim() &&
+    quote.servicoMensalValor != null
+  ) {
+    servicosMensais = [
+      {
+        id: 0,
+        quoteId,
+        monthlyServiceId: quote.servicoMensalId,
+        nome: quote.servicoMensalNome,
+        valor: quote.servicoMensalValor,
+        quantidade: 1,
+        sortOrder: 0,
+      },
+    ];
+  }
+  if (servicosMensais.length > 0) {
+    let totalMensal = 0;
+    for (const service of servicosMensais) {
+      if (!service.nome.trim() || !Number.isFinite(service.valor)) continue;
+      const qtd = service.quantidade > 0 ? service.quantidade : 1;
+      const subtotal = qtd * service.valor;
+      totalMensal += subtotal;
+      const valorUnit = formatMoneyOmie(service.valor);
+      const valorSub = formatMoneyOmie(subtotal);
+      observacaoParts.push(
+        qtd === 1
+          ? `Serviço mensal: ${sanitizeOmieText(service.nome)} - ${valorUnit}/mês`
+          : `Serviço mensal: ${sanitizeOmieText(service.nome)} - ${qtd} x ${valorUnit} = ${valorSub}/mês`,
+      );
+    }
+    if (servicosMensais.length > 1 && totalMensal > 0) {
+      observacaoParts.push(`Total serviços mensais: ${formatMoneyOmie(totalMensal)}/mês`);
+    }
+  }
+  const observacaoOmie = sanitizeOmieText(observacaoParts.join("\n")).slice(0, 2000);
 
   try {
     const payload = {
@@ -330,11 +407,18 @@ async function pushQuoteToOmie(quoteId: number) {
       },
       informacoes_adicionais: {
         codigo_categoria: categoria,
-        codigo_conta_corrente: contaCorrente,
         consumidor_final: "S",
         enviar_email: "N",
-        ...(observacaoOmie ? { dados_adicionais_nf: observacaoOmie } : {}),
+        ...(contaCorrente ? { codigo_conta_corrente: contaCorrente } : {}),
       },
+      // Aba "Observações" do Pedido de Venda (obs_venda).
+      ...(observacaoOmie
+        ? {
+            observacoes: {
+              obs_venda: observacaoOmie,
+            },
+          }
+        : {}),
     };
 
     const response = await omieCall<{
@@ -380,6 +464,12 @@ export async function createOmieOrcamento(input: {
   dataPrevisao?: string | null;
   createdBy?: number | null;
   items: QuoteLineInput[];
+  servicosMensais?: Array<{
+    monthlyServiceId?: number | null;
+    nome: string;
+    valor: number;
+    quantidade?: number;
+  }>;
 }) {
   let quoteId = input.quoteId && input.quoteId > 0 ? input.quoteId : null;
 

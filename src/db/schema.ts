@@ -245,6 +245,28 @@ export async function ensureSchema() {
     );
   }
 
+  if (!(await tableExists("omie_clients"))) {
+    await sql`
+      create table omie_clients (
+        id serial primary key,
+        omie_app_id varchar(64) not null,
+        omie_app_name varchar(160) not null,
+        codigo_cliente bigint not null,
+        razao_social varchar(255) not null,
+        nome_fantasia varchar(255),
+        cnpj_cpf varchar(32),
+        inactive boolean not null default false,
+        synced_at timestamptz not null default now(),
+        unique (omie_app_id, codigo_cliente)
+      )
+    `;
+  }
+  if (!(await indexExists("omie_clients_nome_idx"))) {
+    await sql.unsafe(
+      "create index omie_clients_nome_idx on omie_clients (omie_app_id, razao_social)",
+    );
+  }
+
   if (!(await tableExists("quotes"))) {
     await sql`
       create table quotes (
@@ -306,6 +328,69 @@ export async function ensureSchema() {
         ncm varchar(20)
       )
     `;
+  }
+
+  if (!(await tableExists("monthly_services"))) {
+    await sql`
+      create table monthly_services (
+        id serial primary key,
+        nome varchar(200) not null,
+        valor numeric(15, 4) not null default 0,
+        custo numeric(15, 4) not null default 0,
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await columnExists("monthly_services", "custo"))) {
+    await sql.unsafe(
+      "alter table monthly_services add column custo numeric(15, 4) not null default 0",
+    );
+  }
+
+  if (!(await columnExists("quotes", "servico_mensal_id"))) {
+    await sql.unsafe("alter table quotes add column servico_mensal_id integer");
+  }
+  if (!(await columnExists("quotes", "servico_mensal_nome"))) {
+    await sql.unsafe("alter table quotes add column servico_mensal_nome varchar(200)");
+  }
+  if (!(await columnExists("quotes", "servico_mensal_valor"))) {
+    await sql.unsafe("alter table quotes add column servico_mensal_valor numeric(15, 4)");
+  }
+
+  if (!(await tableExists("quote_monthly_services"))) {
+    await sql`
+      create table quote_monthly_services (
+        id serial primary key,
+        quote_id integer not null references quotes(id) on delete cascade,
+        monthly_service_id integer,
+        nome varchar(200) not null,
+        valor numeric(15, 4) not null default 0,
+        quantidade numeric(15, 4) not null default 1,
+        sort_order integer not null default 0
+      )
+    `;
+    // Migra orçamentos que já tinham um serviço único nas colunas antigas.
+    await sql`
+      insert into quote_monthly_services (quote_id, monthly_service_id, nome, valor, quantidade, sort_order)
+      select
+        id,
+        servico_mensal_id,
+        servico_mensal_nome,
+        coalesce(servico_mensal_valor, 0),
+        1,
+        0
+      from quotes
+      where servico_mensal_nome is not null
+        and trim(servico_mensal_nome) <> ''
+    `;
+  }
+
+  if (!(await columnExists("quote_monthly_services", "quantidade"))) {
+    await sql.unsafe(
+      "alter table quote_monthly_services add column quantidade numeric(15, 4) not null default 1",
+    );
   }
 
   const superUsername = process.env["APP_SUPERADMIN_USERNAME"] ?? "superadmin";

@@ -14,6 +14,11 @@ export const APP_PERMISSIONS = [
     label: "Excluir orçamentos",
     hint: "Permite apagar orçamentos salvos (e na Omie, se marcado).",
   },
+  {
+    id: "orcamentos_servicos_mensais",
+    label: "Cadastrar serviços mensais",
+    hint: "Permite criar e remover serviços mensais no catálogo de orçamentos.",
+  },
 ] as const;
 
 export type AppNavModuleId = (typeof APP_MODULES)[number]["id"];

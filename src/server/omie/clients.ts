@@ -1,6 +1,7 @@
 import "@tanstack/react-start/server-only";
 
-import { omieCall, type OmieAppConfig } from "@/server/omie/client";
+import { upsertOmieClient } from "@/db/clients";
+import { listOrcamentosOmieApps, omieCall, omiePaginate, type OmieAppConfig } from "@/server/omie/client";
 
 export type ClienteResumo = {
   codigo_cliente_omie: number;
@@ -206,4 +207,74 @@ export async function getCliente(app: OmieAppConfig, clientCode: number) {
 
 export function clearClienteCache() {
   clientCache.clear();
+}
+
+function clientInactive(raw: Record<string, unknown>) {
+  const flag = String(raw["inativo"] ?? raw["inactive"] ?? "N").trim().toUpperCase();
+  return flag === "S" || flag === "1" || flag === "TRUE";
+}
+
+export async function syncOmieClientsForApp(app: OmieAppConfig) {
+  const items = await omiePaginate<{
+    pagina?: number;
+    total_de_paginas?: number;
+    clientes_cadastro?: Record<string, unknown>[];
+  }>(
+    app,
+    "/geral/clientes/",
+    "ListarClientes",
+    (page) => ({
+      pagina: page,
+      registros_por_pagina: 100,
+      apenas_importado_api: "N",
+    }),
+    (response) => ({
+      page: response.pagina ?? 1,
+      totalPages: response.total_de_paginas ?? 1,
+      items: response.clientes_cadastro ?? [],
+    }),
+  );
+
+  let count = 0;
+  for (const item of items) {
+    const raw = item as Record<string, unknown>;
+    const client = normalizeCliente(raw);
+    if (!client) continue;
+    await upsertOmieClient({
+      omieAppId: app.id,
+      omieAppName: app.name,
+      codigoCliente: client.codigo_cliente_omie,
+      razaoSocial: client.razao_social || client.nome_fantasia || `Cliente ${client.codigo_cliente_omie}`,
+      nomeFantasia: client.nome_fantasia || null,
+      cnpjCpf: client.cnpj_cpf,
+      inactive: clientInactive(raw),
+    });
+    count += 1;
+  }
+  return { count };
+}
+
+export async function syncAllOmieClients() {
+  const apps = listOrcamentosOmieApps();
+  if (!apps.length) {
+    throw new Error(
+      "Empresa Belfer não configurada. Inclua o app Belfer em OMIE_APPS (ou defina OMIE_ORCAMENTOS_APP).",
+    );
+  }
+  let total = 0;
+  const perApp: Array<{ appId: string; count: number; error?: string }> = [];
+  for (const app of apps) {
+    try {
+      const result = await syncOmieClientsForApp(app);
+      total += result.count;
+      perApp.push({ appId: app.id, count: result.count });
+    } catch (error) {
+      perApp.push({
+        appId: app.id,
+        count: 0,
+        error: error instanceof Error ? error.message : "Falha ao sincronizar clientes",
+      });
+    }
+  }
+  return { total, perApp };
 }

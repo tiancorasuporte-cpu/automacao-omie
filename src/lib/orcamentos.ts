@@ -18,30 +18,50 @@ const draftSchema = z.object({
   observacao: z.string().trim().nullable().optional(),
   dataPrevisao: z.string().trim().nullable().optional(),
   items: z.array(lineSchema).min(1),
+  comServicoMensal: z.boolean().optional(),
+  servicosMensais: z
+    .array(
+      z.object({
+        monthlyServiceId: z.number().int().positive().nullable().optional(),
+        nome: z.string().trim().min(1).max(200),
+        valor: z.number().min(0),
+        quantidade: z.number().positive().optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const getOrcamentosBootstrapFn = createServerFn({ method: "GET" }).handler(async () => {
-  const { requireModule, canDeleteOrcamento } = await import("@/lib/require-auth");
+  const { requireModule, canDeleteOrcamento, canManageMonthlyServices } = await import(
+    "@/lib/require-auth"
+  );
   const { user } = await requireModule("orcamentos");
   const { listOrcamentosOmieApps, requireOrcamentosOmieApp } = await import("@/server/omie/client");
   const { countOmieProducts } = await import("@/db/products");
+  const { countOmieClients } = await import("@/db/clients");
   const { listQuotes } = await import("@/db/quotes");
+  const { listMonthlyServices } = await import("@/db/monthly-services");
   const { getOmieEmpresaInfo } = await import("@/server/omie/quotes");
   const apps = listOrcamentosOmieApps().map(({ id, name }) => ({ id, name }));
   const app = requireOrcamentosOmieApp();
-  const [productCount, quotes, empresa] = await Promise.all([
+  const [productCount, clientCount, quotes, empresa, monthlyServices] = await Promise.all([
     countOmieProducts(app.id),
+    countOmieClients(app.id),
     listQuotes(40, app.id),
     getOmieEmpresaInfo(app),
+    listMonthlyServices(true),
   ]);
   return {
     apps,
     productCount,
+    clientCount,
     quotes,
+    monthlyServices,
     omieAppId: app.id,
     empresaRazaoSocial: empresa.razaoSocial,
     empresaCnpj: empresa.cnpj,
     canDeleteQuotes: canDeleteOrcamento(user),
+    canManageMonthlyServices: canManageMonthlyServices(user),
   };
 });
 
@@ -64,6 +84,13 @@ export const syncOmieProductsFn = createServerFn({ method: "POST" }).handler(asy
   await requireModule("orcamentos");
   const { syncAllOmieProducts } = await import("@/server/omie/products");
   return syncAllOmieProducts();
+});
+
+export const syncOmieClientsFn = createServerFn({ method: "POST" }).handler(async () => {
+  const { requireModule } = await import("@/lib/require-auth");
+  await requireModule("orcamentos");
+  const { syncAllOmieClients } = await import("@/server/omie/clients");
+  return syncAllOmieClients();
 });
 
 export const searchOmieProductsFn = createServerFn({ method: "GET" })
@@ -112,6 +139,110 @@ export const searchOmieClientsFn = createServerFn({ method: "GET" })
     }
   });
 
+export const listMonthlyServicesFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireModule } = await import("@/lib/require-auth");
+  await requireModule("orcamentos");
+  const { listMonthlyServices } = await import("@/db/monthly-services");
+  return listMonthlyServices(true);
+});
+
+export const createMonthlyServiceFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        nome: z.string().trim().min(1).max(200),
+        valor: z.number().min(0),
+        custo: z.number().min(0).optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule, canManageMonthlyServices } = await import("@/lib/require-auth");
+    const { user } = await requireModule("orcamentos");
+    if (!canManageMonthlyServices(user)) {
+      return {
+        ok: false as const,
+        error: "Seu usuário não tem permissão para cadastrar serviços mensais.",
+      };
+    }
+    const { createMonthlyService } = await import("@/db/monthly-services");
+    try {
+      const service = await createMonthlyService({
+        nome: data.nome,
+        valor: data.valor,
+        custo: data.custo ?? 0,
+      });
+      return { ok: true as const, service };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao cadastrar serviço mensal.",
+      };
+    }
+  });
+
+export const updateMonthlyServiceFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive(),
+        nome: z.string().trim().min(1).max(200),
+        valor: z.number().min(0),
+        custo: z.number().min(0).optional(),
+        active: z.boolean().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule, canManageMonthlyServices } = await import("@/lib/require-auth");
+    const { user } = await requireModule("orcamentos");
+    if (!canManageMonthlyServices(user)) {
+      return {
+        ok: false as const,
+        error: "Seu usuário não tem permissão para alterar serviços mensais.",
+      };
+    }
+    const { updateMonthlyService } = await import("@/db/monthly-services");
+    try {
+      const service = await updateMonthlyService({
+        id: data.id,
+        nome: data.nome,
+        valor: data.valor,
+        ...(data.custo !== undefined ? { custo: data.custo } : {}),
+        ...(data.active !== undefined ? { active: data.active } : {}),
+      });
+      return { ok: true as const, service };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao atualizar serviço mensal.",
+      };
+    }
+  });
+
+export const deactivateMonthlyServiceFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ id: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { requireModule, canManageMonthlyServices } = await import("@/lib/require-auth");
+    const { user } = await requireModule("orcamentos");
+    if (!canManageMonthlyServices(user)) {
+      return {
+        ok: false as const,
+        error: "Seu usuário não tem permissão para remover serviços mensais.",
+      };
+    }
+    const { deactivateMonthlyService } = await import("@/db/monthly-services");
+    try {
+      await deactivateMonthlyService(data.id);
+      return { ok: true as const };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao remover serviço mensal.",
+      };
+    }
+  });
+
 function normalizeItems(items: z.infer<typeof lineSchema>[]) {
   return items.map((item) => ({
     codigoProduto: item.codigoProduto,
@@ -121,6 +252,25 @@ function normalizeItems(items: z.infer<typeof lineSchema>[]) {
     unidade: item.unidade ?? null,
     ncm: item.ncm ?? null,
   }));
+}
+
+function resolveServicosMensais(data: z.infer<typeof draftSchema>) {
+  if (!data.comServicoMensal) return [];
+  const list = (data.servicosMensais ?? [])
+    .map((service) => ({
+      monthlyServiceId: service.monthlyServiceId ?? null,
+      nome: service.nome.trim(),
+      valor: service.valor,
+      quantidade:
+        service.quantidade != null && Number.isFinite(service.quantidade) && service.quantidade > 0
+          ? service.quantidade
+          : 1,
+    }))
+    .filter((service) => service.nome.length > 0);
+  if (list.length === 0) {
+    throw new Error("Adicione ao menos um serviço mensal ou desmarque a opção.");
+  }
+  return list;
 }
 
 function toSaveInput(data: z.infer<typeof draftSchema>, createdBy: number, omieAppId: string) {
@@ -133,6 +283,7 @@ function toSaveInput(data: z.infer<typeof draftSchema>, createdBy: number, omieA
     quoteId: data.quoteId ?? null,
     createdBy,
     items: normalizeItems(data.items),
+    servicosMensais: resolveServicosMensais(data),
   };
 }
 
@@ -161,7 +312,7 @@ export const getOrcamentoFn = createServerFn({ method: "GET" })
     const { requireModule } = await import("@/lib/require-auth");
     await requireModule("orcamentos");
     const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
-    const { getQuoteById, getQuoteItems } = await import("@/db/quotes");
+    const { getQuoteById, getQuoteItems, getQuoteMonthlyServices } = await import("@/db/quotes");
     const { listOmieProducts } = await import("@/db/products");
     const app = requireOrcamentosOmieApp();
     const quote = await getQuoteById(data.quoteId);
@@ -171,7 +322,10 @@ export const getOrcamentoFn = createServerFn({ method: "GET" })
     }
     const { getCliente } = await import("@/server/omie/clients");
     const clienteOmie = await getCliente(app, quote.clientCode).catch(() => null);
-    const items = await getQuoteItems(data.quoteId);
+    const [items, servicosMensais] = await Promise.all([
+      getQuoteItems(data.quoteId),
+      getQuoteMonthlyServices(data.quoteId),
+    ]);
     const catalog = await listOmieProducts({
       omieAppId: app.id,
       activeOnly: false,
@@ -181,6 +335,7 @@ export const getOrcamentoFn = createServerFn({ method: "GET" })
     return {
       ok: true as const,
       quote,
+      servicosMensais,
       clienteCnpj: clienteOmie?.cnpj_cpf ?? null,
       clienteNomeCompleto:
         clienteOmie?.razao_social ||

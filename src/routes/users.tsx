@@ -20,10 +20,14 @@ export const Route = createFileRoute("/users")({
 });
 
 function sanitizeOperatorModules(next: AppModuleId[]): AppModuleId[] {
-  if (!next.includes("orcamentos") && next.includes("orcamentos_excluir")) {
-    return next.filter((id) => id !== "orcamentos_excluir");
+  let out = next;
+  if (!out.includes("orcamentos") && out.includes("orcamentos_excluir")) {
+    out = out.filter((id) => id !== "orcamentos_excluir");
   }
-  return next;
+  if (!out.includes("orcamentos") && out.includes("orcamentos_servicos_mensais")) {
+    out = out.filter((id) => id !== "orcamentos_servicos_mensais");
+  }
+  return out;
 }
 
 function ModulesPicker({
@@ -64,7 +68,9 @@ function ModulesPicker({
           {APP_PERMISSIONS.map((permission) => {
             const checked = value.includes(permission.id);
             const needsOrcamentos =
-              permission.id === "orcamentos_excluir" && !value.includes("orcamentos");
+              (permission.id === "orcamentos_excluir" ||
+                permission.id === "orcamentos_servicos_mensais") &&
+              !value.includes("orcamentos");
             return (
               <label
                 key={permission.id}
