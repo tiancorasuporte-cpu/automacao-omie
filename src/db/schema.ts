@@ -393,6 +393,61 @@ export async function ensureSchema() {
     );
   }
 
+  if (!(await tableExists("facilities_posts"))) {
+    await sql`
+      create table facilities_posts (
+        id serial primary key,
+        nome varchar(200) not null,
+        endereco varchar(255),
+        cidade varchar(120),
+        observacao text,
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("facilities_collaborators"))) {
+    await sql`
+      create table facilities_collaborators (
+        id serial primary key,
+        nome varchar(200) not null,
+        empresa varchar(32) not null,
+        funcao varchar(32) not null,
+        escala varchar(32) not null,
+        posto_base_id integer references facilities_posts(id) on delete set null,
+        telefone varchar(32),
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("facilities_substitutions"))) {
+    await sql`
+      create table facilities_substitutions (
+        id serial primary key,
+        data date not null,
+        motivo varchar(32) not null,
+        posto_id integer not null references facilities_posts(id),
+        ausente_id integer not null references facilities_collaborators(id),
+        substituto_id integer not null references facilities_collaborators(id),
+        horas numeric(8, 2) not null default 12,
+        observacao text,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("facilities_substitutions_data_idx"))) {
+    await sql.unsafe(
+      "create index facilities_substitutions_data_idx on facilities_substitutions (data)",
+    );
+  }
+
   const superUsername = process.env["APP_SUPERADMIN_USERNAME"] ?? "superadmin";
   const superPassword = process.env["APP_SUPERADMIN_PASSWORD"] ?? "ancora";
   const superName = process.env["APP_SUPERADMIN_NAME"] ?? "Super Admin";

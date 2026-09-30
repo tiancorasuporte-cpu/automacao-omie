@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
+import { TablePager, paginateList } from "@/components/TablePager";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -40,6 +41,10 @@ import { openOrcamentoPdf } from "@/lib/orcamento-pdf";
 import { downloadOrcamentoExcel } from "@/lib/orcamento-excel";
 import { effectiveCmc, isUnitBelowCmc, isUnitBelowSuggested, suggestedPriceFromCmc } from "@/lib/product-pricing";
 import { requireModule } from "@/lib/require-auth";
+import { cn } from "@/lib/utils";
+
+type MobileOrcamentoTab = "montar" | "produtos" | "salvos";
+type QuotesPageSize = 10 | 20 | 50 | 100;
 
 export const Route = createFileRoute("/orcamentos")({
   beforeLoad: () => requireModule("orcamentos"),
@@ -155,7 +160,11 @@ function OrcamentosPage() {
   const [showTotal, setShowTotal] = useState(true);
   const [quotesFilter, setQuotesFilter] = useState("");
   const [quotesStatusFilter, setQuotesStatusFilter] = useState<"all" | "draft" | "sent" | "error">("all");
+  const [quotesPage, setQuotesPage] = useState(1);
+  const [quotesPageSize, setQuotesPageSize] = useState<QuotesPageSize>(10);
   const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+  const [mobileTab, setMobileTab] = useState<MobileOrcamentoTab>("montar");
+  const [lastAddedLabel, setLastAddedLabel] = useState<string | null>(null);
 
   const total = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantidade * item.valorUnitario, 0),
@@ -212,6 +221,15 @@ function OrcamentosPage() {
       return haystack.includes(q);
     });
   }, [quotes, quotesFilter, quotesStatusFilter]);
+
+  const pagedQuotes = useMemo(
+    () => paginateList(filteredQuotes, quotesPage, quotesPageSize),
+    [filteredQuotes, quotesPage, quotesPageSize],
+  );
+
+  useEffect(() => {
+    setQuotesPage(1);
+  }, [quotesFilter, quotesStatusFilter, quotesPageSize]);
 
   const locked = quoteStatus === "sent";
 
@@ -397,6 +415,8 @@ function OrcamentosPage() {
         },
       ];
     });
+    setLastAddedLabel(product.descricao);
+    window.setTimeout(() => setLastAddedLabel(null), 1800);
   }
 
   function buildPayload() {
@@ -707,6 +727,7 @@ function OrcamentosPage() {
         type: "ok",
         text: `Editando ${quote.numeroInterno} — ${quote.clientName ?? quote.clientCode}.`,
       });
+      setMobileTab("montar");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error) {
       setFeedback({
@@ -946,20 +967,26 @@ function OrcamentosPage() {
 
   return (
     <AppShell mobileTitle="Orçamentos" searchPlaceholder="Buscar produtos...">
-      <div className="space-y-lg">
+      <div className="space-y-lg p-margin-mobile pb-32 md:p-margin-desktop md:pb-margin-desktop">
         <div className="flex flex-wrap items-end justify-between gap-md">
           <div>
             <h1 className="text-headline-sm text-primary">Orçamentos</h1>
-            <p className="text-body-md text-on-surface-variant">
+            <p className="hidden text-body-md text-on-surface-variant sm:block">
               Salve com número interno, imprima PDF, edite e envie à Omie (etapa 00).
             </p>
+            <p className="text-body-md text-on-surface-variant sm:hidden">
+              Monte, adicione produtos e envie à Omie.
+            </p>
           </div>
-          <div className="flex flex-wrap gap-sm">
+          <div className="flex w-full flex-wrap gap-sm sm:w-auto">
             {editingQuoteId ? (
               <button
                 type="button"
-                onClick={resetForm}
-                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary"
+                onClick={() => {
+                  resetForm();
+                  setMobileTab("montar");
+                }}
+                className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary sm:flex-none"
               >
                 <Icon name="add" className="text-[18px]" />
                 Novo orçamento
@@ -969,7 +996,7 @@ function OrcamentosPage() {
               type="button"
               disabled={syncingClients || apps.length === 0}
               onClick={handleSyncClients}
-              className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md text-primary disabled:opacity-50"
+              className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md text-primary disabled:opacity-50 sm:flex-none"
             >
               <Icon name={syncingClients ? "hourglass_empty" : "sync"} className="text-[18px]" />
               {syncingClients ? "Sincronizando..." : `Sync clientes (${clientCount})`}
@@ -978,12 +1005,57 @@ function OrcamentosPage() {
               type="button"
               disabled={syncing || apps.length === 0}
               onClick={handleSyncProducts}
-              className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50"
+              className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50 sm:flex-none"
             >
               <Icon name={syncing ? "hourglass_empty" : "sync"} className="text-[18px]" />
               {syncing ? "Sincronizando..." : `Sync produtos (${productCount})`}
             </button>
           </div>
+        </div>
+
+        <div className="sticky top-0 z-20 -mx-margin-mobile border-b border-outline-variant bg-background/95 px-margin-mobile py-sm backdrop-blur-md xl:hidden">
+          <div className="grid grid-cols-3 gap-xs rounded-xl bg-surface-container-low p-xs">
+            {(
+              [
+                { id: "montar" as const, label: "Montar", icon: "edit_note", badge: cart.length },
+                { id: "produtos" as const, label: "Produtos", icon: "inventory_2", badge: 0 },
+                {
+                  id: "salvos" as const,
+                  label: "Salvos",
+                  icon: "folder_open",
+                  badge: filteredQuotes.length,
+                },
+              ] as const
+            ).map((tab) => {
+              const active = mobileTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setMobileTab(tab.id)}
+                  className={cn(
+                    "relative flex flex-col items-center gap-0.5 rounded-lg px-xs py-sm text-label-md transition-colors",
+                    active
+                      ? "bg-surface font-semibold text-primary shadow-sm"
+                      : "text-on-surface-variant",
+                  )}
+                >
+                  <Icon name={tab.icon} filled={active} className="text-[20px]" />
+                  <span>{tab.label}</span>
+                  {tab.badge > 0 && tab.id !== "produtos" ? (
+                    <span className="absolute right-1 top-1 min-w-5 rounded-full bg-secondary-container px-1 text-center text-[0.65rem] font-bold text-on-secondary-container">
+                      {tab.badge > 99 ? "99+" : tab.badge}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+          {lastAddedLabel && mobileTab === "produtos" ? (
+            <p className="mt-sm truncate rounded-lg bg-emerald-50 px-sm py-xs text-label-md text-emerald-900">
+              + {lastAddedLabel}
+            </p>
+          ) : null}
         </div>
 
         {numeroInterno ? (
@@ -1027,8 +1099,18 @@ function OrcamentosPage() {
           </div>
         ) : null}
 
-        <div className="grid gap-lg xl:grid-cols-[1.1fr_0.9fr]">
-          <section className="space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+        <div
+          className={cn(
+            "grid gap-lg xl:grid-cols-[1.1fr_0.9fr]",
+            mobileTab === "salvos" && "hidden xl:grid",
+          )}
+        >
+          <section
+            className={cn(
+              "space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-md",
+              mobileTab === "produtos" && "hidden xl:block",
+            )}
+          >
             <div className="grid gap-md sm:grid-cols-2">
               <label className="block text-label-md text-on-surface-variant">
                 Empresa Omie
@@ -1420,11 +1502,134 @@ function OrcamentosPage() {
                 </div>
               ) : null}
               {cart.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-outline-variant px-md py-lg text-center text-body-md text-on-surface-variant">
-                  Adicione produtos na lista ao lado.
-                </p>
+                <div className="rounded-lg border border-dashed border-outline-variant px-md py-lg text-center">
+                  <p className="text-body-md text-on-surface-variant">
+                    Nenhum produto no orçamento ainda.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setMobileTab("produtos")}
+                    className="mt-sm inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary xl:hidden"
+                  >
+                    <Icon name="add" className="text-[18px]" />
+                    Escolher produtos
+                  </button>
+                  <p className="mt-sm hidden text-label-md text-on-surface-variant xl:block">
+                    Adicione produtos na lista ao lado.
+                  </p>
+                </div>
               ) : (
-                <div className="overflow-x-auto rounded-lg border border-outline-variant">
+                <>
+                  <div className="space-y-sm xl:hidden">
+                    {cart.map((item) => {
+                      const cmcEfetivo = effectiveCmc(item.cmc, item.cmcInterno);
+                      const sugerido = suggestedPriceFromCmc(cmcEfetivo, item.markup ?? undefined);
+                      const belowCmc = isUnitBelowCmc(item.valorUnitario, cmcEfetivo);
+                      const belowSuggested =
+                        !belowCmc && isUnitBelowSuggested(item.valorUnitario, sugerido);
+                      return (
+                        <article
+                          key={item.key}
+                          className="rounded-xl border border-outline-variant bg-surface p-md"
+                        >
+                          <div className="flex items-start justify-between gap-sm">
+                            <div className="min-w-0">
+                              <p className="text-title-md text-primary">{item.descricao}</p>
+                              <p className="text-label-md text-on-surface-variant">
+                                #{item.codigoProduto}
+                                {item.unidade ? ` · ${item.unidade}` : ""}
+                              </p>
+                            </div>
+                            {!locked ? (
+                              <button
+                                type="button"
+                                className="shrink-0 text-label-md text-red-700"
+                                onClick={() =>
+                                  setCart((prev) => prev.filter((row) => row.key !== item.key))
+                                }
+                              >
+                                Remover
+                              </button>
+                            ) : null}
+                          </div>
+                          <div className="mt-sm grid grid-cols-2 gap-sm">
+                            <label className="block text-label-md text-on-surface-variant">
+                              Qtd
+                              <input
+                                type="number"
+                                min={0.001}
+                                step="any"
+                                disabled={locked}
+                                value={item.quantidade}
+                                onChange={(event) => {
+                                  const value = Number(event.target.value);
+                                  setCart((prev) =>
+                                    prev.map((row) =>
+                                      row.key === item.key
+                                        ? {
+                                            ...row,
+                                            quantidade:
+                                              Number.isFinite(value) && value > 0 ? value : 1,
+                                          }
+                                        : row,
+                                    ),
+                                  );
+                                }}
+                                className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm disabled:opacity-60"
+                              />
+                            </label>
+                            <label className="block text-label-md text-on-surface-variant">
+                              Unitário
+                              <input
+                                type="number"
+                                min={0}
+                                step="any"
+                                disabled={locked}
+                                value={item.valorUnitario}
+                                onChange={(event) => {
+                                  const value = Number(event.target.value);
+                                  setCart((prev) =>
+                                    prev.map((row) =>
+                                      row.key === item.key
+                                        ? {
+                                            ...row,
+                                            valorUnitario:
+                                              Number.isFinite(value) && value >= 0 ? value : 0,
+                                          }
+                                        : row,
+                                    ),
+                                  );
+                                }}
+                                className={cn(
+                                  "mt-xs w-full rounded-lg border bg-surface px-sm py-sm disabled:opacity-60",
+                                  belowCmc
+                                    ? "border-red-400 font-semibold text-red-700"
+                                    : belowSuggested
+                                      ? "border-amber-400 font-semibold text-amber-800"
+                                      : "border-outline-variant",
+                                )}
+                              />
+                            </label>
+                          </div>
+                          <div className="mt-sm flex items-center justify-between gap-sm text-label-md">
+                            <span className="text-on-surface-variant">
+                              {cmcEfetivo != null ? `CMC ${formatMoney(cmcEfetivo)}` : "CMC —"}
+                              {sugerido != null ? ` · sug. ${formatMoney(sugerido)}` : ""}
+                            </span>
+                            <span className="font-semibold text-primary">
+                              {formatMoney(item.quantidade * item.valorUnitario)}
+                            </span>
+                          </div>
+                          {belowCmc ? (
+                            <p className="mt-xs text-label-md text-red-700">Abaixo do CMC</p>
+                          ) : belowSuggested ? (
+                            <p className="mt-xs text-label-md text-amber-800">Abaixo do sugerido</p>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                  <div className="hidden overflow-x-auto rounded-lg border border-outline-variant xl:block">
                   <table className="min-w-full text-left text-body-md">
                     <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
                       <tr>
@@ -1492,7 +1697,7 @@ function OrcamentosPage() {
                                   ),
                                 );
                               }}
-                              className={`w-28 rounded border bg-surface px-xs py-xs disabled:opacity-60 ${
+                              className={`w-28 rounded border bg-surface px-xs py-xs disabled:opacity-50 ${
                                 belowCmc
                                   ? "border-red-400 text-red-700 font-semibold"
                                   : belowSuggested
@@ -1529,7 +1734,8 @@ function OrcamentosPage() {
                       })}
                     </tbody>
                   </table>
-                </div>
+                  </div>
+                </>
               )}
             </div>
 
@@ -1597,9 +1803,17 @@ function OrcamentosPage() {
             </div>
           </section>
 
-          <section className="space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+          <section
+            className={cn(
+              "space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-md",
+              mobileTab === "montar" && "hidden xl:block",
+            )}
+          >
             <div>
               <p className="text-title-md text-on-surface">Produtos</p>
+              <p className="text-label-md text-on-surface-variant xl:hidden">
+                Toque em adicionar — o item entra no orçamento na hora.
+              </p>
               <input
                 value={productQuery}
                 onChange={(event) => setProductQuery(event.target.value)}
@@ -1614,7 +1828,7 @@ function OrcamentosPage() {
             ) : products.length === 0 ? (
               <p className="text-body-md text-on-surface-variant">Nenhum produto encontrado com esse filtro.</p>
             ) : (
-              <ul className="max-h-[34rem] space-y-xs overflow-auto">
+              <ul className="max-h-[min(34rem,calc(100dvh-16rem))] space-y-xs overflow-auto xl:max-h-[34rem]">
                 {products.map((product) => (
                   <li
                     key={`${product.codigoProduto}`}
@@ -1653,18 +1867,32 @@ function OrcamentosPage() {
                       type="button"
                       disabled={locked}
                       onClick={() => addProduct(product)}
-                      className="shrink-0 rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
+                      className="shrink-0 rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-primary hover:brightness-95 disabled:opacity-50 xl:border xl:border-outline-variant xl:bg-transparent xl:font-medium"
                     >
-                      Adicionar
+                      + Add
                     </button>
                   </li>
                 ))}
               </ul>
             )}
+            {cart.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setMobileTab("montar")}
+                className="flex w-full items-center justify-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary xl:hidden"
+              >
+                Ver orçamento ({cart.length}) · {formatMoney(total)}
+              </button>
+            ) : null}
           </section>
         </div>
 
-        <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+        <section
+          className={cn(
+            "rounded-xl border border-outline-variant bg-surface-container-lowest p-md",
+            mobileTab !== "salvos" && "hidden xl:block",
+          )}
+        >
           <div className="mb-sm flex flex-wrap items-end justify-between gap-md">
             <div>
               <p className="text-title-md text-on-surface">Orçamentos salvos</p>
@@ -1675,7 +1903,7 @@ function OrcamentosPage() {
               </p>
             </div>
             {quotes.length > 0 ? (
-              <div className="flex w-full flex-wrap gap-sm sm:w-auto">
+              <div className="flex w-full flex-wrap items-end gap-sm sm:w-auto">
                 <input
                   value={quotesFilter}
                   onChange={(event) => setQuotesFilter(event.target.value)}
@@ -1694,6 +1922,21 @@ function OrcamentosPage() {
                   <option value="sent">Enviados Omie</option>
                   <option value="error">Com erro</option>
                 </select>
+                <label className="block space-y-xs">
+                  <span className="text-label-md text-on-surface-variant">Por página</span>
+                  <select
+                    value={quotesPageSize}
+                    onChange={(event) =>
+                      setQuotesPageSize(Number(event.target.value) as QuotesPageSize)
+                    }
+                    className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md sm:w-28"
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </label>
               </div>
             ) : null}
           </div>
@@ -1702,7 +1945,97 @@ function OrcamentosPage() {
           ) : filteredQuotes.length === 0 ? (
             <p className="text-body-md text-on-surface-variant">Nenhum orçamento encontrado com esse filtro.</p>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              <div className="space-y-sm xl:hidden">
+                {pagedQuotes.items.map((quote) => (
+                  <article
+                    key={quote.id}
+                    className="rounded-xl border border-outline-variant bg-surface p-md"
+                  >
+                    <div className="flex items-start justify-between gap-sm">
+                      <div className="min-w-0">
+                        <p className="text-title-md text-primary">
+                          {quote.numeroInterno || `#${quote.id}`}
+                        </p>
+                        <p className="truncate text-body-md text-on-surface">
+                          {quote.clientName ?? quote.clientCode}
+                        </p>
+                        <p className="text-label-md text-on-surface-variant">
+                          {statusLabel(quote.status, quote.error)}
+                          {quote.createdByName ? ` · ${quote.createdByName}` : ""}
+                        </p>
+                      </div>
+                      <p className="shrink-0 text-title-md font-semibold text-primary">
+                        {quote.total != null ? formatMoney(quote.total) : "—"}
+                      </p>
+                    </div>
+                    <p className="mt-xs text-label-md text-on-surface-variant">
+                      {quote.createdAt ? new Date(quote.createdAt).toLocaleString("pt-BR") : "—"}
+                    </p>
+                    <div className="mt-sm flex flex-wrap gap-xs">
+                      <button
+                        type="button"
+                        disabled={loadingQuote}
+                        onClick={() => void handleLoadQuote(quote.id)}
+                        className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary disabled:opacity-50"
+                      >
+                        <Icon
+                          name={quote.status === "sent" ? "visibility" : "edit"}
+                          className="text-[16px]"
+                        />
+                        {quote.status === "sent" ? "Ver" : "Editar"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={duplicatingQuoteId === quote.id || loadingQuote}
+                        onClick={() => void handleDuplicateQuote(quote.id)}
+                        className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary disabled:opacity-50"
+                      >
+                        <Icon
+                          name={duplicatingQuoteId === quote.id ? "hourglass_empty" : "file_copy"}
+                          className="text-[16px]"
+                        />
+                        Duplicar
+                      </button>
+                      {quote.status !== "sent" ? (
+                        <button
+                          type="button"
+                          disabled={sending}
+                          onClick={() => void handleSendSaved(quote.id)}
+                          className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md text-on-secondary-container disabled:opacity-50"
+                        >
+                          <Icon name={sending ? "hourglass_empty" : "send"} className="text-[16px]" />
+                          Omie
+                        </button>
+                      ) : omieCodigoLabel(quote) ? (
+                        <button
+                          type="button"
+                          onClick={() => copyOmieCodigo(omieCodigoLabel(quote)!)}
+                          className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary"
+                        >
+                          <Icon name="content_copy" className="text-[16px]" />
+                          Omie {omieCodigoLabel(quote)}
+                        </button>
+                      ) : null}
+                      {canDeleteQuotes ? (
+                        <button
+                          type="button"
+                          disabled={deletingQuoteId === quote.id}
+                          onClick={() => handleDeleteQuote(quote)}
+                          className="inline-flex items-center gap-xs rounded-lg border border-red-200 bg-red-50 px-sm py-xs text-label-md text-red-700 disabled:opacity-50"
+                        >
+                          <Icon
+                            name={deletingQuoteId === quote.id ? "hourglass_empty" : "delete"}
+                            className="text-[16px]"
+                          />
+                          Excluir
+                        </button>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto xl:block">
               <table className="min-w-full text-left text-body-md">
                 <thead className="text-label-md text-on-surface-variant">
                   <tr>
@@ -1716,7 +2049,7 @@ function OrcamentosPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredQuotes.map((quote) => (
+                  {pagedQuotes.items.map((quote) => (
                     <tr key={quote.id} className="border-t border-outline-variant">
                       <td className="px-sm py-xs font-medium">{quote.numeroInterno || "—"}</td>
                       <td className="px-sm py-xs">{quote.clientName ?? quote.clientCode}</td>
@@ -1796,9 +2129,54 @@ function OrcamentosPage() {
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+              <TablePager
+                page={pagedQuotes.page}
+                totalPages={pagedQuotes.totalPages}
+                totalItems={pagedQuotes.totalItems}
+                pageSize={quotesPageSize}
+                onPageChange={setQuotesPage}
+                className="-mx-md mt-sm border-outline-variant/60"
+              />
+            </>
           )}
         </section>
+
+        {mobileTab === "montar" ? (
+          <div
+            className="fixed inset-x-0 z-30 border-t border-outline-variant bg-surface/95 px-margin-mobile py-sm backdrop-blur-md xl:hidden"
+            style={{
+              bottom: "calc(4.75rem + env(safe-area-inset-bottom, 0px))",
+            }}
+          >
+            <div className="flex items-center gap-sm">
+              <div className="min-w-0 flex-1">
+                <p className="text-label-md text-on-surface-variant">
+                  {cart.length} item(ns)
+                  {selectedClient ? ` · ${selectedClient.nome}` : " · sem cliente"}
+                </p>
+                <p className="truncate text-title-md font-semibold text-primary">
+                  {formatMoney(total)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileTab("produtos")}
+                className="rounded-lg border border-outline-variant px-sm py-sm text-label-md text-primary"
+              >
+                + Produtos
+              </button>
+              <button
+                type="button"
+                disabled={saving || locked || !selectedClient || cart.length === 0}
+                onClick={() => void handleSave()}
+                className="rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary disabled:opacity-50"
+              >
+                {saving ? "..." : editingQuoteId ? "Atualizar" : "Salvar"}
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <AlertDialog

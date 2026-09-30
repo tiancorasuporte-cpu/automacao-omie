@@ -10,6 +10,7 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import type { AppUser } from "@/db/schema";
+import { PwaInstallBanner } from "@/components/PwaInstall";
 import { getCurrentUser } from "@/lib/auth";
 import { APP_NAME } from "@/lib/brand";
 import appCss from "../styles.css?url";
@@ -80,13 +81,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient; user
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
       { title: `${APP_NAME} — Alertas de vencimento` },
       {
         name: "description",
         content:
           "Integração Omie para boletos com alertas WhatsApp via WAHA.",
       },
+      { name: "theme-color", content: "#000000" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "default" },
+      { name: "apple-mobile-web-app-title", content: "Âncora" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -105,11 +111,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient; user
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap",
       },
+      { rel: "manifest", href: "/manifest.webmanifest" },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
       { rel: "icon", href: "/favicon-16.png", type: "image/png", sizes: "16x16" },
       { rel: "icon", href: "/favicon-32.png", type: "image/png", sizes: "32x32" },
       { rel: "icon", href: "/ancora-logo.png", type: "image/png", sizes: "any" },
-      { rel: "apple-touch-icon", href: "/ancora-logo.png" },
+      { rel: "apple-touch-icon", href: "/pwa-192.png" },
     ],
   }),
 
@@ -140,6 +147,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
+      <PwaInstallBanner />
     </QueryClientProvider>
   );
 }

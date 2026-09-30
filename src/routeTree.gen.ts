@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConversasRouteImport } from './routes/conversas'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as FacilitiesRouteImport } from './routes/facilities'
 import { Route as NotificacoesRouteImport } from './routes/notificacoes'
 import { Route as OrcamentosRouteImport } from './routes/orcamentos'
 import { Route as ProdutosRouteImport } from './routes/produtos'
@@ -35,6 +36,11 @@ const ConversasRoute = ConversasRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FacilitiesRoute = FacilitiesRouteImport.update({
+  id: '/facilities',
+  path: '/facilities',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NotificacoesRoute = NotificacoesRouteImport.update({
@@ -87,6 +93,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
+  '/facilities': typeof FacilitiesRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
   '/produtos': typeof ProdutosRoute
@@ -101,6 +108,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
+  '/facilities': typeof FacilitiesRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
   '/produtos': typeof ProdutosRoute
@@ -116,6 +124,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
+  '/facilities': typeof FacilitiesRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
   '/produtos': typeof ProdutosRoute
@@ -132,6 +141,7 @@ export interface FileRouteTypes {
     | '/'
     | '/conversas'
     | '/dashboard'
+    | '/facilities'
     | '/notificacoes'
     | '/orcamentos'
     | '/produtos'
@@ -146,6 +156,7 @@ export interface FileRouteTypes {
     | '/'
     | '/conversas'
     | '/dashboard'
+    | '/facilities'
     | '/notificacoes'
     | '/orcamentos'
     | '/produtos'
@@ -160,6 +171,7 @@ export interface FileRouteTypes {
     | '/'
     | '/conversas'
     | '/dashboard'
+    | '/facilities'
     | '/notificacoes'
     | '/orcamentos'
     | '/produtos'
@@ -175,6 +187,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ConversasRoute: typeof ConversasRoute
   DashboardRoute: typeof DashboardRoute
+  FacilitiesRoute: typeof FacilitiesRoute
   NotificacoesRoute: typeof NotificacoesRoute
   OrcamentosRoute: typeof OrcamentosRoute
   ProdutosRoute: typeof ProdutosRoute
@@ -207,6 +220,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/facilities': {
+      id: '/facilities'
+      path: '/facilities'
+      fullPath: '/facilities'
+      preLoaderRoute: typeof FacilitiesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/notificacoes': {
@@ -279,6 +299,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ConversasRoute: ConversasRoute,
   DashboardRoute: DashboardRoute,
+  FacilitiesRoute: FacilitiesRoute,
   NotificacoesRoute: NotificacoesRoute,
   OrcamentosRoute: OrcamentosRoute,
   ProdutosRoute: ProdutosRoute,

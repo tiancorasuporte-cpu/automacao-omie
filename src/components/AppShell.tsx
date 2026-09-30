@@ -37,6 +37,7 @@ const NAV: Array<{
     | "/vencimentos"
     | "/orcamentos"
     | "/produtos"
+    | "/facilities"
     | "/notificacoes"
     | "/settings"
     | "/users";
@@ -50,6 +51,7 @@ const NAV: Array<{
   { to: "/vencimentos", label: "Vencimentos", icon: "event", module: "vencimentos" },
   { to: "/orcamentos", label: "Orçamentos", icon: "request_quote", module: "orcamentos" },
   { to: "/produtos", label: "Produtos", icon: "inventory_2", module: "produtos" },
+  { to: "/facilities", label: "Facilities", icon: "apartment", module: "facilities" },
   { to: "/notificacoes", label: "Notificações", icon: "history", module: "notificacoes" },
   { to: "/settings", label: "Configurações", icon: "settings", adminOnly: true },
   { to: "/users", label: "Usuários", icon: "manage_accounts", adminOnly: true },
@@ -97,6 +99,64 @@ function NavList({
           </Link>
         );
       })}
+    </nav>
+  );
+}
+
+function MobileBottomNav({
+  pathname,
+  user,
+}: {
+  pathname: string;
+  user: AppUser | null;
+}) {
+  const items = NAV.filter((item) => {
+    if (item.adminOnly) return false;
+    if (item.module) return canAccessModule(user, item.module);
+    return true;
+  });
+  if (items.length === 0) return null;
+
+  return (
+    <nav
+      aria-label="Módulos"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-outline-variant bg-surface/95 backdrop-blur-md md:hidden"
+      style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+    >
+      <div className="flex items-stretch overflow-x-auto px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {items.map((item) => {
+          const active = pathname === item.to || pathname.startsWith(`${item.to}/`);
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              className={cn(
+                "flex min-w-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 px-2 py-2 text-center transition-colors",
+                active
+                  ? "text-primary"
+                  : "text-on-surface-variant active:bg-surface-container-high",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                  active && "bg-secondary-container text-on-secondary-container",
+                )}
+              >
+                <Icon name={item.icon} filled={active} className="text-[22px]" />
+              </span>
+              <span
+                className={cn(
+                  "max-w-[4.75rem] truncate text-[0.65rem] leading-tight",
+                  active ? "font-bold" : "font-medium",
+                )}
+              >
+                {item.label}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
     </nav>
   );
 }
@@ -311,11 +371,14 @@ export function AppShell({
             <ProfileMenu user={user} />
           </header>
           {fullHeight ? (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:pb-0">
+              {children}
+            </div>
           ) : (
-            children
+            <div className="pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:pb-0">{children}</div>
           )}
         </div>
+        <MobileBottomNav pathname={pathname} user={user} />
         {!fullHeight ? <HelpChat /> : null}
       </div>
     </ShellSearchContext.Provider>
