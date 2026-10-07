@@ -133,7 +133,7 @@ export function HelpChat() {
   }
 
   return (
-    <div className="pointer-events-none fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] right-margin-mobile z-[55] flex flex-col items-end gap-sm md:bottom-margin-desktop md:right-margin-desktop">
+    <div className="pointer-events-none fixed bottom-margin-desktop right-margin-desktop z-[55] hidden flex-col items-end gap-sm md:flex">
       {open ? (
         <section
           className="pointer-events-auto flex h-[min(32rem,calc(100vh-7rem))] w-[min(22.5rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl bg-surface-container-lowest shadow-[0_24px_60px_-28px_color-mix(in_oklch,var(--primary)_45%,transparent)] ring-1 ring-outline-variant/80 animate-[login-rise_0.35s_cubic-bezier(0.22,1,0.36,1)_both]"

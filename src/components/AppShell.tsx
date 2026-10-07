@@ -38,6 +38,7 @@ const NAV: Array<{
     | "/orcamentos"
     | "/produtos"
     | "/facilities"
+    | "/uniformes"
     | "/notificacoes"
     | "/settings"
     | "/users";
@@ -52,6 +53,7 @@ const NAV: Array<{
   { to: "/orcamentos", label: "Orçamentos", icon: "request_quote", module: "orcamentos" },
   { to: "/produtos", label: "Produtos", icon: "inventory_2", module: "produtos" },
   { to: "/facilities", label: "Facilities", icon: "apartment", module: "facilities" },
+  { to: "/uniformes", label: "Uniformes", icon: "checkroom", module: "uniformes" },
   { to: "/notificacoes", label: "Notificações", icon: "history", module: "notificacoes" },
   { to: "/settings", label: "Configurações", icon: "settings", adminOnly: true },
   { to: "/users", label: "Usuários", icon: "manage_accounts", adminOnly: true },

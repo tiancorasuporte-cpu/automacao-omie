@@ -19,6 +19,7 @@ import { Route as ProdutosRouteImport } from './routes/produtos'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
+import { Route as UniformesRouteImport } from './routes/uniformes'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as VencimentosRouteImport } from './routes/vencimentos'
 import { Route as ApiWahaWebhookRouteImport } from './routes/api/waha/webhook'
@@ -73,6 +74,11 @@ const SetupRoute = SetupRouteImport.update({
   path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const UniformesRoute = UniformesRouteImport.update({
+  id: '/uniformes',
+  path: '/uniformes',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UsersRoute = UsersRouteImport.update({
   id: '/users',
   path: '/users',
@@ -100,6 +106,7 @@ export interface FileRoutesByFullPath {
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
+  '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
@@ -115,6 +122,7 @@ export interface FileRoutesByTo {
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
+  '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
@@ -131,6 +139,7 @@ export interface FileRoutesById {
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
+  '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
@@ -148,6 +157,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/settings'
     | '/setup'
+    | '/uniformes'
     | '/users'
     | '/vencimentos'
     | '/api/waha/webhook'
@@ -163,6 +173,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/settings'
     | '/setup'
+    | '/uniformes'
     | '/users'
     | '/vencimentos'
     | '/api/waha/webhook'
@@ -178,6 +189,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/settings'
     | '/setup'
+    | '/uniformes'
     | '/users'
     | '/vencimentos'
     | '/api/waha/webhook'
@@ -194,6 +206,7 @@ export interface RootRouteChildren {
   ProfileRoute: typeof ProfileRoute
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
+  UniformesRoute: typeof UniformesRoute
   UsersRoute: typeof UsersRoute
   VencimentosRoute: typeof VencimentosRoute
   ApiWahaWebhookRoute: typeof ApiWahaWebhookRoute
@@ -271,6 +284,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/uniformes': {
+      id: '/uniformes'
+      path: '/uniformes'
+      fullPath: '/uniformes'
+      preLoaderRoute: typeof UniformesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/users': {
       id: '/users'
       path: '/users'
@@ -306,6 +326,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProfileRoute: ProfileRoute,
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
+  UniformesRoute: UniformesRoute,
   UsersRoute: UsersRoute,
   VencimentosRoute: VencimentosRoute,
   ApiWahaWebhookRoute: ApiWahaWebhookRoute,

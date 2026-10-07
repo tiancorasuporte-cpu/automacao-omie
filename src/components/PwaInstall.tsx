@@ -79,7 +79,7 @@ export function PwaInstallBanner() {
   return (
     <div
       className={cn(
-        "fixed inset-x-margin-mobile bottom-[calc(9.5rem+env(safe-area-inset-bottom,0px))] z-40 rounded-xl border border-outline-variant bg-surface-container-lowest p-md shadow-lg md:bottom-lg md:left-auto md:right-lg md:w-[min(22rem,calc(100vw-2rem))]",
+        "fixed inset-x-margin-mobile bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] z-40 rounded-xl border border-outline-variant bg-surface-container-lowest p-md shadow-lg md:bottom-lg md:left-auto md:right-lg md:w-[min(22rem,calc(100vw-2rem))]",
       )}
     >
       <div className="flex items-start gap-sm">

@@ -448,6 +448,139 @@ export async function ensureSchema() {
     );
   }
 
+  if (!(await tableExists("uniform_collaborators"))) {
+    await sql`
+      create table uniform_collaborators (
+        id serial primary key,
+        nome varchar(200) not null,
+        matricula varchar(40),
+        departamento varchar(120),
+        cargo varchar(120),
+        telefone varchar(32),
+        tamanho_camisa varchar(12),
+        tamanho_calca varchar(12),
+        tamanho_calcado varchar(12),
+        facilities_collaborator_id integer unique references facilities_collaborators(id) on delete set null,
+        observacao text,
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("uniform_items"))) {
+    await sql`
+      create table uniform_items (
+        id serial primary key,
+        nome varchar(200) not null,
+        categoria varchar(60),
+        tamanho varchar(20),
+        quantidade integer not null default 0 check (quantidade >= 0),
+        estoque_minimo integer not null default 0 check (estoque_minimo >= 0),
+        custo numeric(12, 2) not null default 0,
+        vida_util_meses integer check (vida_util_meses is null or vida_util_meses > 0),
+        foto text,
+        foto_thumb text,
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("uniform_movements"))) {
+    await sql`
+      create table uniform_movements (
+        id serial primary key,
+        collaborator_id integer not null references uniform_collaborators(id),
+        tipo varchar(16) not null,
+        observacao text,
+        assinatura text,
+        status varchar(16) not null default 'ativo',
+        estorno_motivo text,
+        estornado_em timestamptz,
+        estornado_por integer references users(id) on delete set null,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("uniform_movements_collab_idx"))) {
+    await sql.unsafe(
+      "create index uniform_movements_collab_idx on uniform_movements (collaborator_id, created_at desc)",
+    );
+  }
+
+  if (!(await tableExists("uniform_movement_items"))) {
+    await sql`
+      create table uniform_movement_items (
+        id serial primary key,
+        movement_id integer not null references uniform_movements(id) on delete cascade,
+        item_id integer not null references uniform_items(id),
+        direcao varchar(8) not null,
+        condicao varchar(20),
+        descricao varchar(200) not null,
+        tamanho varchar(20),
+        quantidade integer not null check (quantidade > 0),
+        custo_unitario numeric(12, 2) not null default 0,
+        proxima_troca date
+      )
+    `;
+  }
+  if (!(await indexExists("uniform_movement_items_movement_idx"))) {
+    await sql.unsafe(
+      "create index uniform_movement_items_movement_idx on uniform_movement_items (movement_id)",
+    );
+  }
+
+  if (!(await tableExists("uniform_movement_photos"))) {
+    await sql`
+      create table uniform_movement_photos (
+        id serial primary key,
+        movement_id integer not null references uniform_movements(id) on delete cascade,
+        foto text not null,
+        thumb text not null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("uniform_stock_moves"))) {
+    await sql`
+      create table uniform_stock_moves (
+        id serial primary key,
+        item_id integer not null references uniform_items(id),
+        tipo varchar(16) not null,
+        quantidade integer not null,
+        saldo_apos integer not null,
+        custo_unitario numeric(12, 2),
+        fornecedor varchar(160),
+        documento varchar(80),
+        motivo text,
+        movement_id integer references uniform_movements(id) on delete set null,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("uniform_stock_moves_item_idx"))) {
+    await sql.unsafe(
+      "create index uniform_stock_moves_item_idx on uniform_stock_moves (item_id, created_at desc)",
+    );
+  }
+
+  for (const table of ["uniform_collaborators", "uniform_items", "uniform_movements"]) {
+    if (!(await columnExists(table, "origem_id"))) {
+      await sql.unsafe(`alter table ${table} add column origem_id varchar(64)`);
+    }
+    if (!(await indexExists(`${table}_origem_idx`))) {
+      await sql.unsafe(
+        `create unique index ${table}_origem_idx on ${table} (origem_id) where origem_id is not null`,
+      );
+    }
+  }
+
   const superUsername = process.env["APP_SUPERADMIN_USERNAME"] ?? "superadmin";
   const superPassword = process.env["APP_SUPERADMIN_PASSWORD"] ?? "ancora";
   const superName = process.env["APP_SUPERADMIN_NAME"] ?? "Super Admin";

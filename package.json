@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "db:setup": "bun scripts/setup-db.ts",
+    "uniformes:importar": "bun scripts/import-uniform-tracker.ts",
     "bot:listen": "bun scripts/waha-bot-listener.ts",
     "bot:stop": "bun scripts/waha-bot-stop.ts"
   },
