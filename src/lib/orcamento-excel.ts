@@ -1,7 +1,7 @@
 /** Nome sugerido ao salvar: Nome-do-Cliente - ORC-2026-00001 */
 export function buildOrcamentoFileBaseName(input: {
-  numeroInterno?: string | null;
-  clienteNome?: string | null;
+  numeroInterno?: string | null | undefined;
+  clienteNome?: string | null | undefined;
 }) {
   const numero = (input.numeroInterno ?? "orcamento").trim() || "orcamento";
   const cliente = (input.clienteNome ?? "cliente")
@@ -38,6 +38,8 @@ export type OrcamentoExcelOptions = {
   clienteNome: string;
   clienteCnpj?: string | null;
   clienteCodigo?: number | null;
+  clienteEndereco?: string | null;
+  contato?: string | null;
   numeroInterno?: string | null;
   criadoPor?: string | null;
   dataPrevisao: string;
@@ -227,11 +229,21 @@ export function buildOrcamentoExcelXml(options: OrcamentoExcelOptions) {
         ].join("")}</Row>`
       : "";
 
-  const obsXml = options.observacao?.trim()
-    ? `<Row/><Row ss:AutoFitHeight="0" ss:Height="20">${cellString(
-        "Observação",
-        "metaLabel",
-      )}${cellString(options.observacao.trim(), "metaValue", 6)}</Row>`
+  const clienteInfo: Array<[string, string]> = [];
+  if (options.contato?.trim()) clienteInfo.push(["A/C", options.contato.trim()]);
+  if (options.clienteEndereco?.trim()) clienteInfo.push(["Endereço", options.clienteEndereco.trim()]);
+  if (options.observacao?.trim()) clienteInfo.push(["Observação", options.observacao.trim()]);
+  const obsXml = clienteInfo.length
+    ? `<Row/>${clienteInfo
+        .map(
+          ([label, value]) =>
+            `<Row ss:AutoFitHeight="0" ss:Height="20">${cellString(label, "metaLabel")}${cellString(
+              value,
+              "metaValue",
+              6,
+            )}</Row>`,
+        )
+        .join("\n      ")}`
     : "";
 
   const servicosList = (options.servicosMensais ?? []).filter(

@@ -16,6 +16,8 @@ export type OrcamentoPdfOptions = {
   clienteNome: string;
   clienteCnpj?: string | null;
   clienteCodigo?: number | null;
+  clienteEndereco?: string | null;
+  contato?: string | null;
   numeroInterno?: string | null;
   criadoPor?: string | null;
   dataPrevisao: string;
@@ -216,11 +218,24 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
         <div class="value">${escapeHtml(options.clienteNome)}</div>
         ${clienteCnpj ? `<div class="meta">CNPJ/CPF ${escapeHtml(clienteCnpj)}</div>` : ""}
         ${
+          options.clienteEndereco?.trim()
+            ? `<div class="meta">${escapeHtml(options.clienteEndereco.trim())}</div>`
+            : ""
+        }
+        ${
           options.clienteCodigo
             ? `<div class="meta">Código Omie ${options.clienteCodigo}</div>`
             : ""
         }
       </div>
+      ${
+        options.contato?.trim()
+          ? `<div>
+        <div class="label">A/C (aos cuidados de)</div>
+        <div class="value">${escapeHtml(options.contato.trim())}</div>
+      </div>`
+          : ""
+      }
       <div>
         <div class="label">Previsão</div>
         <div class="value">${escapeHtml(formatDateBr(options.dataPrevisao))}</div>

@@ -27,6 +27,7 @@ import {
   createOrcamentoFn,
   deactivateMonthlyServiceFn,
   deleteOrcamentoFn,
+  getOmieClientDetailsFn,
   getOrcamentoEmpresaFn,
   getOrcamentoFn,
   getOrcamentosBootstrapFn,
@@ -112,13 +113,22 @@ function OrcamentosPage() {
   const [copiedOmieCode, setCopiedOmieCode] = useState(false);
   const [clientQuery, setClientQuery] = useState("");
   const [clientResults, setClientResults] = useState<
-    Array<{ codigo: number; nome: string; cnpjCpf: string | null }>
+    Array<{
+      codigo: number;
+      nome: string;
+      cnpjCpf: string | null;
+      endereco?: string | null;
+      contato?: string | null;
+    }>
   >([]);
   const [selectedClient, setSelectedClient] = useState<{
     codigo: number;
     nome: string;
     cnpjCpf: string | null;
   } | null>(null);
+  const [contato, setContato] = useState("");
+  const [clientAddress, setClientAddress] = useState("");
+  const [loadingClientAddress, setLoadingClientAddress] = useState(false);
   const [productQuery, setProductQuery] = useState("");
   const [products, setProducts] = useState<
     Array<{
@@ -264,6 +274,25 @@ function OrcamentosPage() {
     return () => clearTimeout(timer);
   }, [omieAppId, clientQuery, selectedClient]);
 
+  async function selectClient(client: (typeof clientResults)[number]) {
+    setSelectedClient({ codigo: client.codigo, nome: client.nome, cnpjCpf: client.cnpjCpf });
+    setClientQuery(client.nome);
+    setClientResults([]);
+    setClientAddress(client.endereco ?? "");
+    if (!contato.trim() && client.contato) setContato(client.contato);
+    if (client.endereco) return;
+    setLoadingClientAddress(true);
+    try {
+      const details = await getOmieClientDetailsFn({ data: { clientCode: client.codigo } });
+      if (details.endereco) setClientAddress((current) => current || details.endereco || "");
+      if (details.contato) setContato((current) => current || details.contato || "");
+    } catch {
+      // endereço pode ser digitado manualmente
+    } finally {
+      setLoadingClientAddress(false);
+    }
+  }
+
   async function refreshQuotes() {
     const boot = await getOrcamentosBootstrapFn();
     setQuotes(boot.quotes);
@@ -308,6 +337,8 @@ function OrcamentosPage() {
     setCopiedOmieCode(false);
     setSelectedClient(null);
     setClientQuery("");
+    setContato("");
+    setClientAddress("");
     setCart([]);
     setObservacao("");
     setDataPrevisao(todayIso());
@@ -431,6 +462,8 @@ function OrcamentosPage() {
       omieAppId,
       clientCode: selectedClient.codigo,
       clientName: selectedClient.nome,
+      contato: contato.trim() || null,
+      clientAddress: clientAddress.trim() || null,
       observacao: observacao || null,
       dataPrevisao,
       comServicoMensal,
@@ -684,6 +717,8 @@ function OrcamentosPage() {
       setClientQuery(
         result.clienteNomeCompleto ?? quote.clientName ?? "",
       );
+      setContato(result.clienteContato ?? "");
+      setClientAddress(result.clienteEndereco ?? "");
       setObservacao(quote.observacao ?? "");
       setDataPrevisao(quote.dataPrevisao ?? todayIso());
       const loadedServicos =
@@ -779,6 +814,8 @@ function OrcamentosPage() {
           omieAppId: quote.omieAppId || omieAppId,
           clientCode: quote.clientCode,
           clientName: result.clienteNomeCompleto ?? quote.clientName,
+          contato: quote.contato,
+          clientAddress: result.clienteEndereco,
           observacao: quote.observacao,
           dataPrevisao: todayIso(),
           comServicoMensal: loadedServicos.length > 0,
@@ -857,6 +894,8 @@ function OrcamentosPage() {
       clienteNome: selectedClient?.nome ?? "Cliente não informado",
       clienteCodigo: selectedClient?.codigo ?? null,
       clienteCnpj: selectedClient?.cnpjCpf ?? null,
+      clienteEndereco: clientAddress.trim() || null,
+      contato: contato.trim() || null,
       empresaNome,
       empresaCnpj,
     };
@@ -881,6 +920,8 @@ function OrcamentosPage() {
         empresaCnpj: saved.empresaCnpj,
         clienteNome: saved.clienteNome,
         clienteCnpj: saved.clienteCnpj,
+        clienteEndereco: saved.clienteEndereco,
+        contato: saved.contato,
         clienteCodigo: saved.clienteCodigo,
         numeroInterno: saved.numero,
         criadoPor: saved.elaborador,
@@ -930,6 +971,8 @@ function OrcamentosPage() {
         empresaCnpj: saved.empresaCnpj,
         clienteNome: saved.clienteNome,
         clienteCnpj: saved.clienteCnpj,
+        clienteEndereco: saved.clienteEndereco,
+        contato: saved.contato,
         clienteCodigo: saved.clienteCodigo,
         numeroInterno: saved.numero,
         criadoPor: saved.elaborador,
@@ -1152,6 +1195,7 @@ function OrcamentosPage() {
                       onClick={() => {
                         setSelectedClient(null);
                         setClientQuery("");
+                        setClientAddress("");
                       }}
                     >
                       Trocar
@@ -1180,11 +1224,7 @@ function OrcamentosPage() {
                           <button
                             type="button"
                             className="block w-full px-sm py-sm text-left text-body-md hover:bg-surface-container-high"
-                            onClick={() => {
-                              setSelectedClient(client);
-                              setClientQuery(client.nome);
-                              setClientResults([]);
-                            }}
+                            onClick={() => void selectClient(client)}
                           >
                             {client.nome}
                             <span className="ml-xs text-label-md text-on-surface-variant">
@@ -1198,6 +1238,37 @@ function OrcamentosPage() {
                   ) : null}
                 </div>
               )}
+            </div>
+
+            <div className="grid gap-sm sm:grid-cols-2">
+              <label className="block text-label-md text-on-surface-variant">
+                A/C (pessoa de contato)
+                <input
+                  value={contato}
+                  disabled={locked}
+                  onChange={(event) => setContato(event.target.value)}
+                  maxLength={160}
+                  placeholder="Ex.: João Silva — Compras"
+                  className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md disabled:opacity-60"
+                />
+              </label>
+              <label className="block text-label-md text-on-surface-variant">
+                Endereço do cliente
+                <input
+                  value={clientAddress}
+                  disabled={locked || !selectedClient}
+                  onChange={(event) => setClientAddress(event.target.value)}
+                  maxLength={500}
+                  placeholder={
+                    loadingClientAddress
+                      ? "Buscando endereço no Omie..."
+                      : selectedClient
+                        ? "Rua, número - bairro - cidade/UF - CEP"
+                        : "Selecione o cliente"
+                  }
+                  className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md disabled:opacity-60"
+                />
+              </label>
             </div>
 
             <label className="block text-label-md text-on-surface-variant">

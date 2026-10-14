@@ -13,7 +13,34 @@ export type ClienteResumo = {
   telefone2_ddd: string;
   telefone2_numero: string;
   celular: string;
+  endereco: string | null;
+  contato: string | null;
 };
+
+function text(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function formatCep(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits.length === 8 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : value;
+}
+
+export function formatClienteEndereco(root: Record<string, unknown>) {
+  const rua = text(root["endereco"]);
+  const numero = text(root["endereco_numero"]);
+  const complemento = text(root["complemento"]);
+  const bairro = text(root["bairro"]);
+  const cidade = text(root["cidade"]);
+  const estado = text(root["estado"]);
+  const cep = text(root["cep"]);
+
+  const linha1 = [rua, numero].filter(Boolean).join(", ");
+  const cidadeUf = cidade && estado && !cidade.includes("(") ? `${cidade}/${estado}` : cidade || estado;
+  const parts = [linha1, complemento, bairro, cidadeUf].filter(Boolean);
+  if (cep) parts.push(`CEP ${formatCep(cep)}`);
+  return parts.length ? parts.join(" - ") : null;
+}
 
 const clientCache = new Map<string, ClienteResumo>();
 
@@ -36,6 +63,8 @@ export function normalizeCliente(raw: Record<string, unknown>, fallbackCode?: nu
     telefone2_ddd: String(root["telefone2_ddd"] ?? ""),
     telefone2_numero: String(root["telefone2_numero"] ?? ""),
     celular: String(root["celular"] ?? root["telefone_celular"] ?? root["fone"] ?? root["cTel"] ?? ""),
+    endereco: formatClienteEndereco(root),
+    contato: text(root["contato"]) || null,
   };
 }
 
@@ -247,6 +276,8 @@ export async function syncOmieClientsForApp(app: OmieAppConfig) {
       razaoSocial: client.razao_social || client.nome_fantasia || `Cliente ${client.codigo_cliente_omie}`,
       nomeFantasia: client.nome_fantasia || null,
       cnpjCpf: client.cnpj_cpf,
+      endereco: client.endereco,
+      contato: client.contato,
       inactive: clientInactive(raw),
     });
     count += 1;

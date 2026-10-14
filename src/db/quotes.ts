@@ -17,6 +17,8 @@ export type Quote = {
   omieAppName: string;
   clientCode: number;
   clientName: string | null;
+  contato: string | null;
+  clientAddress: string | null;
   numeroInterno: string;
   omiePedidoCode: number | null;
   integrationCode: string | null;
@@ -76,6 +78,8 @@ function mapQuote(r: Record<string, unknown>): Quote {
     omieAppName: String(r["omie_app_name"] ?? ""),
     clientCode: toNumber(r["client_code"]),
     clientName: r["client_name"] == null ? null : String(r["client_name"]),
+    contato: r["contato"] == null ? null : String(r["contato"]),
+    clientAddress: r["client_address"] == null ? null : String(r["client_address"]),
     numeroInterno: String(r["numero_interno"] ?? ""),
     omiePedidoCode: r["omie_pedido_code"] == null ? null : toNumber(r["omie_pedido_code"]),
     integrationCode: r["integration_code"] == null ? null : String(r["integration_code"]),
@@ -124,6 +128,8 @@ export async function createQuoteRecord(input: {
   omieAppName: string;
   clientCode: number;
   clientName?: string | null;
+  contato?: string | null;
+  clientAddress?: string | null;
   numeroInterno?: string;
   dataPrevisao?: string | null;
   observacao?: string | null;
@@ -138,11 +144,12 @@ export async function createQuoteRecord(input: {
   const firstServico = input.servicosMensais?.[0] ?? null;
   const rows = (await db`
     insert into quotes (
-      omie_app_id, omie_app_name, client_code, client_name,
+      omie_app_id, omie_app_name, client_code, client_name, contato, client_address,
       numero_interno, data_previsao, observacao, total, status, created_by, updated_at,
       servico_mensal_id, servico_mensal_nome, servico_mensal_valor
     ) values (
       ${input.omieAppId}, ${input.omieAppName}, ${input.clientCode}, ${input.clientName ?? null},
+      ${input.contato ?? null}, ${input.clientAddress ?? null},
       ${numeroInterno}, ${input.dataPrevisao ?? null}, ${input.observacao ?? null},
       ${input.total}, ${input.status ?? "draft"}, ${input.createdBy ?? null}, now(),
       ${firstServico?.monthlyServiceId ?? null}, ${firstServico?.nome ?? null},
@@ -241,6 +248,8 @@ export async function updateQuoteRecord(
     omieAppName: string;
     clientCode: number;
     clientName?: string | null;
+    contato?: string | null;
+    clientAddress?: string | null;
     dataPrevisao?: string | null;
     observacao?: string | null;
     total: number;
@@ -267,6 +276,8 @@ export async function updateQuoteRecord(
       omie_app_name = ${input.omieAppName},
       client_code = ${input.clientCode},
       client_name = ${input.clientName ?? null},
+      contato = ${input.contato ?? null},
+      client_address = ${input.clientAddress ?? null},
       data_previsao = ${input.dataPrevisao ?? null},
       observacao = ${input.observacao ?? null},
       total = ${input.total},
@@ -328,7 +339,7 @@ export async function listQuotes(limit = 50, omieAppId?: string): Promise<Quote[
   const appId = omieAppId?.trim() || null;
   const rows = (await db`
     select
-      q.id, q.omie_app_id, q.omie_app_name, q.client_code, q.client_name,
+      q.id, q.omie_app_id, q.omie_app_name, q.client_code, q.client_name, q.contato, q.client_address,
       q.numero_interno, q.omie_pedido_code, q.integration_code, q.numero_pedido,
       q.etapa, q.data_previsao::text as data_previsao, q.observacao, q.total::text as total,
       q.status, q.error, q.created_by,
@@ -349,7 +360,7 @@ export async function getQuoteById(quoteId: number): Promise<Quote | null> {
   const db = await getDb();
   const rows = (await db`
     select
-      q.id, q.omie_app_id, q.omie_app_name, q.client_code, q.client_name,
+      q.id, q.omie_app_id, q.omie_app_name, q.client_code, q.client_name, q.contato, q.client_address,
       q.numero_interno, q.omie_pedido_code, q.integration_code, q.numero_pedido,
       q.etapa, q.data_previsao::text as data_previsao, q.observacao, q.total::text as total,
       q.status, q.error, q.created_by,

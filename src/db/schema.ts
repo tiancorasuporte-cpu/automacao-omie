@@ -266,6 +266,12 @@ export async function ensureSchema() {
       "create index omie_clients_nome_idx on omie_clients (omie_app_id, razao_social)",
     );
   }
+  if (!(await columnExists("omie_clients", "endereco"))) {
+    await sql.unsafe("alter table omie_clients add column endereco text");
+  }
+  if (!(await columnExists("omie_clients", "contato"))) {
+    await sql.unsafe("alter table omie_clients add column contato varchar(160)");
+  }
 
   if (!(await tableExists("quotes"))) {
     await sql`
@@ -310,6 +316,12 @@ export async function ensureSchema() {
   }
   if (!(await columnExists("quotes", "data_previsao"))) {
     await sql.unsafe("alter table quotes add column data_previsao date");
+  }
+  if (!(await columnExists("quotes", "contato"))) {
+    await sql.unsafe("alter table quotes add column contato varchar(160)");
+  }
+  if (!(await columnExists("quotes", "client_address"))) {
+    await sql.unsafe("alter table quotes add column client_address text");
   }
   if (!(await columnExists("quotes", "updated_at"))) {
     await sql.unsafe("alter table quotes add column updated_at timestamptz not null default now()");

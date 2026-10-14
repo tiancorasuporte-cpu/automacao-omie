@@ -15,6 +15,8 @@ const draftSchema = z.object({
   omieAppId: z.string().trim().min(1),
   clientCode: z.number().int().positive(),
   clientName: z.string().trim().nullable().optional(),
+  contato: z.string().trim().max(160).nullable().optional(),
+  clientAddress: z.string().trim().max(500).nullable().optional(),
   observacao: z.string().trim().nullable().optional(),
   dataPrevisao: z.string().trim().nullable().optional(),
   items: z.array(lineSchema).min(1),
@@ -137,6 +139,26 @@ export const searchOmieClientsFn = createServerFn({ method: "GET" })
     } catch {
       return [];
     }
+  });
+
+export const getOmieClientDetailsFn = createServerFn({ method: "GET" })
+  .validator((input) => z.object({ clientCode: z.coerce.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("orcamentos");
+    const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
+    const { getCliente } = await import("@/server/omie/clients");
+    const { updateOmieClientDetails } = await import("@/db/clients");
+    const app = requireOrcamentosOmieApp();
+    const client = await getCliente(app, data.clientCode).catch(() => undefined);
+    if (!client) return { endereco: null, contato: null, cnpjCpf: null };
+    await updateOmieClientDetails({
+      omieAppId: app.id,
+      codigoCliente: client.codigo_cliente_omie,
+      endereco: client.endereco,
+      contato: client.contato,
+    }).catch(() => undefined);
+    return { endereco: client.endereco, contato: client.contato, cnpjCpf: client.cnpj_cpf };
   });
 
 export const listMonthlyServicesFn = createServerFn({ method: "GET" }).handler(async () => {
@@ -278,6 +300,8 @@ function toSaveInput(data: z.infer<typeof draftSchema>, createdBy: number, omieA
     omieAppId,
     clientCode: data.clientCode,
     clientName: data.clientName ?? null,
+    contato: data.contato ?? null,
+    clientAddress: data.clientAddress ?? null,
     observacao: data.observacao ?? null,
     dataPrevisao: data.dataPrevisao ?? null,
     quoteId: data.quoteId ?? null,
@@ -337,6 +361,8 @@ export const getOrcamentoFn = createServerFn({ method: "GET" })
       quote,
       servicosMensais,
       clienteCnpj: clienteOmie?.cnpj_cpf ?? null,
+      clienteEndereco: quote.clientAddress ?? clienteOmie?.endereco ?? null,
+      clienteContato: quote.contato,
       clienteNomeCompleto:
         clienteOmie?.razao_social ||
         clienteOmie?.nome_fantasia ||

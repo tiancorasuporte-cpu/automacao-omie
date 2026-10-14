@@ -10,8 +10,18 @@ export type OmieClient = {
   razaoSocial: string;
   nomeFantasia: string | null;
   cnpjCpf: string | null;
+  endereco: string | null;
+  contato: string | null;
   inactive: boolean;
   syncedAt: string;
+};
+
+export type OmieClientSearchResult = {
+  codigo: number;
+  nome: string;
+  cnpjCpf: string | null;
+  endereco: string | null;
+  contato: string | null;
 };
 
 type ClientRow = {
@@ -22,6 +32,8 @@ type ClientRow = {
   razao_social: string;
   nome_fantasia: string | null;
   cnpj_cpf: string | null;
+  endereco: string | null;
+  contato: string | null;
   inactive: boolean;
   synced_at: string | Date;
 };
@@ -35,6 +47,8 @@ function toClient(row: ClientRow): OmieClient {
     razaoSocial: row.razao_social,
     nomeFantasia: row.nome_fantasia,
     cnpjCpf: row.cnpj_cpf,
+    endereco: row.endereco ?? null,
+    contato: row.contato ?? null,
     inactive: Boolean(row.inactive),
     syncedAt: row.synced_at instanceof Date ? row.synced_at.toISOString() : String(row.synced_at),
   };
@@ -47,6 +61,8 @@ export async function upsertOmieClient(input: {
   razaoSocial: string;
   nomeFantasia?: string | null;
   cnpjCpf?: string | null;
+  endereco?: string | null;
+  contato?: string | null;
   inactive?: boolean;
 }) {
   const db = await getDb();
@@ -54,11 +70,14 @@ export async function upsertOmieClient(input: {
   if (!razao) return;
   await db`
     insert into omie_clients (
-      omie_app_id, omie_app_name, codigo_cliente, razao_social, nome_fantasia, cnpj_cpf, inactive, synced_at
+      omie_app_id, omie_app_name, codigo_cliente, razao_social, nome_fantasia, cnpj_cpf,
+      endereco, contato, inactive, synced_at
     ) values (
       ${input.omieAppId}, ${input.omieAppName}, ${input.codigoCliente}, ${razao},
       ${input.nomeFantasia?.trim().slice(0, 255) || null},
       ${input.cnpjCpf?.trim().slice(0, 32) || null},
+      ${input.endereco?.trim() || null},
+      ${input.contato?.trim().slice(0, 160) || null},
       ${input.inactive === true}, now()
     )
     on conflict (omie_app_id, codigo_cliente) do update set
@@ -66,8 +85,25 @@ export async function upsertOmieClient(input: {
       razao_social = excluded.razao_social,
       nome_fantasia = excluded.nome_fantasia,
       cnpj_cpf = excluded.cnpj_cpf,
+      endereco = excluded.endereco,
+      contato = excluded.contato,
       inactive = excluded.inactive,
       synced_at = now()
+  `;
+}
+
+export async function updateOmieClientDetails(input: {
+  omieAppId: string;
+  codigoCliente: number;
+  endereco: string | null;
+  contato: string | null;
+}) {
+  const db = await getDb();
+  await db`
+    update omie_clients
+    set endereco = ${input.endereco?.trim() || null},
+        contato = ${input.contato?.trim().slice(0, 160) || null}
+    where omie_app_id = ${input.omieAppId} and codigo_cliente = ${input.codigoCliente}
   `;
 }
 
@@ -87,10 +123,10 @@ export async function searchOmieClientsLocal(input: {
   omieAppId: string;
   query: string;
   limit?: number;
-}) {
+}): Promise<OmieClientSearchResult[]> {
   const db = await getDb();
   const q = input.query.trim();
-  if (q.length < 2) return [] as Array<{ codigo: number; nome: string; cnpjCpf: string | null }>;
+  if (q.length < 2) return [];
   const limit = Math.min(Math.max(input.limit ?? 40, 1), 100);
   const like = `%${q}%`;
 
@@ -115,6 +151,8 @@ export async function searchOmieClientsLocal(input: {
       codigo: client.codigoCliente,
       nome: client.razaoSocial || client.nomeFantasia || `Cliente ${client.codigoCliente}`,
       cnpjCpf: client.cnpjCpf,
+      endereco: client.endereco,
+      contato: client.contato,
     };
   });
 }

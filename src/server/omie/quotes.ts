@@ -91,7 +91,13 @@ export async function searchOmieClients(app: OmieAppConfig, query: string) {
 
   const attempts = [{ razao_social: q }, { nome_fantasia: q }];
 
-  const out: Array<{ codigo: number; nome: string; cnpjCpf: string | null }> = [];
+  const out: Array<{
+    codigo: number;
+    nome: string;
+    cnpjCpf: string | null;
+    endereco: string | null;
+    contato: string | null;
+  }> = [];
   const seen = new Set<number>();
 
   for (const filtro of attempts) {
@@ -112,6 +118,8 @@ export async function searchOmieClients(app: OmieAppConfig, query: string) {
           codigo: client.codigo_cliente_omie,
           nome: client.razao_social || clientDisplayName(client) || `Cliente ${client.codigo_cliente_omie}`,
           cnpjCpf: client.cnpj_cpf,
+          endereco: client.endereco,
+          contato: client.contato,
         });
       }
       if (out.length > 0) break;
@@ -249,6 +257,8 @@ export async function saveLocalOrcamento(input: {
   omieAppId: string;
   clientCode: number;
   clientName?: string | null;
+  contato?: string | null;
+  clientAddress?: string | null;
   observacao?: string | null;
   dataPrevisao?: string | null;
   createdBy?: number | null;
@@ -282,6 +292,8 @@ export async function saveLocalOrcamento(input: {
     omieAppName: app.name,
     clientCode: input.clientCode,
     clientName: input.clientName ?? null,
+    contato: input.contato?.trim().slice(0, 160) || null,
+    clientAddress: input.clientAddress?.trim() || null,
     dataPrevisao: input.dataPrevisao ?? null,
     observacao: input.observacao ?? null,
     total,
@@ -336,6 +348,9 @@ async function pushQuoteToOmie(quoteId: number) {
       : formatOmieDate(new Date());
 
   const observacaoParts: string[] = [];
+  if (quote.contato?.trim()) {
+    observacaoParts.push(`A/C: ${quote.contato.trim()}`);
+  }
   if (quote.observacao?.trim()) {
     observacaoParts.push(quote.observacao.trim());
   }
@@ -460,6 +475,8 @@ export async function createOmieOrcamento(input: {
   omieAppId: string;
   clientCode: number;
   clientName?: string | null;
+  contato?: string | null;
+  clientAddress?: string | null;
   observacao?: string | null;
   dataPrevisao?: string | null;
   createdBy?: number | null;
