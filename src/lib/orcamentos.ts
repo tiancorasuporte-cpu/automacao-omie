@@ -46,10 +46,10 @@ export const getOrcamentosBootstrapFn = createServerFn({ method: "GET" }).handle
   const { getOmieEmpresaInfo } = await import("@/server/omie/quotes");
   const apps = listOrcamentosOmieApps().map(({ id, name }) => ({ id, name }));
   const app = requireOrcamentosOmieApp();
-  const [productCount, clientCount, quotes, empresa, monthlyServices] = await Promise.all([
+  const [productCount, clientCount, quotesResult, empresa, monthlyServices] = await Promise.all([
     countOmieProducts(app.id),
     countOmieClients(app.id),
-    listQuotes(40, app.id),
+    listQuotes({ omieAppId: app.id, limit: 100 }),
     getOmieEmpresaInfo(app),
     listMonthlyServices(true),
   ]);
@@ -57,7 +57,8 @@ export const getOrcamentosBootstrapFn = createServerFn({ method: "GET" }).handle
     apps,
     productCount,
     clientCount,
-    quotes,
+    quotes: quotesResult.quotes,
+    quotesTotal: quotesResult.total,
     monthlyServices,
     omieAppId: app.id,
     empresaRazaoSocial: empresa.razaoSocial,
@@ -66,6 +67,32 @@ export const getOrcamentosBootstrapFn = createServerFn({ method: "GET" }).handle
     canManageMonthlyServices: canManageMonthlyServices(user),
   };
 });
+
+export const listOrcamentosFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        query: z.string().trim().optional(),
+        status: z.enum(["draft", "sent", "error"]).optional(),
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+        offset: z.coerce.number().int().min(0).optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("orcamentos");
+    const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
+    const { listQuotes } = await import("@/db/quotes");
+    const app = requireOrcamentosOmieApp();
+    return listQuotes({
+      omieAppId: app.id,
+      limit: data.limit ?? 100,
+      offset: data.offset ?? 0,
+      ...(data.query ? { query: data.query } : {}),
+      ...(data.status ? { status: data.status } : {}),
+    });
+  });
 
 export const getOrcamentoEmpresaFn = createServerFn({ method: "GET" }).handler(async () => {
   const { requireModule } = await import("@/lib/require-auth");

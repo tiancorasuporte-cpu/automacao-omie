@@ -333,10 +333,39 @@ export async function deleteQuoteById(quoteId: number) {
   return { quoteId, numeroInterno: existing.numeroInterno };
 }
 
-export async function listQuotes(limit = 50, omieAppId?: string): Promise<Quote[]> {
+export async function listQuotes(input: {
+  omieAppId?: string | null;
+  limit?: number;
+  offset?: number;
+  query?: string | null;
+  status?: string | null;
+} = {}): Promise<{ quotes: Quote[]; total: number }> {
   const db = await getDb();
-  const safeLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
-  const appId = omieAppId?.trim() || null;
+  const safeLimit = Math.max(1, Math.min(500, Math.trunc(input.limit ?? 100)));
+  const safeOffset = Math.max(0, Math.trunc(input.offset ?? 0));
+  const appId = input.omieAppId?.trim() || null;
+  const status = input.status?.trim() || null;
+  const q = input.query?.trim() || null;
+  const like = q ? `%${q}%` : null;
+
+  const countRows = (await db`
+    select count(*)::int as total
+    from quotes q
+    left join users u on u.id = q.created_by
+    where (${appId}::text is null or q.omie_app_id = ${appId})
+      and (${status}::text is null or q.status = ${status})
+      and (
+        ${like}::text is null
+        or q.numero_interno ilike ${like}
+        or coalesce(q.client_name, '') ilike ${like}
+        or coalesce(q.contato, '') ilike ${like}
+        or coalesce(q.numero_pedido, '') ilike ${like}
+        or coalesce(q.observacao, '') ilike ${like}
+        or q.client_code::text ilike ${like}
+        or coalesce(nullif(trim(u.name), ''), u.username, '') ilike ${like}
+      )
+  `) as Array<{ total: number }>;
+
   const rows = (await db`
     select
       q.id, q.omie_app_id, q.omie_app_name, q.client_code, q.client_name, q.contato, q.client_address,
@@ -349,11 +378,26 @@ export async function listQuotes(limit = 50, omieAppId?: string): Promise<Quote[
     from quotes q
     left join users u on u.id = q.created_by
     where (${appId}::text is null or q.omie_app_id = ${appId})
+      and (${status}::text is null or q.status = ${status})
+      and (
+        ${like}::text is null
+        or q.numero_interno ilike ${like}
+        or coalesce(q.client_name, '') ilike ${like}
+        or coalesce(q.contato, '') ilike ${like}
+        or coalesce(q.numero_pedido, '') ilike ${like}
+        or coalesce(q.observacao, '') ilike ${like}
+        or q.client_code::text ilike ${like}
+        or coalesce(nullif(trim(u.name), ''), u.username, '') ilike ${like}
+      )
     order by q.id desc
     limit ${safeLimit}
+    offset ${safeOffset}
   `) as Array<Record<string, unknown>>;
 
-  return rows.map(mapQuote);
+  return {
+    quotes: rows.map(mapQuote),
+    total: Number(countRows[0]?.total ?? 0),
+  };
 }
 
 export async function getQuoteById(quoteId: number): Promise<Quote | null> {

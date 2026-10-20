@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
-import { TablePager, paginateList } from "@/components/TablePager";
+import { TablePager } from "@/components/TablePager";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -31,6 +31,7 @@ import {
   getOrcamentoEmpresaFn,
   getOrcamentoFn,
   getOrcamentosBootstrapFn,
+  listOrcamentosFn,
   saveOrcamentoFn,
   searchOmieClientsFn,
   searchOmieProductsFn,
@@ -99,6 +100,8 @@ function OrcamentosPage() {
 
   const [apps] = useState(bootstrap.apps);
   const [quotes, setQuotes] = useState(bootstrap.quotes);
+  const [quotesTotal, setQuotesTotal] = useState(bootstrap.quotesTotal ?? bootstrap.quotes.length);
+  const [searchingQuotes, setSearchingQuotes] = useState(false);
   const [productCount, setProductCount] = useState(bootstrap.productCount);
   const [clientCount, setClientCount] = useState(bootstrap.clientCount ?? 0);
   const [omieAppId] = useState(bootstrap.omieAppId ?? bootstrap.apps[0]?.id ?? "");
@@ -209,37 +212,59 @@ function OrcamentosPage() {
     [cart],
   );
 
-  const filteredQuotes = useMemo(() => {
-    const q = quotesFilter.trim().toLowerCase();
-    return quotes.filter((quote) => {
-      if (quotesStatusFilter !== "all" && quote.status !== quotesStatusFilter) return false;
-      if (!q) return true;
-      const haystack = [
-        quote.numeroInterno,
-        quote.clientName,
-        String(quote.clientCode),
-        quote.createdByName,
-        quote.numeroPedido,
-        quote.omiePedidoCode != null ? String(quote.omiePedidoCode) : "",
-        quote.omieAppName,
-        statusLabel(quote.status, quote.error),
-        quote.error,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [quotes, quotesFilter, quotesStatusFilter]);
-
-  const pagedQuotes = useMemo(
-    () => paginateList(filteredQuotes, quotesPage, quotesPageSize),
-    [filteredQuotes, quotesPage, quotesPageSize],
-  );
+  const pagedQuotes = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(quotesTotal / quotesPageSize) || 1);
+    const page = Math.min(Math.max(1, quotesPage), totalPages);
+    return {
+      items: quotes,
+      page,
+      totalPages,
+      totalItems: quotesTotal,
+      pageSize: quotesPageSize,
+    };
+  }, [quotes, quotesPage, quotesPageSize, quotesTotal]);
 
   useEffect(() => {
     setQuotesPage(1);
   }, [quotesFilter, quotesStatusFilter, quotesPageSize]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(quotesTotal / quotesPageSize) || 1);
+    if (quotesPage > totalPages) setQuotesPage(totalPages);
+  }, [quotesTotal, quotesPageSize, quotesPage]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setSearchingQuotes(true);
+      try {
+        const result = await listOrcamentosFn({
+          data: {
+            ...(quotesFilter.trim() ? { query: quotesFilter.trim() } : {}),
+            ...(quotesStatusFilter !== "all" ? { status: quotesStatusFilter } : {}),
+            limit: quotesPageSize,
+            offset: (Math.max(1, quotesPage) - 1) * quotesPageSize,
+          },
+        });
+        if (cancelled) return;
+        setQuotes(result.quotes);
+        setQuotesTotal(result.total);
+      } catch {
+        if (!cancelled) {
+          setFeedback({
+            type: "error",
+            text: "Não foi possível carregar a lista de orçamentos.",
+          });
+        }
+      } finally {
+        if (!cancelled) setSearchingQuotes(false);
+      }
+    }, quotesFilter.trim() ? 300 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [quotesFilter, quotesStatusFilter, quotesPage, quotesPageSize]);
 
   const locked = quoteStatus === "sent";
 
@@ -293,12 +318,25 @@ function OrcamentosPage() {
     }
   }
 
+  async function reloadQuotesList() {
+    const result = await listOrcamentosFn({
+      data: {
+        ...(quotesFilter.trim() ? { query: quotesFilter.trim() } : {}),
+        ...(quotesStatusFilter !== "all" ? { status: quotesStatusFilter } : {}),
+        limit: quotesPageSize,
+        offset: (Math.max(1, quotesPage) - 1) * quotesPageSize,
+      },
+    });
+    setQuotes(result.quotes);
+    setQuotesTotal(result.total);
+  }
+
   async function refreshQuotes() {
     const boot = await getOrcamentosBootstrapFn();
-    setQuotes(boot.quotes);
     setProductCount(boot.productCount);
     setClientCount(boot.clientCount ?? 0);
     setMonthlyServices(boot.monthlyServices ?? []);
+    await reloadQuotesList();
   }
 
   function resetServicoMensal() {
@@ -1066,7 +1104,7 @@ function OrcamentosPage() {
                   id: "salvos" as const,
                   label: "Salvos",
                   icon: "folder_open",
-                  badge: filteredQuotes.length,
+                  badge: quotesTotal,
                 },
               ] as const
             ).map((tab) => {
@@ -1968,53 +2006,55 @@ function OrcamentosPage() {
             <div>
               <p className="text-title-md text-on-surface">Orçamentos salvos</p>
               <p className="text-label-md text-on-surface-variant">
-                {filteredQuotes.length === quotes.length
-                  ? `${quotes.length} registro(s)`
-                  : `${filteredQuotes.length} de ${quotes.length} registro(s)`}
+                {searchingQuotes
+                  ? "Buscando..."
+                  : quotesFilter.trim() || quotesStatusFilter !== "all"
+                    ? `${quotesTotal} encontrado(s)`
+                    : `${quotesTotal} registro(s)`}
               </p>
             </div>
-            {quotes.length > 0 ? (
-              <div className="flex w-full flex-wrap items-end gap-sm sm:w-auto">
-                <input
-                  value={quotesFilter}
-                  onChange={(event) => setQuotesFilter(event.target.value)}
-                  placeholder="Buscar nº, cliente, usuário..."
-                  className="min-w-[16rem] flex-1 rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md sm:flex-none"
-                />
+            <div className="flex w-full flex-wrap items-end gap-sm sm:w-auto">
+              <input
+                value={quotesFilter}
+                onChange={(event) => setQuotesFilter(event.target.value)}
+                placeholder="Buscar nº, cliente, usuário..."
+                className="min-w-[16rem] flex-1 rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md sm:flex-none"
+              />
+              <select
+                value={quotesStatusFilter}
+                onChange={(event) =>
+                  setQuotesStatusFilter(event.target.value as "all" | "draft" | "sent" | "error")
+                }
+                className="rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+              >
+                <option value="all">Todos os status</option>
+                <option value="draft">Salvos</option>
+                <option value="sent">Enviados Omie</option>
+                <option value="error">Com erro</option>
+              </select>
+              <label className="block space-y-xs">
+                <span className="text-label-md text-on-surface-variant">Por página</span>
                 <select
-                  value={quotesStatusFilter}
+                  value={quotesPageSize}
                   onChange={(event) =>
-                    setQuotesStatusFilter(event.target.value as "all" | "draft" | "sent" | "error")
+                    setQuotesPageSize(Number(event.target.value) as QuotesPageSize)
                   }
-                  className="rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+                  className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md sm:w-28"
                 >
-                  <option value="all">Todos os status</option>
-                  <option value="draft">Salvos</option>
-                  <option value="sent">Enviados Omie</option>
-                  <option value="error">Com erro</option>
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
                 </select>
-                <label className="block space-y-xs">
-                  <span className="text-label-md text-on-surface-variant">Por página</span>
-                  <select
-                    value={quotesPageSize}
-                    onChange={(event) =>
-                      setQuotesPageSize(Number(event.target.value) as QuotesPageSize)
-                    }
-                    className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md sm:w-28"
-                  >
-                    <option value={10}>10</option>
-                    <option value={20}>20</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                  </select>
-                </label>
-              </div>
-            ) : null}
+              </label>
+            </div>
           </div>
-          {quotes.length === 0 ? (
-            <p className="text-body-md text-on-surface-variant">Nenhum orçamento salvo ainda.</p>
-          ) : filteredQuotes.length === 0 ? (
-            <p className="text-body-md text-on-surface-variant">Nenhum orçamento encontrado com esse filtro.</p>
+          {quotesTotal === 0 && !searchingQuotes ? (
+            <p className="text-body-md text-on-surface-variant">
+              {quotesFilter.trim() || quotesStatusFilter !== "all"
+                ? "Nenhum orçamento encontrado com esse filtro."
+                : "Nenhum orçamento salvo ainda."}
+            </p>
           ) : (
             <>
               <div className="space-y-sm xl:hidden">
