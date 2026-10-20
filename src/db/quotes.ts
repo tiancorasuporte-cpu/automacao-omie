@@ -335,14 +335,16 @@ export async function deleteQuoteById(quoteId: number) {
 
 export async function listQuotes(input: {
   omieAppId?: string | null;
-  limit?: number;
+  /** null ou omitido = sem limite (retorna todos os resultados) */
+  limit?: number | null;
   offset?: number;
   query?: string | null;
   status?: string | null;
 } = {}): Promise<{ quotes: Quote[]; total: number }> {
   const db = await getDb();
-  const safeLimit = Math.max(1, Math.min(500, Math.trunc(input.limit ?? 100)));
-  const safeOffset = Math.max(0, Math.trunc(input.offset ?? 0));
+  const unlimited = input.limit == null || input.limit <= 0;
+  const safeLimit = unlimited ? null : Math.max(1, Math.trunc(input.limit!));
+  const safeOffset = unlimited ? 0 : Math.max(0, Math.trunc(input.offset ?? 0));
   const appId = input.omieAppId?.trim() || null;
   const status = input.status?.trim() || null;
   const q = input.query?.trim() || null;
@@ -390,7 +392,7 @@ export async function listQuotes(input: {
         or coalesce(nullif(trim(u.name), ''), u.username, '') ilike ${like}
       )
     order by q.id desc
-    limit ${safeLimit}
+    limit ${safeLimit ?? 2_147_483_647}
     offset ${safeOffset}
   `) as Array<Record<string, unknown>>;
 

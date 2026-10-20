@@ -46,7 +46,7 @@ import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 
 type MobileOrcamentoTab = "montar" | "produtos" | "salvos";
-type QuotesPageSize = 10 | 20 | 50 | 100;
+type QuotesPageSize = 10 | 20 | 50 | 100 | "all";
 
 export const Route = createFileRoute("/orcamentos")({
   beforeLoad: () => requireModule("orcamentos"),
@@ -174,7 +174,7 @@ function OrcamentosPage() {
   const [quotesFilter, setQuotesFilter] = useState("");
   const [quotesStatusFilter, setQuotesStatusFilter] = useState<"all" | "draft" | "sent" | "error">("all");
   const [quotesPage, setQuotesPage] = useState(1);
-  const [quotesPageSize, setQuotesPageSize] = useState<QuotesPageSize>(10);
+  const [quotesPageSize, setQuotesPageSize] = useState<QuotesPageSize>("all");
   const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileOrcamentoTab>("montar");
   const [lastAddedLabel, setLastAddedLabel] = useState<string | null>(null);
@@ -212,15 +212,19 @@ function OrcamentosPage() {
     [cart],
   );
 
+  const quotesLimit = quotesPageSize === "all" ? null : quotesPageSize;
+
   const pagedQuotes = useMemo(() => {
-    const totalPages = Math.max(1, Math.ceil(quotesTotal / quotesPageSize) || 1);
+    const pageSize = quotesPageSize === "all" ? Math.max(quotesTotal, 1) : quotesPageSize;
+    const totalPages =
+      quotesPageSize === "all" ? 1 : Math.max(1, Math.ceil(quotesTotal / quotesPageSize) || 1);
     const page = Math.min(Math.max(1, quotesPage), totalPages);
     return {
       items: quotes,
       page,
       totalPages,
       totalItems: quotesTotal,
-      pageSize: quotesPageSize,
+      pageSize,
     };
   }, [quotes, quotesPage, quotesPageSize, quotesTotal]);
 
@@ -229,6 +233,7 @@ function OrcamentosPage() {
   }, [quotesFilter, quotesStatusFilter, quotesPageSize]);
 
   useEffect(() => {
+    if (quotesPageSize === "all") return;
     const totalPages = Math.max(1, Math.ceil(quotesTotal / quotesPageSize) || 1);
     if (quotesPage > totalPages) setQuotesPage(totalPages);
   }, [quotesTotal, quotesPageSize, quotesPage]);
@@ -242,8 +247,9 @@ function OrcamentosPage() {
           data: {
             ...(quotesFilter.trim() ? { query: quotesFilter.trim() } : {}),
             ...(quotesStatusFilter !== "all" ? { status: quotesStatusFilter } : {}),
-            limit: quotesPageSize,
-            offset: (Math.max(1, quotesPage) - 1) * quotesPageSize,
+            limit: quotesLimit,
+            offset:
+              quotesLimit == null ? 0 : (Math.max(1, quotesPage) - 1) * quotesLimit,
           },
         });
         if (cancelled) return;
@@ -264,7 +270,7 @@ function OrcamentosPage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [quotesFilter, quotesStatusFilter, quotesPage, quotesPageSize]);
+  }, [quotesFilter, quotesStatusFilter, quotesPage, quotesLimit]);
 
   const locked = quoteStatus === "sent";
 
@@ -323,8 +329,8 @@ function OrcamentosPage() {
       data: {
         ...(quotesFilter.trim() ? { query: quotesFilter.trim() } : {}),
         ...(quotesStatusFilter !== "all" ? { status: quotesStatusFilter } : {}),
-        limit: quotesPageSize,
-        offset: (Math.max(1, quotesPage) - 1) * quotesPageSize,
+        limit: quotesLimit,
+        offset: quotesLimit == null ? 0 : (Math.max(1, quotesPage) - 1) * quotesLimit,
       },
     });
     setQuotes(result.quotes);
@@ -2034,18 +2040,22 @@ function OrcamentosPage() {
               </select>
               <label className="block space-y-xs">
                 <span className="text-label-md text-on-surface-variant">Por página</span>
-                <select
-                  value={quotesPageSize}
-                  onChange={(event) =>
-                    setQuotesPageSize(Number(event.target.value) as QuotesPageSize)
-                  }
-                  className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md sm:w-28"
-                >
-                  <option value={10}>10</option>
-                  <option value={20}>20</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                </select>
+                  <select
+                    value={quotesPageSize}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setQuotesPageSize(
+                        value === "all" ? "all" : (Number(value) as QuotesPageSize),
+                      );
+                    }}
+                    className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md sm:w-28"
+                  >
+                    <option value="all">Todos</option>
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
               </label>
             </div>
           </div>
@@ -2241,14 +2251,20 @@ function OrcamentosPage() {
                 </tbody>
               </table>
               </div>
-              <TablePager
-                page={pagedQuotes.page}
-                totalPages={pagedQuotes.totalPages}
-                totalItems={pagedQuotes.totalItems}
-                pageSize={quotesPageSize}
-                onPageChange={setQuotesPage}
-                className="-mx-md mt-sm border-outline-variant/60"
-              />
+              {quotesPageSize !== "all" && pagedQuotes.totalPages > 1 ? (
+                <TablePager
+                  page={pagedQuotes.page}
+                  totalPages={pagedQuotes.totalPages}
+                  totalItems={pagedQuotes.totalItems}
+                  pageSize={pagedQuotes.pageSize}
+                  onPageChange={setQuotesPage}
+                  className="-mx-md mt-sm border-outline-variant/60"
+                />
+              ) : quotesTotal > 0 ? (
+                <p className="-mx-md mt-sm border-t border-outline-variant/60 px-md py-sm text-label-md text-on-surface-variant">
+                  Exibindo todos os {quotesTotal} orçamento(s)
+                </p>
+              ) : null}
             </>
           )}
         </section>

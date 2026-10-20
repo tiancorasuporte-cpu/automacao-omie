@@ -49,7 +49,7 @@ export const getOrcamentosBootstrapFn = createServerFn({ method: "GET" }).handle
   const [productCount, clientCount, quotesResult, empresa, monthlyServices] = await Promise.all([
     countOmieProducts(app.id),
     countOmieClients(app.id),
-    listQuotes({ omieAppId: app.id, limit: 100 }),
+    listQuotes({ omieAppId: app.id, limit: null }),
     getOmieEmpresaInfo(app),
     listMonthlyServices(true),
   ]);
@@ -74,7 +74,8 @@ export const listOrcamentosFn = createServerFn({ method: "GET" })
       .object({
         query: z.string().trim().optional(),
         status: z.enum(["draft", "sent", "error"]).optional(),
-        limit: z.coerce.number().int().min(1).max(500).optional(),
+        /** null = sem limite (todos os orçamentos) */
+        limit: z.union([z.null(), z.coerce.number().int().min(1).max(10000)]).optional(),
         offset: z.coerce.number().int().min(0).optional(),
       })
       .parse(input ?? {}),
@@ -87,7 +88,7 @@ export const listOrcamentosFn = createServerFn({ method: "GET" })
     const app = requireOrcamentosOmieApp();
     return listQuotes({
       omieAppId: app.id,
-      limit: data.limit ?? 100,
+      limit: data.limit === undefined ? null : data.limit,
       offset: data.offset ?? 0,
       ...(data.query ? { query: data.query } : {}),
       ...(data.status ? { status: data.status } : {}),
