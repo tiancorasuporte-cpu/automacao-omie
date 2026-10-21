@@ -31,6 +31,7 @@ import {
   getOrcamentoEmpresaFn,
   getOrcamentoFn,
   getOrcamentosBootstrapFn,
+  getProductsPricingFn,
   listOrcamentosFn,
   saveOrcamentoFn,
   searchOmieClientsFn,
@@ -996,6 +997,29 @@ function OrcamentosPage() {
     }
   }
 
+  async function resolveCartPricing() {
+    const codes = cart.map((item) => item.codigoProduto);
+    if (!codes.length) return cart;
+    try {
+      const pricing = await getProductsPricingFn({ data: { codes } });
+      const byCode = new Map(pricing.map((row) => [row.codigoProduto, row]));
+      const next = cart.map((item) => {
+        const product = byCode.get(item.codigoProduto);
+        if (!product) return item;
+        return {
+          ...item,
+          cmc: product.cmc ?? item.cmc,
+          cmcInterno: product.cmcInterno ?? item.cmcInterno,
+          markup: product.markup ?? item.markup,
+        };
+      });
+      setCart(next);
+      return next;
+    } catch {
+      return cart;
+    }
+  }
+
   async function handleExportExcel() {
     if (cart.length === 0) {
       setFeedback({ type: "error", text: "Adicione produtos antes de exportar o Excel." });
@@ -1009,6 +1033,7 @@ function OrcamentosPage() {
     try {
       const saved = await ensureQuoteSavedForExport();
       if (!saved) return;
+      const pricedCart = await resolveCartPricing();
 
       downloadOrcamentoExcel({
         empresaNome: saved.empresaNome,
@@ -1031,7 +1056,7 @@ function OrcamentosPage() {
               quantidade: s.quantidade,
             }))
           : [],
-        items: cart.map((item) => ({
+        items: pricedCart.map((item) => ({
           descricao: item.descricao,
           codigoProduto: item.codigoProduto,
           unidade: item.unidade,

@@ -157,6 +157,19 @@ export async function getOmieProductById(id: number) {
   return rows[0] ? toProduct(rows[0]) : null;
 }
 
+export async function getOmieProductsByCodes(omieAppId: string, codes: number[]) {
+  const db = await getDb();
+  const unique = [...new Set(codes.filter((code) => Number.isFinite(code) && code > 0))];
+  if (!unique.length) return [] as OmieProduct[];
+  const rows = await db<ProductRow[]>`
+    select *
+    from omie_products
+    where omie_app_id = ${omieAppId}
+      and codigo_produto in ${db(unique)}
+  `;
+  return rows.map(toProduct);
+}
+
 export async function listOmieProducts(input?: {
   omieAppId?: string;
   query?: string;

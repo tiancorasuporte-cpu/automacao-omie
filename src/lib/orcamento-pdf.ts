@@ -162,6 +162,11 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
       border: 1px solid #e2e8f0;
       border-radius: 8px;
     }
+    .obs .body {
+      margin-top: 4px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
     .total-row td {
       border-bottom: none;
       padding-top: 14px;
@@ -305,7 +310,7 @@ export function buildOrcamentoPdfHtml(options: OrcamentoPdfOptions) {
 
     ${
       options.observacao?.trim()
-        ? `<div class="obs"><div class="label">Observações</div><div>${escapeHtml(options.observacao.trim())}</div></div>`
+        ? `<div class="obs"><div class="label">Observações</div><div class="body">${escapeHtml(options.observacao.trim())}</div></div>`
         : ""
     }
   </div>

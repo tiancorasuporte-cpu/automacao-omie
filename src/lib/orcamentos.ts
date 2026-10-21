@@ -365,7 +365,7 @@ export const getOrcamentoFn = createServerFn({ method: "GET" })
     await requireModule("orcamentos");
     const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
     const { getQuoteById, getQuoteItems, getQuoteMonthlyServices } = await import("@/db/quotes");
-    const { listOmieProducts } = await import("@/db/products");
+    const { getOmieProductsByCodes } = await import("@/db/products");
     const app = requireOrcamentosOmieApp();
     const quote = await getQuoteById(data.quoteId);
     if (!quote) return { ok: false as const, error: "Orçamento não encontrado." };
@@ -378,11 +378,10 @@ export const getOrcamentoFn = createServerFn({ method: "GET" })
       getQuoteItems(data.quoteId),
       getQuoteMonthlyServices(data.quoteId),
     ]);
-    const catalog = await listOmieProducts({
-      omieAppId: app.id,
-      activeOnly: false,
-      limit: 500,
-    });
+    const catalog = await getOmieProductsByCodes(
+      app.id,
+      items.map((item) => item.codigoProduto),
+    );
     const byCode = new Map(catalog.map((product) => [product.codigoProduto, product]));
     return {
       ok: true as const,
@@ -407,6 +406,30 @@ export const getOrcamentoFn = createServerFn({ method: "GET" })
         };
       }),
     };
+  });
+
+export const getProductsPricingFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        codes: z.array(z.number().int().positive()).min(1).max(500),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("orcamentos");
+    const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
+    const { getOmieProductsByCodes } = await import("@/db/products");
+    const app = requireOrcamentosOmieApp();
+    const products = await getOmieProductsByCodes(app.id, data.codes);
+    return products.map((product) => ({
+      codigoProduto: product.codigoProduto,
+      cmc: product.cmc,
+      cmcInterno: product.cmcInterno,
+      cmcEfetivo: product.cmcEfetivo,
+      markup: product.markup,
+    }));
   });
 
 export const sendOrcamentoToOmieFn = createServerFn({ method: "POST" })
