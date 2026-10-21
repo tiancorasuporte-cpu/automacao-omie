@@ -90,6 +90,48 @@ export async function sendInteggriText(chatId: string, text: string, config = re
   }
 }
 
+/** Envia template WABA (ex.: aviso_de_cobranca). Única forma de iniciar conversa em conexão Meta. */
+export async function sendInteggriTemplate(
+  chatId: string,
+  templateName: string,
+  options?: { body?: string },
+  config = readInteggriConfig(),
+) {
+  if (!isInteggriConfigured(config)) {
+    throw new Error("Informe URL e token da Integgri em Configurações.");
+  }
+  const number = chatIdToPhoneDigits(chatId);
+  if (number.length < 10) {
+    throw new Error("Número de WhatsApp inválido para envio na Integgri.");
+  }
+  const name = templateName.trim();
+  if (!name) throw new Error("Nome do template WABA não informado.");
+
+  const payload: Record<string, unknown> = {
+    number,
+    body: options?.body?.trim() || name,
+    templateName: name,
+    sendSignature: false,
+    closeTicket: false,
+  };
+  if (config.whatsappId) payload.whatsappId = Number(config.whatsappId) || config.whatsappId;
+  if (config.queueId) payload.queueId = Number(config.queueId) || config.queueId;
+  if (config.userId) payload.userId = Number(config.userId) || config.userId;
+
+  const response = await fetch(`${config.url}/api/messages/send`, {
+    method: "POST",
+    headers: authHeaders(config.token),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+}
+
+export function readCobrancaTemplateName() {
+  return (process.env["INTEGGRI_COBRANCA_TEMPLATE"] ?? "aviso_de_cobranca").trim() || "aviso_de_cobranca";
+}
+
 export async function sendInteggriDocument(
   chatId: string,
   file: { filename: string; mimetype: string; url?: string; base64?: string },

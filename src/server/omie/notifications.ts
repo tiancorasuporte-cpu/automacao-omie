@@ -18,7 +18,12 @@ import { formatDisplayDate, listOmieApps } from "@/server/omie/client";
 import { resolveDueItemPdfWithStatus } from "@/server/omie/documents";
 import { clientDisplayName, clientPhones, getCliente } from "@/server/omie/clients";
 import { isOpenReceivableStatus } from "@/server/omie/status";
-import { sendWhatsAppDocument, sendWhatsAppText } from "@/server/whatsapp";
+import {
+  sendWhatsAppDocument,
+  sendWhatsAppText,
+  usesWabaTemplateForCobranca,
+} from "@/server/whatsapp";
+import { notifyCobrancaViaWabaTemplate } from "@/server/integgri-cobranca";
 
 const DEFAULT_SEND_DELAY_MS = 10_000;
 const DEFAULT_HOURLY_LIMIT = 12;
@@ -302,6 +307,11 @@ async function sendItemToPhone(
   message: string,
   errors: string[],
 ) {
+  if (usesWabaTemplateForCobranca()) {
+    // Template abre a conversa; o PDF só sai depois que o cliente responder (webhook Integgri).
+    await notifyCobrancaViaWabaTemplate(chatId, [item.id]);
+    return;
+  }
   await sendWhatsAppText(chatId, message);
   await sendItemPdf(chatId, item, errors);
 }
@@ -515,11 +525,17 @@ async function sendReminderBatch(
     });
 
     try {
-      await sendWhatsAppText(group.chatId, message);
-
-      for (const item of group.items) {
-        await sendItemPdf(group.chatId, item, errors);
-        if (options.delayMs > 0) await sleep(options.delayMs);
+      if (usesWabaTemplateForCobranca()) {
+        await notifyCobrancaViaWabaTemplate(
+          group.chatId,
+          group.items.map((item) => item.id),
+        );
+      } else {
+        await sendWhatsAppText(group.chatId, message);
+        for (const item of group.items) {
+          await sendItemPdf(group.chatId, item, errors);
+          if (options.delayMs > 0) await sleep(options.delayMs);
+        }
       }
 
       for (const item of group.items) {
@@ -533,7 +549,9 @@ async function sendReminderBatch(
         await insertNotificationLog({
           dueItemId: item.id,
           phone: group.phone,
-          message,
+          message: usesWabaTemplateForCobranca()
+            ? `WABA template aviso_de_cobranca (PDF pendente da resposta)`
+            : message,
           success: true,
           kind,
         });

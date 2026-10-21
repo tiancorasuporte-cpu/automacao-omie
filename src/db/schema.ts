@@ -183,6 +183,26 @@ export async function ensureSchema() {
     await sql.unsafe("alter table notification_log add column kind varchar(16) not null default 'pre_due'");
   }
 
+  if (!(await tableExists("waba_pending_docs"))) {
+    await sql`
+      create table waba_pending_docs (
+        id serial primary key,
+        phone varchar(32) not null,
+        due_item_id integer references due_items(id) on delete cascade,
+        test_filename varchar(200),
+        test_mimetype varchar(120),
+        test_base64 text,
+        created_at timestamptz not null default now(),
+        fulfilled_at timestamptz
+      )
+    `;
+  }
+  if (!(await indexExists("waba_pending_docs_phone_idx"))) {
+    await sql.unsafe(
+      "create index waba_pending_docs_phone_idx on waba_pending_docs (phone) where fulfilled_at is null",
+    );
+  }
+
   if (!(await tableExists("sync_log"))) {
     await sql`
       create table sync_log (

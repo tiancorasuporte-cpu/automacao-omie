@@ -2,8 +2,10 @@ import "@tanstack/react-start/server-only";
 
 import {
   isInteggriConfigured,
+  readCobrancaTemplateName,
   readInteggriConfig,
   sendInteggriDocument,
+  sendInteggriTemplate,
   sendInteggriText,
 } from "@/server/integgri";
 import { isWahaConfigured, sendWahaDocument, sendWahaText } from "@/server/waha";
@@ -23,12 +25,24 @@ export function isWhatsAppSendConfigured() {
   return provider === "integgri" ? isInteggriConfigured() : isWahaConfigured();
 }
 
+/** Em conexão WABA Meta, cobrança sai só por template; o PDF vai depois da resposta do cliente. */
+export function usesWabaTemplateForCobranca() {
+  return readWhatsAppProvider() === "integgri" && isInteggriConfigured();
+}
+
 export async function sendWhatsAppText(chatId: string, text: string) {
   if (readWhatsAppProvider() === "integgri") {
     await sendInteggriText(chatId, text);
     return;
   }
   await sendWahaText(chatId, text);
+}
+
+export async function sendWhatsAppCobrancaTemplate(chatId: string) {
+  if (!usesWabaTemplateForCobranca()) {
+    throw new Error("Template de cobrança só está disponível com Integgri/WABA configurada.");
+  }
+  await sendInteggriTemplate(chatId, readCobrancaTemplateName());
 }
 
 export async function sendWhatsAppDocument(
