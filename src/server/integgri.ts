@@ -90,11 +90,62 @@ export async function sendInteggriText(chatId: string, text: string, config = re
   }
 }
 
-/** Envia template WABA (ex.: aviso_de_cobranca). Única forma de iniciar conversa em conexão Meta. */
+function soft10Token(config: InteggriConfig) {
+  return (process.env["SOFT10_TOKEN"] ?? config.token).replace(/\s+/g, "").replace(/^"|"$/g, "");
+}
+
+function soft10BaseUrl() {
+  return (process.env["SOFT10_URL"] ?? "https://api.soft10.io/v1").replace(/\/+$/, "");
+}
+
+/**
+ * Templates com {{1}}, {{2}}… não passam no /api/messages/send da Integgri (só estáticos).
+ * Tentamos Soft10 WABA (Meta-style) quando há variáveis.
+ */
+async function sendSoft10Template(
+  number: string,
+  templateName: string,
+  variables: string[],
+  config: InteggriConfig,
+) {
+  const token = soft10Token(config);
+  if (!token) throw new Error("Token Soft10/Integgri ausente.");
+
+  const components: Array<Record<string, unknown>> = [];
+  if (variables.length) {
+    components.push({
+      type: "body",
+      parameters: variables.map((text) => ({ type: "text", text })),
+    });
+  }
+
+  const payload: Record<string, unknown> = {
+    messaging_product: "whatsapp",
+    to: number,
+    type: "template",
+    template: {
+      name: templateName,
+      language: { code: (process.env["WABA_TEMPLATE_LANG"] ?? "pt_BR").trim() || "pt_BR" },
+      ...(components.length ? { components } : {}),
+    },
+  };
+  if (config.whatsappId) payload.whatsappId = config.whatsappId;
+
+  const response = await fetch(`${soft10BaseUrl()}/waba/message/send`, {
+    method: "POST",
+    headers: authHeaders(token),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response));
+  }
+}
+
+/** Envia template WABA. Sem variáveis: Integgri Chat API. Com variáveis: Soft10 WABA. */
 export async function sendInteggriTemplate(
   chatId: string,
   templateName: string,
-  options?: { body?: string },
+  options?: { body?: string; variables?: string[] },
   config = readInteggriConfig(),
 ) {
   if (!isInteggriConfigured(config)) {
@@ -106,6 +157,42 @@ export async function sendInteggriTemplate(
   }
   const name = templateName.trim();
   if (!name) throw new Error("Nome do template WABA não informado.");
+  const variables = (options?.variables ?? []).map((v) => v.trim()).filter(Boolean);
+
+  if (variables.length > 0) {
+    try {
+      await sendSoft10Template(number, name, variables, config);
+      return { channel: "soft10" as const };
+    } catch (soft10Error) {
+      // Fallback: tenta Integgri (só funciona se o template for estático; útil para mensagem de erro clara).
+      const payload: Record<string, unknown> = {
+        number,
+        body: variables[0] || options?.body?.trim() || name,
+        templateName: name,
+        variables,
+        templateVariables: variables,
+        parameters: variables,
+        sendSignature: false,
+        closeTicket: false,
+      };
+      if (config.whatsappId) payload.whatsappId = Number(config.whatsappId) || config.whatsappId;
+      if (config.queueId) payload.queueId = Number(config.queueId) || config.queueId;
+      if (config.userId) payload.userId = Number(config.userId) || config.userId;
+
+      const response = await fetch(`${config.url}/api/messages/send`, {
+        method: "POST",
+        headers: authHeaders(config.token),
+        body: JSON.stringify(payload),
+      });
+      if (response.ok) return { channel: "integgri" as const };
+
+      const integgriErr = await readError(response);
+      const soft10Err = soft10Error instanceof Error ? soft10Error.message : String(soft10Error);
+      throw new Error(
+        `Template com variáveis bloqueado. Soft10: ${soft10Err} | Integgri: ${integgriErr}`,
+      );
+    }
+  }
 
   const payload: Record<string, unknown> = {
     number,
@@ -126,10 +213,18 @@ export async function sendInteggriTemplate(
   if (!response.ok) {
     throw new Error(await readError(response));
   }
+  return { channel: "integgri" as const };
 }
 
 export function readCobrancaTemplateName() {
   return (process.env["INTEGGRI_COBRANCA_TEMPLATE"] ?? "aviso_de_cobranca").trim() || "aviso_de_cobranca";
+}
+
+export function readDocumentoPagamentoTemplateName() {
+  return (
+    (process.env["INTEGGRI_DOCUMENTO_TEMPLATE"] ?? "documento_para_pagamento").trim() ||
+    "documento_para_pagamento"
+  );
 }
 
 export async function sendInteggriDocument(

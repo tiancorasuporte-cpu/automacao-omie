@@ -203,6 +203,21 @@ export async function ensureSchema() {
     );
   }
 
+  if (!(await tableExists("doc_links"))) {
+    await sql`
+      create table doc_links (
+        token varchar(32) primary key,
+        target_url text not null,
+        due_item_id integer references due_items(id) on delete set null,
+        phone varchar(32),
+        label varchar(200),
+        created_at timestamptz not null default now(),
+        expires_at timestamptz,
+        hits integer not null default 0
+      )
+    `;
+  }
+
   if (!(await tableExists("sync_log"))) {
     await sql`
       create table sync_log (

@@ -3,6 +3,7 @@ import "@tanstack/react-start/server-only";
 import {
   isInteggriConfigured,
   readCobrancaTemplateName,
+  readDocumentoPagamentoTemplateName,
   readInteggriConfig,
   sendInteggriDocument,
   sendInteggriTemplate,
@@ -43,6 +44,21 @@ export async function sendWhatsAppCobrancaTemplate(chatId: string) {
     throw new Error("Template de cobrança só está disponível com Integgri/WABA configurada.");
   }
   await sendInteggriTemplate(chatId, readCobrancaTemplateName());
+}
+
+/** Template com variável {{1}} = link do documento. */
+export async function sendWhatsAppDocumentoPagamentoTemplate(chatId: string, documentLink: string) {
+  if (!usesWabaTemplateForCobranca()) {
+    throw new Error("Template de documento só está disponível com Integgri/WABA configurada.");
+  }
+  const link = documentLink.trim();
+  if (!/^https?:\/\//i.test(link)) {
+    throw new Error("Link do documento inválido.");
+  }
+  return sendInteggriTemplate(chatId, readDocumentoPagamentoTemplateName(), {
+    body: link,
+    variables: [link],
+  });
 }
 
 export async function sendWhatsAppDocument(

@@ -1,5 +1,6 @@
 import "@tanstack/react-start/server-only";
 
+import { createDocLink } from "@/db/doc-links";
 import { getDueItemById } from "@/db/due-items";
 import {
   listPendingDocsForPhone,
@@ -12,6 +13,7 @@ import { resolveDueItemPdfWithStatus } from "@/server/omie/documents";
 import {
   sendWhatsAppCobrancaTemplate,
   sendWhatsAppDocument,
+  sendWhatsAppDocumentoPagamentoTemplate,
   sendWhatsAppText,
   usesWabaTemplateForCobranca,
 } from "@/server/whatsapp";
@@ -57,17 +59,79 @@ export function extractInboundPhone(payload: unknown): string | null {
 export function isInboundCustomerMessage(payload: unknown) {
   if (!payload || typeof payload !== "object") return false;
   const root = payload as Record<string, unknown>;
-  const fromMe = root["fromMe"] ?? root["from_me"] ?? (root["message"] as Record<string, unknown> | undefined)?.["fromMe"];
+  const fromMe =
+    root["fromMe"] ??
+    root["from_me"] ??
+    (root["message"] as Record<string, unknown> | undefined)?.["fromMe"];
   if (fromMe === true || fromMe === "true" || fromMe === 1) return false;
   const direction = String(root["direction"] ?? root["type"] ?? "").toLowerCase();
   if (direction.includes("out") || direction === "sent") return false;
   return true;
 }
 
-/** Avisa por template e guarda os boletos para enviar só depois da resposta. */
+async function resolveItemDocumentLink(dueItemId: number, phone: string) {
+  const item = await getDueItemById(dueItemId);
+  if (!item) throw new Error(`Documento ${dueItemId} não encontrado.`);
+  const app = listOmieApps().find((entry) => entry.id === item.omieAppId);
+  if (!app) throw new Error(`App Omie não encontrado para o item ${dueItemId}.`);
+
+  const result = await resolveDueItemPdfWithStatus(app, item);
+  const target =
+    result.link?.trim() ||
+    (result.document?.url ? result.document.url.trim() : "") ||
+    "";
+  if (!target) {
+    throw new Error(result.status ?? `Sem link/PDF para o item ${dueItemId}.`);
+  }
+
+  const label = [
+    item.clientName?.trim(),
+    (result.documentNumber ?? item.documentNumber)
+      ? `Doc. ${result.documentNumber ?? item.documentNumber}`
+      : null,
+    `Venc. ${formatDisplayDate(item.dueDate)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const short = await createDocLink({
+    targetUrl: target,
+    dueItemId,
+    phone,
+    label,
+  });
+  return { ...short, targetUrl: target, label, item };
+}
+
+/**
+ * Envia template documento_para_pagamento com {{1}} = link do boleto.
+ * Um template por documento (cada um com seu link).
+ */
 export async function notifyCobrancaViaWabaTemplate(chatId: string, dueItemIds: number[]) {
-  await sendWhatsAppCobrancaTemplate(chatId);
-  await queuePendingDueItems(chatId, dueItemIds);
+  const phone = digitsPhone(chatId);
+  const errors: string[] = [];
+  let sent = 0;
+
+  for (const dueItemId of dueItemIds) {
+    try {
+      const doc = await resolveItemDocumentLink(dueItemId, phone);
+      await sendWhatsAppDocumentoPagamentoTemplate(phone, doc.url);
+      sent += 1;
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Falha no template com link.");
+    }
+  }
+
+  if (sent === 0) {
+    // Fallback antigo: aviso estático + fila para resposta (se API de variáveis falhar).
+    await sendWhatsAppCobrancaTemplate(phone);
+    await queuePendingDueItems(phone, dueItemIds);
+    if (errors.length) {
+      throw new Error(errors.join(" | "));
+    }
+  } else if (errors.length) {
+    console.warn("[waba-cobranca] parcial", { sent, errors });
+  }
 }
 
 export async function fulfillPendingDocsForPhone(phone: string) {
@@ -103,27 +167,22 @@ export async function fulfillPendingDocsForPhone(phone: string) {
         continue;
       }
 
-      const item = await getDueItemById(row.dueItemId);
-      if (!item) {
+      const doc = await resolveItemDocumentLink(row.dueItemId, chatId);
+      try {
+        await sendWhatsAppDocumentoPagamentoTemplate(chatId, doc.url);
+        sent += 1;
         fulfilledIds.push(row.id);
         continue;
-      }
-      const app = listOmieApps().find((entry) => entry.id === item.omieAppId);
-      if (!app) {
-        errors.push(`Item ${row.dueItemId}: app Omie não encontrado.`);
-        continue;
+      } catch {
+        // tenta arquivo/link livre se a janela permitir
       }
 
-      const result = await resolveDueItemPdfWithStatus(app, item);
-      const caption = [
-        item.clientName?.trim(),
-        (result.documentNumber ?? item.documentNumber)
-          ? `Doc. ${result.documentNumber ?? item.documentNumber}`
-          : null,
-        `Venc. ${formatDisplayDate(item.dueDate)}`,
-      ]
-        .filter(Boolean)
-        .join(" · ");
+      const item = doc.item;
+      const result = await resolveDueItemPdfWithStatus(
+        listOmieApps().find((entry) => entry.id === item.omieAppId)!,
+        item,
+      );
+      const caption = doc.label;
 
       if (result.document) {
         await sendWhatsAppDocument(chatId, result.document, caption);
@@ -131,10 +190,10 @@ export async function fulfillPendingDocsForPhone(phone: string) {
         fulfilledIds.push(row.id);
         continue;
       }
-      if (result.link) {
+      if (result.link || doc.targetUrl) {
         await sendWhatsAppText(
           chatId,
-          [`📎 Documento`, caption, "", result.link].filter(Boolean).join("\n"),
+          [`📎 Documento`, caption, "", result.link || doc.targetUrl].filter(Boolean).join("\n"),
         );
         sent += 1;
         fulfilledIds.push(row.id);
@@ -166,36 +225,25 @@ export async function handleInteggriInboundWebhook(payload: unknown) {
   return { ok: true, phone, ...result };
 }
 
-export async function prepareTestCobrancaFlow(phone: string) {
-  const pdf = Buffer.from(`%PDF-1.4
-1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj
-2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj
-3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>endobj
-4 0 obj<< /Length 78 >>stream
-BT /F1 16 Tf 72 720 Td (Boleto teste - resposta WABA) Tj ET
-endstream
-endobj
-5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj
-xref
-0 6
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000266 00000 n 
-0000000394 00000 n 
-trailer<< /Size 6 /Root 1 0 R >>
-startxref
-467
-%%EOF
-`);
-
-  await sendWhatsAppCobrancaTemplate(phone);
-  const pendingId = await queuePendingTestDocument({
+export async function prepareTestDocumentoPagamento(phone: string, documentUrl?: string) {
+  const target =
+    documentUrl?.trim() ||
+    "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
+  const short = await createDocLink({
+    targetUrl: target,
     phone,
-    filename: "boleto-teste.pdf",
-    mimetype: "application/pdf",
-    base64: pdf.toString("base64"),
+    label: "Teste documento_para_pagamento",
   });
-  return { pendingId, template: "aviso_de_cobranca", phone: digitsPhone(phone) };
+  const result = await sendWhatsAppDocumentoPagamentoTemplate(phone, short.url);
+  return {
+    phone: digitsPhone(phone),
+    template: "documento_para_pagamento",
+    variable: short.url,
+    targetUrl: target,
+    channel: result.channel,
+  };
+}
+
+export async function prepareTestCobrancaFlow(phone: string) {
+  return prepareTestDocumentoPagamento(phone);
 }

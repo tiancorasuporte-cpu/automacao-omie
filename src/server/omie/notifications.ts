@@ -550,7 +550,7 @@ async function sendReminderBatch(
           dueItemId: item.id,
           phone: group.phone,
           message: usesWabaTemplateForCobranca()
-            ? `WABA template aviso_de_cobranca (PDF pendente da resposta)`
+            ? `WABA template documento_para_pagamento (link do boleto)`
             : message,
           success: true,
           kind,
