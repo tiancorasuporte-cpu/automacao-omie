@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConversasRouteImport } from './routes/conversas'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as FacilitiesRouteImport } from './routes/facilities'
+import { Route as FrotaRouteImport } from './routes/frota'
 import { Route as NotificacoesRouteImport } from './routes/notificacoes'
 import { Route as OrcamentosRouteImport } from './routes/orcamentos'
 import { Route as ProdutosRouteImport } from './routes/produtos'
@@ -22,6 +23,7 @@ import { Route as SetupRouteImport } from './routes/setup'
 import { Route as UniformesRouteImport } from './routes/uniformes'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as VencimentosRouteImport } from './routes/vencimentos'
+import { Route as DTokenRouteImport } from './routes/d.$token'
 import { Route as ApiInteggriWebhookRouteImport } from './routes/api/integgri/webhook'
 import { Route as ApiWahaWebhookRouteImport } from './routes/api/waha/webhook'
 
@@ -43,6 +45,11 @@ const DashboardRoute = DashboardRouteImport.update({
 const FacilitiesRoute = FacilitiesRouteImport.update({
   id: '/facilities',
   path: '/facilities',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FrotaRoute = FrotaRouteImport.update({
+  id: '/frota',
+  path: '/frota',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NotificacoesRoute = NotificacoesRouteImport.update({
@@ -90,6 +97,11 @@ const VencimentosRoute = VencimentosRouteImport.update({
   path: '/vencimentos',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DTokenRoute = DTokenRouteImport.update({
+  id: '/d/$token',
+  path: '/d/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiInteggriWebhookRoute = ApiInteggriWebhookRouteImport.update({
   id: '/api/integgri/webhook',
   path: '/api/integgri/webhook',
@@ -106,6 +118,7 @@ export interface FileRoutesByFullPath {
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
   '/facilities': typeof FacilitiesRoute
+  '/frota': typeof FrotaRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
   '/produtos': typeof ProdutosRoute
@@ -115,6 +128,7 @@ export interface FileRoutesByFullPath {
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
+  '/d/$token': typeof DTokenRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
 }
@@ -123,6 +137,7 @@ export interface FileRoutesByTo {
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
   '/facilities': typeof FacilitiesRoute
+  '/frota': typeof FrotaRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
   '/produtos': typeof ProdutosRoute
@@ -132,6 +147,7 @@ export interface FileRoutesByTo {
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
+  '/d/$token': typeof DTokenRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
 }
@@ -141,6 +157,7 @@ export interface FileRoutesById {
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
   '/facilities': typeof FacilitiesRoute
+  '/frota': typeof FrotaRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
   '/produtos': typeof ProdutosRoute
@@ -150,6 +167,7 @@ export interface FileRoutesById {
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
+  '/d/$token': typeof DTokenRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
 }
@@ -160,6 +178,7 @@ export interface FileRouteTypes {
     | '/conversas'
     | '/dashboard'
     | '/facilities'
+    | '/frota'
     | '/notificacoes'
     | '/orcamentos'
     | '/produtos'
@@ -169,6 +188,7 @@ export interface FileRouteTypes {
     | '/uniformes'
     | '/users'
     | '/vencimentos'
+    | '/d/$token'
     | '/api/integgri/webhook'
     | '/api/waha/webhook'
   fileRoutesByTo: FileRoutesByTo
@@ -177,6 +197,7 @@ export interface FileRouteTypes {
     | '/conversas'
     | '/dashboard'
     | '/facilities'
+    | '/frota'
     | '/notificacoes'
     | '/orcamentos'
     | '/produtos'
@@ -186,6 +207,7 @@ export interface FileRouteTypes {
     | '/uniformes'
     | '/users'
     | '/vencimentos'
+    | '/d/$token'
     | '/api/integgri/webhook'
     | '/api/waha/webhook'
   id:
@@ -194,6 +216,7 @@ export interface FileRouteTypes {
     | '/conversas'
     | '/dashboard'
     | '/facilities'
+    | '/frota'
     | '/notificacoes'
     | '/orcamentos'
     | '/produtos'
@@ -203,6 +226,7 @@ export interface FileRouteTypes {
     | '/uniformes'
     | '/users'
     | '/vencimentos'
+    | '/d/$token'
     | '/api/integgri/webhook'
     | '/api/waha/webhook'
   fileRoutesById: FileRoutesById
@@ -212,6 +236,7 @@ export interface RootRouteChildren {
   ConversasRoute: typeof ConversasRoute
   DashboardRoute: typeof DashboardRoute
   FacilitiesRoute: typeof FacilitiesRoute
+  FrotaRoute: typeof FrotaRoute
   NotificacoesRoute: typeof NotificacoesRoute
   OrcamentosRoute: typeof OrcamentosRoute
   ProdutosRoute: typeof ProdutosRoute
@@ -221,6 +246,7 @@ export interface RootRouteChildren {
   UniformesRoute: typeof UniformesRoute
   UsersRoute: typeof UsersRoute
   VencimentosRoute: typeof VencimentosRoute
+  DTokenRoute: typeof DTokenRoute
   ApiInteggriWebhookRoute: typeof ApiInteggriWebhookRoute
   ApiWahaWebhookRoute: typeof ApiWahaWebhookRoute
 }
@@ -253,6 +279,13 @@ declare module '@tanstack/react-router' {
       path: '/facilities'
       fullPath: '/facilities'
       preLoaderRoute: typeof FacilitiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/frota': {
+      id: '/frota'
+      path: '/frota'
+      fullPath: '/frota'
+      preLoaderRoute: typeof FrotaRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/notificacoes': {
@@ -318,6 +351,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VencimentosRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/d/$token': {
+      id: '/d/$token'
+      path: '/d/$token'
+      fullPath: '/d/$token'
+      preLoaderRoute: typeof DTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/integgri/webhook': {
       id: '/api/integgri/webhook'
       path: '/api/integgri/webhook'
@@ -340,6 +380,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConversasRoute: ConversasRoute,
   DashboardRoute: DashboardRoute,
   FacilitiesRoute: FacilitiesRoute,
+  FrotaRoute: FrotaRoute,
   NotificacoesRoute: NotificacoesRoute,
   OrcamentosRoute: OrcamentosRoute,
   ProdutosRoute: ProdutosRoute,
@@ -349,6 +390,7 @@ const rootRouteChildren: RootRouteChildren = {
   UniformesRoute: UniformesRoute,
   UsersRoute: UsersRoute,
   VencimentosRoute: VencimentosRoute,
+  DTokenRoute: DTokenRoute,
   ApiInteggriWebhookRoute: ApiInteggriWebhookRoute,
   ApiWahaWebhookRoute: ApiWahaWebhookRoute,
 }

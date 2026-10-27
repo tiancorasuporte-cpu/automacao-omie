@@ -2610,7 +2610,7 @@ function FacilitiesPage() {
       </Dialog>
 
       <Dialog open={colDialog} onOpenChange={setColDialog}>
-        <DialogContent className="w-[min(36rem,calc(100vw-2rem))]">
+        <DialogContent className="max-w-[36rem]">
           <DialogHeader>
             <DialogTitle>
               {colForm.id ? "Editar colaborador" : "Novo colaborador"}

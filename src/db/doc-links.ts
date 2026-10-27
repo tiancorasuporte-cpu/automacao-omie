@@ -8,12 +8,62 @@ function newToken() {
   return randomBytes(12).toString("base64url");
 }
 
+const DEFAULT_PUBLIC_SITE_URL = "https://sistema.ancoraseguranca.app";
+
+/** Host privado/local — não serve para link de WhatsApp. */
+function isPrivateOrLocalHost(hostname: string) {
+  const host = hostname.trim().toLowerCase().replace(/^\[|\]$/g, "");
+  if (!host || host === "localhost" || host.endsWith(".local")) return true;
+  if (host === "::1" || host === "0.0.0.0") return true;
+  if (/^127\./.test(host)) return true;
+  if (/^10\./.test(host)) return true;
+  if (/^192\.168\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return true;
+  if (/^169\.254\./.test(host)) return true;
+  return false;
+}
+
+function normalizeSiteBase(raw: string) {
+  const cleaned = raw.trim().replace(/\/+$/, "").replace(/\/api\/waha\/webhook$/i, "");
+  if (!cleaned) return null;
+  try {
+    const url = new URL(cleaned.includes("://") ? cleaned : `https://${cleaned}`);
+    if (isPrivateOrLocalHost(url.hostname)) return null;
+    // WhatsApp/Meta templates preferem HTTPS público.
+    if (url.protocol === "http:" && url.port && url.port !== "80") return null;
+    return `${url.protocol}//${url.host}`.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Base pública do app para links /d/*.
+ * Não usa PUBLIC_APP_URL de webhook WAHA (costuma ser IP LAN).
+ */
 export function readPublicSiteUrl() {
-  const raw =
-    process.env["PUBLIC_SITE_URL"]?.trim() ||
-    process.env["PUBLIC_APP_URL"]?.trim() ||
-    "https://sistema.ancoraseguranca.app";
-  return raw.replace(/\/+$/, "").replace(/\/api\/waha\/webhook$/i, "");
+  const candidates = [
+    process.env["PUBLIC_SITE_URL"]?.trim(),
+    process.env["PUBLIC_APP_URL"]?.trim(),
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const normalized = normalizeSiteBase(candidate);
+    if (normalized) return normalized;
+  }
+  return DEFAULT_PUBLIC_SITE_URL;
+}
+
+/** URL segura para variável de template WABA (HTTPS público). */
+export function isPublicTemplateUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "https:") return false;
+    if (isPrivateOrLocalHost(url.hostname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function createDocLink(input: {

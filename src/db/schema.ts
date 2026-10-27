@@ -628,6 +628,243 @@ export async function ensureSchema() {
     }
   }
 
+  // --- Frota (paridade Drivvo) ---
+  if (!(await tableExists("fleet_vehicles"))) {
+    await sql`
+      create table fleet_vehicles (
+        id serial primary key,
+        name varchar(80) not null,
+        brand varchar(80),
+        model varchar(120),
+        plate varchar(20),
+        year integer,
+        color varchar(40),
+        fuel_capacity_liters numeric(10, 2),
+        current_odometer numeric(12, 1) not null default 0,
+        notes text,
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("fleet_drivers"))) {
+    await sql`
+      create table fleet_drivers (
+        id serial primary key,
+        name varchar(160) not null,
+        phone varchar(32),
+        email varchar(160),
+        cnh varchar(40),
+        user_id integer references users(id) on delete set null,
+        active boolean not null default true,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await columnExists("fleet_drivers", "user_id"))) {
+    await sql`alter table fleet_drivers add column user_id integer references users(id) on delete set null`;
+  }
+  if (!(await indexExists("fleet_drivers_user_uidx"))) {
+    await sql.unsafe(
+      "create unique index fleet_drivers_user_uidx on fleet_drivers (user_id) where user_id is not null",
+    );
+  }
+
+  if (!(await tableExists("fleet_catalog"))) {
+    await sql`
+      create table fleet_catalog (
+        id serial primary key,
+        kind varchar(32) not null,
+        name varchar(160) not null,
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        unique (kind, name)
+      )
+    `;
+  }
+
+  if (!(await tableExists("fleet_refuelings"))) {
+    await sql`
+      create table fleet_refuelings (
+        id serial primary key,
+        vehicle_id integer not null references fleet_vehicles(id) on delete cascade,
+        driver_id integer references fleet_drivers(id) on delete set null,
+        occurred_at timestamptz not null,
+        odometer numeric(12, 1) not null,
+        fuel_type varchar(80) not null,
+        price_per_liter numeric(12, 4) not null default 0,
+        total_amount numeric(12, 2) not null default 0,
+        liters numeric(12, 3) not null default 0,
+        full_tank boolean not null default false,
+        station varchar(160),
+        reason varchar(160),
+        payment_method varchar(80),
+        discount numeric(12, 2) not null default 0,
+        previous_missing boolean not null default false,
+        attachment_name varchar(200),
+        attachment_data text,
+        notes text,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("fleet_refuelings_vehicle_idx"))) {
+    await sql.unsafe(
+      "create index fleet_refuelings_vehicle_idx on fleet_refuelings (vehicle_id, occurred_at desc)",
+    );
+  }
+
+  if (!(await tableExists("fleet_expenses"))) {
+    await sql`
+      create table fleet_expenses (
+        id serial primary key,
+        vehicle_id integer not null references fleet_vehicles(id) on delete cascade,
+        driver_id integer references fleet_drivers(id) on delete set null,
+        occurred_at timestamptz not null,
+        odometer numeric(12, 1),
+        title varchar(160),
+        expense_type varchar(120) not null,
+        amount numeric(12, 2) not null default 0,
+        discount numeric(12, 2) not null default 0,
+        installments integer,
+        location varchar(160),
+        reason varchar(160),
+        payment_method varchar(80),
+        attachment_name varchar(200),
+        attachment_data text,
+        notes text,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("fleet_expenses_vehicle_idx"))) {
+    await sql.unsafe(
+      "create index fleet_expenses_vehicle_idx on fleet_expenses (vehicle_id, occurred_at desc)",
+    );
+  }
+
+  if (!(await tableExists("fleet_incomes"))) {
+    await sql`
+      create table fleet_incomes (
+        id serial primary key,
+        vehicle_id integer not null references fleet_vehicles(id) on delete cascade,
+        driver_id integer references fleet_drivers(id) on delete set null,
+        occurred_at timestamptz not null,
+        odometer numeric(12, 1),
+        title varchar(160),
+        income_type varchar(120) not null default 'Receita',
+        amount numeric(12, 2) not null default 0,
+        location varchar(160),
+        payment_method varchar(80),
+        notes text,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("fleet_services"))) {
+    await sql`
+      create table fleet_services (
+        id serial primary key,
+        vehicle_id integer not null references fleet_vehicles(id) on delete cascade,
+        driver_id integer references fleet_drivers(id) on delete set null,
+        occurred_at timestamptz not null,
+        odometer numeric(12, 1),
+        title varchar(160),
+        service_type varchar(120) not null,
+        amount numeric(12, 2) not null default 0,
+        discount numeric(12, 2) not null default 0,
+        installments integer,
+        location varchar(160),
+        payment_method varchar(80),
+        attachment_name varchar(200),
+        attachment_data text,
+        notes text,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("fleet_routes"))) {
+    await sql`
+      create table fleet_routes (
+        id serial primary key,
+        vehicle_id integer not null references fleet_vehicles(id) on delete cascade,
+        driver_id integer references fleet_drivers(id) on delete set null,
+        occurred_at timestamptz not null,
+        odometer_start numeric(12, 1),
+        odometer_end numeric(12, 1),
+        distance_km numeric(12, 1),
+        origin varchar(200),
+        destination varchar(200),
+        purpose varchar(160),
+        freight_amount numeric(12, 2) not null default 0,
+        notes text,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("fleet_readings"))) {
+    await sql`
+      create table fleet_readings (
+        id serial primary key,
+        vehicle_id integer not null references fleet_vehicles(id) on delete cascade,
+        driver_id integer references fleet_drivers(id) on delete set null,
+        occurred_at timestamptz not null,
+        odometer numeric(12, 1) not null,
+        kind varchar(40) not null default 'odometer',
+        notes text,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("fleet_reminders"))) {
+    await sql`
+      create table fleet_reminders (
+        id serial primary key,
+        vehicle_id integer not null references fleet_vehicles(id) on delete cascade,
+        title varchar(160) not null,
+        trigger_kind varchar(16) not null default 'both',
+        due_date date,
+        due_odometer numeric(12, 1),
+        last_done_at date,
+        last_done_odometer numeric(12, 1),
+        interval_days integer,
+        interval_km integer,
+        active boolean not null default true,
+        notes text,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("fleet_checklists"))) {
+    await sql`
+      create table fleet_checklists (
+        id serial primary key,
+        vehicle_id integer not null references fleet_vehicles(id) on delete cascade,
+        driver_id integer references fleet_drivers(id) on delete set null,
+        occurred_at timestamptz not null,
+        odometer numeric(12, 1),
+        title varchar(160) not null default 'Checklist',
+        items_json text not null default '[]',
+        notes text,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+
   const superUsername = process.env["APP_SUPERADMIN_USERNAME"] ?? "superadmin";
   const superPassword = process.env["APP_SUPERADMIN_PASSWORD"] ?? "ancora";
   const superName = process.env["APP_SUPERADMIN_NAME"] ?? "Super Admin";

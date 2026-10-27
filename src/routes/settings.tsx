@@ -259,7 +259,9 @@ function InteggriSettings({
           Integgri Chat
         </a>
         . Use a URL da API <code>https://iapi.integgri.com.br</code> (não o app). O token fica em Conexões → API. Com isso ativo, o WAHA deixa de ser usado no envio.
-        Cobrança WABA: template <code>documento_para_pagamento</code> com variável do link do boleto.
+        Cobrança WABA: lembrete D-1 usa{" "}
+        <code>lembrete_de_vencimento_1|2_documento(s)</code>; botão de envio usa{" "}
+        <code>envio_para_pagamento_1|2|3_documento(s)</code> (mesmo cliente). Vars: nome + links.
         Templates com {"{{1}}"} precisam de permissão Soft10/WABA dinâmica (a API Chat só envia templates estáticos).
       </p>
       <form

@@ -39,6 +39,7 @@ const NAV: Array<{
     | "/produtos"
     | "/facilities"
     | "/uniformes"
+    | "/frota"
     | "/notificacoes"
     | "/settings"
     | "/users";
@@ -54,6 +55,7 @@ const NAV: Array<{
   { to: "/produtos", label: "Produtos", icon: "inventory_2", module: "produtos" },
   { to: "/facilities", label: "Facilities", icon: "apartment", module: "facilities" },
   { to: "/uniformes", label: "Uniformes", icon: "checkroom", module: "uniformes" },
+  { to: "/frota", label: "Frota", icon: "directions_car", module: "frota" },
   { to: "/notificacoes", label: "Notificações", icon: "history", module: "notificacoes" },
   { to: "/settings", label: "Configurações", icon: "settings", adminOnly: true },
   { to: "/users", label: "Usuários", icon: "manage_accounts", adminOnly: true },

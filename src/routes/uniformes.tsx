@@ -368,7 +368,7 @@ function EmptyState({ icon, text }: { icon: string; text: string }) {
 function ImageViewer({ src, onClose }: { src: string | null; onClose: () => void }) {
   return (
     <Dialog open={src != null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-[min(56rem,calc(100vw-2rem))]">
+      <DialogContent style={{ width: "min(56rem, 100%)" }}>
         <DialogHeader>
           <DialogTitle>Foto</DialogTitle>
         </DialogHeader>

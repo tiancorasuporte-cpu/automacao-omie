@@ -1,17 +1,23 @@
 import "@tanstack/react-start/server-only";
 
 import {
+  envioPagamentoTemplateName,
   isInteggriConfigured,
+  lembreteVencimentoTemplateName,
   readCobrancaTemplateName,
   readDocumentoPagamentoTemplateName,
   readInteggriConfig,
   sendInteggriDocument,
   sendInteggriTemplate,
   sendInteggriText,
+  type WabaEnvioDocCount,
+  type WabaLembreteDocCount,
 } from "@/server/integgri";
 import { isWahaConfigured, sendWahaDocument, sendWahaText } from "@/server/waha";
 
 export type WhatsAppProvider = "integgri" | "waha";
+
+export type WabaDocsTemplateKind = "lembrete" | "envio";
 
 export function readWhatsAppProvider(): WhatsAppProvider {
   const raw = (process.env["WHATSAPP_PROVIDER"] ?? "").trim().toLowerCase();
@@ -46,7 +52,7 @@ export async function sendWhatsAppCobrancaTemplate(chatId: string) {
   await sendInteggriTemplate(chatId, readCobrancaTemplateName());
 }
 
-/** Template com variável {{1}} = link do documento. */
+/** Template legado com 1 variável = link. */
 export async function sendWhatsAppDocumentoPagamentoTemplate(chatId: string, documentLink: string) {
   if (!usesWabaTemplateForCobranca()) {
     throw new Error("Template de documento só está disponível com Integgri/WABA configurada.");
@@ -59,6 +65,56 @@ export async function sendWhatsAppDocumentoPagamentoTemplate(chatId: string, doc
     body: link,
     variables: [link],
   });
+}
+
+/**
+ * Templates novos:
+ * - lembrete_de_vencimento_1|2_documento(s)
+ * - envio_para_pagamento_1|2|3_documento(s)
+ *
+ * Variáveis: {{1}} nome, {{2}} link1, {{3}} link2, {{4}} link3
+ */
+export async function sendWhatsAppDocsBundleTemplate(input: {
+  chatId: string;
+  kind: WabaDocsTemplateKind;
+  clientName: string;
+  documentLinks: string[];
+}) {
+  if (!usesWabaTemplateForCobranca()) {
+    throw new Error("Template WABA só está disponível com Integgri configurada.");
+  }
+
+  const name = input.clientName.trim() || "Cliente";
+  const links = input.documentLinks.map((l) => l.trim()).filter((l) => /^https?:\/\//i.test(l));
+  if (!links.length) throw new Error("Nenhum link de documento válido.");
+
+  const maxPerMessage = input.kind === "lembrete" ? 2 : 3;
+  const chunks: string[][] = [];
+  for (let i = 0; i < links.length; i += maxPerMessage) {
+    chunks.push(links.slice(i, i + maxPerMessage));
+  }
+
+  let lastChannel: "integgri" | "soft10" = "integgri";
+  const templates: string[] = [];
+
+  for (const chunk of chunks) {
+    const count = chunk.length as WabaLembreteDocCount | WabaEnvioDocCount;
+    const templateName =
+      input.kind === "lembrete"
+        ? lembreteVencimentoTemplateName(Math.min(count, 2) as WabaLembreteDocCount)
+        : envioPagamentoTemplateName(Math.min(count, 3) as WabaEnvioDocCount);
+
+    // msg1=nome, msg2..=links
+    const variables = [name, ...chunk];
+    const result = await sendInteggriTemplate(input.chatId, templateName, {
+      body: chunk[0],
+      variables,
+    });
+    lastChannel = result.channel;
+    templates.push(templateName);
+  }
+
+  return { channel: lastChannel, templates, messages: chunks.length };
 }
 
 export async function sendWhatsAppDocument(

@@ -255,6 +255,41 @@
   }
 }
 
+/* Dialog: centrado por flex — evita left/translate + w-[min()] quebrado no Tailwind deste projeto. */
+.ancora-dialog-positioner {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  pointer-events: none;
+}
+
+.ancora-dialog-panel {
+  box-sizing: border-box;
+  pointer-events: auto;
+  position: relative;
+  z-index: 50;
+  display: flex;
+  width: min(32rem, 100%);
+  min-width: min(18rem, 100%) !important;
+  max-height: min(90vh, 56rem);
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-outline-variant);
+  background: var(--color-surface-container-lowest);
+  padding: var(--spacing-md);
+  color: var(--color-on-surface);
+  box-shadow:
+    0 20px 40px -24px color-mix(in oklch, var(--primary) 35%, transparent);
+}
+
 @keyframes login-rise {
   from {
     opacity: 0;

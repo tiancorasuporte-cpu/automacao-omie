@@ -69,6 +69,13 @@ export const createUserFn = createServerFn({ method: "POST" })
         role: data.role,
         modules: data.role === "operator" ? data.modules ?? [] : [...ALL_MODULE_IDS],
       });
+      const { canAccessModule } = await import("@/lib/require-auth");
+      if (canAccessModule(user, "frota")) {
+        const { ensureSchema } = await import("@/db/schema");
+        const { ensureFleetDriverForUser } = await import("@/db/frota");
+        await ensureSchema();
+        await ensureFleetDriverForUser({ id: user.id, name: user.name });
+      }
       return { ok: true as const, user };
     } catch (error) {
       const code = typeof error === "object" && error && "code" in error ? String(error.code) : "";
@@ -116,6 +123,15 @@ export const updateUserModulesFn = createServerFn({ method: "POST" })
     try {
       const user = await updateUserModules(data.id, data.modules);
       if (!user) return { ok: false as const, error: "Usuário não encontrado." };
+      const { canAccessModule } = await import("@/lib/require-auth");
+      const { ensureSchema } = await import("@/db/schema");
+      const { deactivateFleetDriverForUser, ensureFleetDriverForUser } = await import("@/db/frota");
+      await ensureSchema();
+      if (canAccessModule(user, "frota")) {
+        await ensureFleetDriverForUser({ id: user.id, name: user.name });
+      } else {
+        await deactivateFleetDriverForUser(user.id);
+      }
       return { ok: true as const, user };
     } catch (error) {
       return {

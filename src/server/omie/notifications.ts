@@ -308,8 +308,8 @@ async function sendItemToPhone(
   errors: string[],
 ) {
   if (usesWabaTemplateForCobranca()) {
-    // Template abre a conversa; o PDF só sai depois que o cliente responder (webhook Integgri).
-    await notifyCobrancaViaWabaTemplate(chatId, [item.id]);
+    // Botão manual / envio avulso → templates envio_para_pagamento_*.
+    await notifyCobrancaViaWabaTemplate(chatId, [item.id], { kind: "envio" });
     return;
   }
   await sendWhatsAppText(chatId, message);
@@ -525,11 +525,16 @@ async function sendReminderBatch(
     });
 
     try {
+      let wabaTemplates: string[] = [];
       if (usesWabaTemplateForCobranca()) {
-        await notifyCobrancaViaWabaTemplate(
+        // Pré-vencimento (D-1) → lembrete_*; atraso/cobrança → envio_*.
+        const wabaKind = kind === "pre_due" ? "lembrete" : "envio";
+        const result = await notifyCobrancaViaWabaTemplate(
           group.chatId,
           group.items.map((item) => item.id),
+          { kind: wabaKind },
         );
+        wabaTemplates = result?.templates ?? [];
       } else {
         await sendWhatsAppText(group.chatId, message);
         for (const item of group.items) {
@@ -550,7 +555,7 @@ async function sendReminderBatch(
           dueItemId: item.id,
           phone: group.phone,
           message: usesWabaTemplateForCobranca()
-            ? `WABA template documento_para_pagamento (link do boleto)`
+            ? `WABA ${wabaTemplates.join(", ") || "template"} (nome + links)`
             : message,
           success: true,
           kind,

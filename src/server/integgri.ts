@@ -37,7 +37,12 @@ export function isInteggriConfigured(config = readInteggriConfig()) {
 }
 
 export function chatIdToPhoneDigits(chatId: string) {
-  return chatId.replace(/@.*$/, "").replace(/\D/g, "");
+  let digits = chatId.replace(/@.*$/, "").replace(/\D/g, "");
+  // WhatsApp BR: garante DDI 55 quando vier só DDD+número.
+  if (digits.length >= 10 && digits.length <= 11 && !digits.startsWith("55")) {
+    digits = `55${digits}`;
+  }
+  return digits;
 }
 
 function authHeaders(token: string, json = true) {
@@ -141,7 +146,20 @@ async function sendSoft10Template(
   }
 }
 
-/** Envia template WABA. Sem variáveis: Integgri Chat API. Com variáveis: Soft10 WABA. */
+/** Converte ["a","b"] → { msg1: "a", msg2: "b" } (contrato Integgri / corpo do template). */
+export function toTemplateBodyVariable(variables: string[]) {
+  const out: Record<string, string> = {};
+  variables.forEach((text, index) => {
+    out[`msg${index + 1}`] = text;
+  });
+  return out;
+}
+
+/**
+ * Envia template WABA via Integgri Chat API.
+ * Com variáveis no CORPO: `templateBodyVariable: { msg1, msg2, … }`.
+ * Variáveis no cabeçalho do template Meta ainda não são suportadas pela Integgri.
+ */
 export async function sendInteggriTemplate(
   chatId: string,
   templateName: string,
@@ -159,48 +177,16 @@ export async function sendInteggriTemplate(
   if (!name) throw new Error("Nome do template WABA não informado.");
   const variables = (options?.variables ?? []).map((v) => v.trim()).filter(Boolean);
 
-  if (variables.length > 0) {
-    try {
-      await sendSoft10Template(number, name, variables, config);
-      return { channel: "soft10" as const };
-    } catch (soft10Error) {
-      // Fallback: tenta Integgri (só funciona se o template for estático; útil para mensagem de erro clara).
-      const payload: Record<string, unknown> = {
-        number,
-        body: variables[0] || options?.body?.trim() || name,
-        templateName: name,
-        variables,
-        templateVariables: variables,
-        parameters: variables,
-        sendSignature: false,
-        closeTicket: false,
-      };
-      if (config.whatsappId) payload.whatsappId = Number(config.whatsappId) || config.whatsappId;
-      if (config.queueId) payload.queueId = Number(config.queueId) || config.queueId;
-      if (config.userId) payload.userId = Number(config.userId) || config.userId;
-
-      const response = await fetch(`${config.url}/api/messages/send`, {
-        method: "POST",
-        headers: authHeaders(config.token),
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) return { channel: "integgri" as const };
-
-      const integgriErr = await readError(response);
-      const soft10Err = soft10Error instanceof Error ? soft10Error.message : String(soft10Error);
-      throw new Error(
-        `Template com variáveis bloqueado. Soft10: ${soft10Err} | Integgri: ${integgriErr}`,
-      );
-    }
-  }
-
   const payload: Record<string, unknown> = {
     number,
-    body: options?.body?.trim() || name,
+    body: variables[0] || options?.body?.trim() || name,
     templateName: name,
     sendSignature: false,
     closeTicket: false,
   };
+  if (variables.length > 0) {
+    payload.templateBodyVariable = toTemplateBodyVariable(variables);
+  }
   if (config.whatsappId) payload.whatsappId = Number(config.whatsappId) || config.whatsappId;
   if (config.queueId) payload.queueId = Number(config.queueId) || config.queueId;
   if (config.userId) payload.userId = Number(config.userId) || config.userId;
@@ -210,10 +196,24 @@ export async function sendInteggriTemplate(
     headers: authHeaders(config.token),
     body: JSON.stringify(payload),
   });
-  if (!response.ok) {
-    throw new Error(await readError(response));
+  if (response.ok) return { channel: "integgri" as const };
+
+  const integgriErr = await readError(response);
+
+  // Fallback Soft10 (Meta-style) se a Integgri rejeitar variáveis.
+  if (variables.length > 0) {
+    try {
+      await sendSoft10Template(number, name, variables, config);
+      return { channel: "soft10" as const };
+    } catch (soft10Error) {
+      const soft10Err = soft10Error instanceof Error ? soft10Error.message : String(soft10Error);
+      throw new Error(
+        `Template com variáveis falhou. Integgri: ${integgriErr} | Soft10: ${soft10Err}`,
+      );
+    }
   }
-  return { channel: "integgri" as const };
+
+  throw new Error(integgriErr);
 }
 
 export function readCobrancaTemplateName() {
@@ -224,6 +224,38 @@ export function readDocumentoPagamentoTemplateName() {
   return (
     (process.env["INTEGGRI_DOCUMENTO_TEMPLATE"] ?? "documento_para_pagamento").trim() ||
     "documento_para_pagamento"
+  );
+}
+
+/** Lembrete D-1 (pré-vencimento): 1 ou 2 documentos. */
+export type WabaLembreteDocCount = 1 | 2;
+/** Envio manual / cobrança: 1, 2 ou 3 documentos. */
+export type WabaEnvioDocCount = 1 | 2 | 3;
+
+export function lembreteVencimentoTemplateName(count: WabaLembreteDocCount) {
+  if (count === 1) {
+    return (
+      process.env["INTEGGRI_LEMBRETE_1_TEMPLATE"]?.trim() || "lembrete_de_vencimento_1_documento"
+    );
+  }
+  return (
+    process.env["INTEGGRI_LEMBRETE_2_TEMPLATE"]?.trim() || "lembrete_de_vencimento_2_documentos"
+  );
+}
+
+export function envioPagamentoTemplateName(count: WabaEnvioDocCount) {
+  if (count === 1) {
+    return (
+      process.env["INTEGGRI_ENVIO_1_TEMPLATE"]?.trim() || "envio_para_pagamento_1_documento"
+    );
+  }
+  if (count === 2) {
+    return (
+      process.env["INTEGGRI_ENVIO_2_TEMPLATE"]?.trim() || "envio_para_pagamento_2_documentos"
+    );
+  }
+  return (
+    process.env["INTEGGRI_ENVIO_3_TEMPLATE"]?.trim() || "envio_para_pagamento_3_documentos"
   );
 }
 

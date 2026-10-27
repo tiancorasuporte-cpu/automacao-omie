@@ -1,21 +1,22 @@
 import "@tanstack/react-start/server-only";
 
-import { createDocLink } from "@/db/doc-links";
+import { createDocLink, isPublicTemplateUrl } from "@/db/doc-links";
 import { getDueItemById } from "@/db/due-items";
 import {
   listPendingDocsForPhone,
   markPendingFulfilled,
   queuePendingDueItems,
-  queuePendingTestDocument,
 } from "@/db/waba-pending";
 import { formatDisplayDate, listOmieApps } from "@/server/omie/client";
 import { resolveDueItemPdfWithStatus } from "@/server/omie/documents";
 import {
   sendWhatsAppCobrancaTemplate,
+  sendWhatsAppDocsBundleTemplate,
   sendWhatsAppDocument,
   sendWhatsAppDocumentoPagamentoTemplate,
   sendWhatsAppText,
   usesWabaTemplateForCobranca,
+  type WabaDocsTemplateKind,
 } from "@/server/whatsapp";
 
 function digitsPhone(value: string) {
@@ -69,6 +70,19 @@ export function isInboundCustomerMessage(payload: unknown) {
   return true;
 }
 
+function tituloCodeFromItem(item: {
+  itemType: string;
+  omieCode: number | null;
+  integrationCode: string | null;
+}) {
+  if (item.integrationCode?.startsWith("titulo:")) {
+    const n = Number(item.integrationCode.slice("titulo:".length));
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  if (item.itemType === "boleto" && item.omieCode && item.omieCode > 0) return item.omieCode;
+  return null;
+}
+
 async function resolveItemDocumentLink(dueItemId: number, phone: string) {
   const item = await getDueItemById(dueItemId);
   if (!item) throw new Error(`Documento ${dueItemId} não encontrado.`);
@@ -76,10 +90,30 @@ async function resolveItemDocumentLink(dueItemId: number, phone: string) {
   if (!app) throw new Error(`App Omie não encontrado para o item ${dueItemId}.`);
 
   const result = await resolveDueItemPdfWithStatus(app, item);
-  const target =
+  let target =
     result.link?.trim() ||
     (result.document?.url ? result.document.url.trim() : "") ||
     "";
+
+  // NFS-e/NF-e costumam vir só em PDF base64 — tenta boleto do título para o template.
+  if (!isPublicTemplateUrl(target) && item.itemType !== "boleto") {
+    const tituloCode = tituloCodeFromItem(item);
+    if (tituloCode) {
+      const boleto = await resolveDueItemPdfWithStatus(app, {
+        ...item,
+        itemType: "boleto",
+        omieCode: tituloCode,
+      });
+      const boletoUrl =
+        boleto.link?.trim() ||
+        (boleto.document?.url ? boleto.document.url.trim() : "") ||
+        "";
+      if (isPublicTemplateUrl(boletoUrl)) {
+        target = boletoUrl;
+      }
+    }
+  }
+
   if (!target) {
     throw new Error(result.status ?? `Sem link/PDF para o item ${dueItemId}.`);
   }
@@ -94,43 +128,92 @@ async function resolveItemDocumentLink(dueItemId: number, phone: string) {
     .filter(Boolean)
     .join(" · ");
 
+  // Preferir URL pública do Omie/prefeitura. Encurtador /d/ só como fallback
+  // e nunca com IP LAN (PUBLIC_APP_URL do WAHA).
+  if (isPublicTemplateUrl(target)) {
+    return {
+      token: "",
+      url: target,
+      targetUrl: target,
+      templateLink: target,
+      label,
+      item,
+    };
+  }
+
   const short = await createDocLink({
     targetUrl: target,
     dueItemId,
     phone,
     label,
   });
-  return { ...short, targetUrl: target, label, item };
+  if (!isPublicTemplateUrl(short.url)) {
+    throw new Error(
+      `Link público indisponível para o item ${dueItemId}. Defina PUBLIC_SITE_URL (ex.: https://sistema.ancoraseguranca.app).`,
+    );
+  }
+  return { ...short, targetUrl: target, templateLink: short.url, label, item };
 }
 
 /**
- * Envia template documento_para_pagamento com {{1}} = link do boleto.
- * Um template por documento (cada um com seu link).
+ * Envia templates por quantidade de documentos (mesmo cliente):
+ * - lembrete: lembrete_de_vencimento_1|2_documento(s)
+ * - envio: envio_para_pagamento_1|2|3_documento(s)
+ *
+ * Vars: {{1}} nome, {{2}} link1, {{3}} link2, {{4}} link3
  */
-export async function notifyCobrancaViaWabaTemplate(chatId: string, dueItemIds: number[]) {
+export async function notifyCobrancaViaWabaTemplate(
+  chatId: string,
+  dueItemIds: number[],
+  options?: { kind?: WabaDocsTemplateKind },
+) {
   const phone = digitsPhone(chatId);
-  const errors: string[] = [];
-  let sent = 0;
+  const kind: WabaDocsTemplateKind = options?.kind ?? "envio";
+  const uniqueIds = [...new Set(dueItemIds.filter((id) => Number.isFinite(id) && id > 0))];
+  if (!uniqueIds.length) throw new Error("Nenhum documento para enviar.");
 
-  for (const dueItemId of dueItemIds) {
+  const docs: Array<{ templateLink: string; clientName: string | null }> = [];
+  const errors: string[] = [];
+
+  for (const dueItemId of uniqueIds) {
     try {
       const doc = await resolveItemDocumentLink(dueItemId, phone);
-      await sendWhatsAppDocumentoPagamentoTemplate(phone, doc.url);
-      sent += 1;
+      docs.push({
+        templateLink: doc.templateLink,
+        clientName: doc.item.clientName,
+      });
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Falha no template com link.");
+      errors.push(
+        error instanceof Error ? error.message : `Falha ao resolver documento ${dueItemId}.`,
+      );
     }
   }
 
-  if (sent === 0) {
-    // Fallback antigo: aviso estático + fila para resposta (se API de variáveis falhar).
+  if (!docs.length) {
     await sendWhatsAppCobrancaTemplate(phone);
-    await queuePendingDueItems(phone, dueItemIds);
+    await queuePendingDueItems(phone, uniqueIds);
+    throw new Error(errors.join(" | ") || "Sem links de documento.");
+  }
+
+  const clientName =
+    docs.map((d) => d.clientName?.trim()).find(Boolean) ||
+    "Cliente";
+
+  try {
+    const result = await sendWhatsAppDocsBundleTemplate({
+      chatId: phone,
+      kind,
+      clientName,
+      documentLinks: docs.map((d) => d.templateLink),
+    });
     if (errors.length) {
-      throw new Error(errors.join(" | "));
+      console.warn("[waba-cobranca] parcial (alguns docs sem link)", { errors, result });
     }
-  } else if (errors.length) {
-    console.warn("[waba-cobranca] parcial", { sent, errors });
+    return result;
+  } catch (error) {
+    await sendWhatsAppCobrancaTemplate(phone);
+    await queuePendingDueItems(phone, uniqueIds);
+    throw error;
   }
 }
 
@@ -169,7 +252,7 @@ export async function fulfillPendingDocsForPhone(phone: string) {
 
       const doc = await resolveItemDocumentLink(row.dueItemId, chatId);
       try {
-        await sendWhatsAppDocumentoPagamentoTemplate(chatId, doc.url);
+        await sendWhatsAppDocumentoPagamentoTemplate(chatId, doc.templateLink);
         sent += 1;
         fulfilledIds.push(row.id);
         continue;
@@ -229,16 +312,16 @@ export async function prepareTestDocumentoPagamento(phone: string, documentUrl?:
   const target =
     documentUrl?.trim() ||
     "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
-  const short = await createDocLink({
-    targetUrl: target,
-    phone,
-    label: "Teste documento_para_pagamento",
+  const result = await sendWhatsAppDocsBundleTemplate({
+    chatId: phone,
+    kind: "envio",
+    clientName: "Cliente Teste",
+    documentLinks: [target],
   });
-  const result = await sendWhatsAppDocumentoPagamentoTemplate(phone, short.url);
   return {
     phone: digitsPhone(phone),
-    template: "documento_para_pagamento",
-    variable: short.url,
+    templates: result.templates,
+    variable: target,
     targetUrl: target,
     channel: result.channel,
   };
