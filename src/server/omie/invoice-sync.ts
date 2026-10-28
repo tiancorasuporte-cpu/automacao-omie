@@ -65,29 +65,69 @@ function isDueDateInWindow(dueDate: string, from: Date, to: Date) {
   return dueDate >= fromIso && dueDate <= toIso;
 }
 
+function documentoTipo(detalhes: Record<string, unknown>) {
+  return String(
+    detalhes["cTipo"] ??
+      detalhes["codigo_tipo_documento"] ??
+      detalhes["cCodTipoDocumento"] ??
+      "",
+  )
+    .trim()
+    .toUpperCase();
+}
+
 export function isBoletoMovement(detalhes: Record<string, unknown>) {
-  const tipo = String(detalhes["cTipo"] ?? "").toUpperCase();
-  const boleto = String(detalhes["cNumBoleto"] ?? "").trim();
-  return tipo === "BOL" || Boolean(boleto);
+  const tipo = documentoTipo(detalhes);
+  const boleto = String(
+    detalhes["cNumBoleto"] ??
+      (detalhes["boleto"] as Record<string, unknown> | undefined)?.["cNumBoleto"] ??
+      "",
+  ).trim();
+  const boletoGerado =
+    String((detalhes["boleto"] as Record<string, unknown> | undefined)?.["cGerado"] ?? "")
+      .trim()
+      .toUpperCase() === "S";
+  // Omie usa codigo_tipo_documento=BOL mesmo quando o boleto bancário ainda não foi gerado.
+  return tipo === "BOL" || boletoGerado || Boolean(boleto);
 }
 
 export function classifyReceivableType(detalhes: Record<string, unknown>): DueItemType | null {
   if (isBoletoMovement(detalhes)) return "boleto";
 
-  const tipo = String(detalhes["cTipo"] ?? "").toUpperCase();
-  const origem = String(detalhes["cOrigem"] ?? detalhes["cGrupo"] ?? "").toUpperCase();
-  const chave = String(detalhes["cChaveNFe"] ?? "").trim();
-  const doc = String(detalhes["cNumDocFiscal"] ?? detalhes["cNumTitulo"] ?? detalhes["numero_documento"] ?? "");
+  const tipo = documentoTipo(detalhes);
+  const origem = String(detalhes["cOrigem"] ?? detalhes["cGrupo"] ?? detalhes["id_origem"] ?? "").toUpperCase();
+  const chave = String(detalhes["cChaveNFe"] ?? detalhes["chave_nfe"] ?? "").trim();
+  const docFiscal = String(
+    detalhes["cNumDocFiscal"] ??
+      detalhes["numero_documento_fiscal"] ??
+      detalhes["cNumTitulo"] ??
+      "",
+  ).trim();
+  const doc = String(detalhes["numero_documento"] ?? docFiscal ?? "");
 
-  if (tipo.includes("NFS") || origem.includes("NFSE") || /nfs-?e/i.test(doc)) return "nfse";
-  if (tipo.includes("NFE") || tipo === "NF" || chave.length > 40 || /nf-?e/i.test(doc)) return "nfe";
+  if (tipo.includes("NFS") || origem.includes("NFSE") || /nfs-?e/i.test(doc) || /nfs-?e/i.test(docFiscal)) {
+    return "nfse";
+  }
+  if (
+    tipo.includes("NFE") ||
+    tipo === "NF" ||
+    chave.length > 40 ||
+    /nf-?e/i.test(doc) ||
+    // Conta a receber ligada a NF (número fiscal) sem tipo explícito.
+    Boolean(docFiscal)
+  ) {
+    return "nfe";
+  }
 
   return null;
 }
 
 function nfeIntegrationCode(nIdNfe: number | null, nCodTitulo: number | null, chaveNfe?: string | null) {
+  // Inclui o título para não colapsar parcelas da mesma NF numa linha só.
+  if (nIdNfe && nCodTitulo) return `nfe:${nIdNfe}:titulo:${nCodTitulo}`;
   if (nIdNfe) return `nfe:${nIdNfe}`;
   const chave = chaveNfe?.replace(/\D/g, "") ?? "";
+  if (chave.length >= 40 && nCodTitulo) return `chave:${chave}:titulo:${nCodTitulo}`;
   if (chave.length >= 40) return `chave:${chave}`;
   if (nCodTitulo) return `titulo:${nCodTitulo}`;
   return null;
@@ -187,6 +227,7 @@ export async function saveDueItemFromMovement(
         String(
           detalhes["cNumBoleto"] ??
             detalhes["cNumDocFiscal"] ??
+            detalhes["numero_documento_fiscal"] ??
             detalhes["cNumTitulo"] ??
             detalhes["numero_documento"] ??
             "",
@@ -251,14 +292,23 @@ async function syncNfeInvoices(app: OmieAppConfig, from: Date, to: Date) {
         const dueDate = pickDueDate(titulo);
         if (!dueDate) continue;
         const nCodTitulo = Number(titulo["nCodTitulo"] ?? 0) || null;
+        const detalhesTitulo = { ...titulo, nIdNfe, nCodCliente: clientCode, chave_nfe: chaveNfe };
+        // NF com parcela em boleto → registra como boleto (cobrança/PDF).
+        const itemType = isBoletoMovement(detalhesTitulo) ? ("boleto" as const) : ("nfe" as const);
         const saved = await saveReceivableDueItem(
           app,
           {
-            itemType: "nfe",
-            detalhes: { ...titulo, nIdNfe, nCodCliente: clientCode },
-            omieCode: nIdNfe ?? nCodTitulo,
-            integrationCode: nfeIntegrationCode(nIdNfe, nCodTitulo, chaveNfe),
-            documentNumber,
+            itemType,
+            detalhes: detalhesTitulo,
+            omieCode: itemType === "boleto" ? nCodTitulo ?? nIdNfe : nIdNfe ?? nCodTitulo,
+            integrationCode:
+              itemType === "boleto"
+                ? String(titulo["cCodIntTitulo"] ?? "") || (nCodTitulo ? `titulo:${nCodTitulo}` : null)
+                : nfeIntegrationCode(nIdNfe, nCodTitulo, chaveNfe),
+            documentNumber:
+              itemType === "boleto"
+                ? String(titulo["cNumBoleto"] ?? documentNumber ?? "").trim() || documentNumber
+                : documentNumber,
             clientCode,
             clientName: null,
             dueDate,

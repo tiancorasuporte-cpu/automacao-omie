@@ -84,6 +84,12 @@ async function syncContasReceber(app: OmieAppConfig, from: Date, to: Date) {
   const openOmieCodes: number[] = [];
   for (const raw of items) {
     const item = raw as Record<string, unknown>;
+    const boleto = (item["boleto"] as Record<string, unknown> | undefined) ?? {};
+    const tipoDocumento = String(
+      item["codigo_tipo_documento"] ?? item["cTipo"] ?? item["cCodTipoDocumento"] ?? "",
+    )
+      .trim()
+      .toUpperCase();
     const mapped = {
       ...item,
       dDtVenc: item["dDtVenc"] ?? item["data_vencimento"],
@@ -93,12 +99,16 @@ async function syncContasReceber(app: OmieAppConfig, from: Date, to: Date) {
       nCodCliente: item["nCodCliente"] ?? item["codigo_cliente_fornecedor"],
       nValorTitulo: item["nValorTitulo"] ?? item["valor_documento"],
       cStatus: item["cStatus"] ?? item["status_titulo"] ?? "A VENCER",
-      cNumBoleto: (item["boleto"] as Record<string, unknown> | undefined)?.["cNumBoleto"] ?? item["cNumBoleto"],
-      cTipo: (item["boleto"] as Record<string, unknown> | undefined)?.["cGerado"] === "S" ? "BOL" : item["cTipo"],
+      cNumBoleto: boleto["cNumBoleto"] ?? item["cNumBoleto"],
+      // Omie lista costuma trazer codigo_tipo_documento=BOL mesmo com boleto.cGerado=N.
+      cTipo: boleto["cGerado"] === "S" || tipoDocumento === "BOL" ? "BOL" : tipoDocumento || item["cTipo"],
+      codigo_tipo_documento: tipoDocumento || item["codigo_tipo_documento"],
       chave_nfe: item["chave_nfe"],
       cChaveNFe: item["chave_nfe"],
-      nCodOS: item["nCodOS"],
+      cNumDocFiscal: item["numero_documento_fiscal"] ?? item["cNumDocFiscal"],
       numero_documento_fiscal: item["numero_documento_fiscal"],
+      nCodOS: item["nCodOS"],
+      boleto,
     };
     const omieCode = Number(mapped.nCodTitulo ?? 0) || null;
     if (omieCode) openOmieCodes.push(omieCode);
