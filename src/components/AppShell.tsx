@@ -30,36 +30,109 @@ export function useShellSearch() {
   return useContext(ShellSearchContext);
 }
 
-const NAV: Array<{
-  to:
-    | "/dashboard"
-    | "/conversas"
-    | "/vencimentos"
-    | "/orcamentos"
-    | "/produtos"
-    | "/facilities"
-    | "/uniformes"
-    | "/frota"
-    | "/notificacoes"
-    | "/settings"
-    | "/users";
+type NavPath =
+  | "/dashboard"
+  | "/vencimentos"
+  | "/orcamentos"
+  | "/produtos"
+  | "/facilities"
+  | "/uniformes"
+  | "/frota"
+  | "/notificacoes"
+  | "/settings"
+  | "/users";
+
+type NavLeaf = {
+  to: NavPath;
   label: string;
   icon: string;
   adminOnly?: boolean;
   module?: AppModuleId;
-}> = [
-  { to: "/dashboard", label: "Painel", icon: "dashboard", module: "dashboard" },
-  { to: "/conversas", label: "Conversas", icon: "chat", module: "conversas" },
-  { to: "/vencimentos", label: "Vencimentos", icon: "event", module: "vencimentos" },
-  { to: "/orcamentos", label: "Orçamentos", icon: "request_quote", module: "orcamentos" },
-  { to: "/produtos", label: "Produtos", icon: "inventory_2", module: "produtos" },
-  { to: "/facilities", label: "Facilities", icon: "apartment", module: "facilities" },
-  { to: "/uniformes", label: "Uniformes", icon: "checkroom", module: "uniformes" },
-  { to: "/frota", label: "Frota", icon: "directions_car", module: "frota" },
-  { to: "/notificacoes", label: "Notificações", icon: "history", module: "notificacoes" },
-  { to: "/settings", label: "Configurações", icon: "settings", adminOnly: true },
-  { to: "/users", label: "Usuários", icon: "manage_accounts", adminOnly: true },
+};
+
+type NavEntry =
+  | ({ kind: "link" } & NavLeaf)
+  | {
+      kind: "group";
+      id: string;
+      label: string;
+      icon: string;
+      children: NavLeaf[];
+    };
+
+const NAV: NavEntry[] = [
+  { kind: "link", to: "/dashboard", label: "Painel", icon: "dashboard", module: "dashboard" },
+  {
+    kind: "group",
+    id: "cobranca",
+    label: "Cobrança",
+    icon: "payments",
+    children: [
+      { to: "/vencimentos", label: "Vencimentos", icon: "event", module: "vencimentos" },
+      { to: "/notificacoes", label: "Notificações", icon: "history", module: "notificacoes" },
+    ],
+  },
+  {
+    kind: "group",
+    id: "comercial",
+    label: "Comercial",
+    icon: "storefront",
+    children: [
+      { to: "/orcamentos", label: "Orçamentos", icon: "request_quote", module: "orcamentos" },
+      { to: "/produtos", label: "Produtos", icon: "inventory_2", module: "produtos" },
+    ],
+  },
+  {
+    kind: "group",
+    id: "operacoes",
+    label: "Operações",
+    icon: "build",
+    children: [
+      { to: "/facilities", label: "Facilities", icon: "apartment", module: "facilities" },
+      { to: "/uniformes", label: "Uniformes", icon: "checkroom", module: "uniformes" },
+      { to: "/frota", label: "Frota", icon: "directions_car", module: "frota" },
+    ],
+  },
+  { kind: "link", to: "/settings", label: "Configurações", icon: "settings", adminOnly: true },
+  { kind: "link", to: "/users", label: "Usuários", icon: "manage_accounts", adminOnly: true },
 ];
+
+function canSeeLeaf(user: AppUser | null, item: NavLeaf) {
+  if (item.adminOnly) return isAdmin(user);
+  if (item.module) return canAccessModule(user, item.module);
+  return true;
+}
+
+function isPathActive(pathname: string, to: string) {
+  return pathname === to || pathname.startsWith(`${to}/`);
+}
+
+function visibleNav(user: AppUser | null): NavEntry[] {
+  const out: NavEntry[] = [];
+  for (const entry of NAV) {
+    if (entry.kind === "link") {
+      if (canSeeLeaf(user, entry)) out.push(entry);
+      continue;
+    }
+    const children = entry.children.filter((child) => canSeeLeaf(user, child));
+    if (children.length) out.push({ ...entry, children });
+  }
+  return out;
+}
+
+function leafItems(user: AppUser | null, opts?: { includeAdmin?: boolean }) {
+  const includeAdmin = opts?.includeAdmin ?? false;
+  const leaves: NavLeaf[] = [];
+  for (const entry of visibleNav(user)) {
+    if (entry.kind === "link") {
+      if (!includeAdmin && entry.adminOnly) continue;
+      leaves.push(entry);
+      continue;
+    }
+    leaves.push(...entry.children);
+  }
+  return leaves;
+}
 
 function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -68,41 +141,149 @@ function initials(name: string) {
   return `${parts[0]!.slice(0, 1)}${parts[parts.length - 1]!.slice(0, 1)}`.toUpperCase();
 }
 
+const SIDEBAR_COLLAPSED_KEY = "ancora.sidebar.collapsed";
+const SIDEBAR_WIDTH = 280;
+const SIDEBAR_COLLAPSED_WIDTH = 76;
+
+function NavLinkItem({
+  item,
+  pathname,
+  onNavigate,
+  nested = false,
+  collapsed = false,
+}: {
+  item: NavLeaf;
+  pathname: string;
+  onNavigate?: (() => void) | undefined;
+  nested?: boolean;
+  collapsed?: boolean;
+}) {
+  const active = isPathActive(pathname, item.to);
+  return (
+    <Link
+      to={item.to}
+      onClick={onNavigate}
+      title={collapsed ? item.label : undefined}
+      className={cn(
+        "flex items-center gap-sm rounded-lg py-sm text-label-md transition-colors",
+        collapsed ? "justify-center px-sm" : nested ? "px-md pl-10" : "px-md",
+        active
+          ? collapsed
+            ? "bg-secondary-container text-on-secondary-container"
+            : "border-r-4 border-secondary-container bg-surface-container-low font-bold text-primary"
+          : "text-on-surface-variant hover:bg-surface-container-high",
+      )}
+    >
+      <Icon name={item.icon} filled={active} className="text-xl" />
+      {!collapsed ? <span>{item.label}</span> : null}
+    </Link>
+  );
+}
+
+function NavGroupItem({
+  entry,
+  pathname,
+  onNavigate,
+  collapsed = false,
+}: {
+  entry: Extract<NavEntry, { kind: "group" }>;
+  pathname: string;
+  onNavigate?: (() => void) | undefined;
+  collapsed?: boolean;
+}) {
+  const childActive = entry.children.some((child) => isPathActive(pathname, child.to));
+  const [open, setOpen] = useState(childActive);
+
+  useEffect(() => {
+    if (childActive) setOpen(true);
+  }, [childActive, pathname]);
+
+  if (collapsed) {
+    return (
+      <div className="space-y-0.5">
+        {entry.children.map((child) => (
+          <NavLinkItem
+            key={child.to}
+            item={child}
+            pathname={pathname}
+            onNavigate={onNavigate}
+            collapsed
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={cn(
+          "flex w-full items-center gap-sm rounded-lg px-md py-sm text-left text-label-md transition-colors",
+          childActive
+            ? "bg-surface-container-low font-semibold text-primary"
+            : "text-on-surface-variant hover:bg-surface-container-high",
+        )}
+      >
+        <Icon name={entry.icon} filled={childActive} className="text-xl" />
+        <span className="flex-1">{entry.label}</span>
+        <Icon
+          name={open ? "expand_less" : "expand_more"}
+          className="text-lg text-on-surface-variant"
+        />
+      </button>
+      {open ? (
+        <div className="space-y-0.5">
+          {entry.children.map((child) => (
+            <NavLinkItem
+              key={child.to}
+              item={child}
+              pathname={pathname}
+              onNavigate={onNavigate}
+              nested
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function NavList({
   pathname,
   user,
   onNavigate,
+  collapsed = false,
 }: {
   pathname: string;
   user: AppUser | null;
   onNavigate?: (() => void) | undefined;
+  collapsed?: boolean;
 }) {
-  const items = NAV.filter((item) => {
-    if (item.adminOnly) return isAdmin(user);
-    if (item.module) return canAccessModule(user, item.module);
-    return true;
-  });
+  const items = visibleNav(user);
   return (
-    <nav className="flex-1 space-y-1">
-      {items.map((item) => {
-        const active = pathname === item.to || pathname.startsWith(`${item.to}/`);
-        return (
-          <Link
-            key={item.to}
-            to={item.to}
-            onClick={onNavigate}
-            className={cn(
-              "flex items-center gap-sm rounded-lg px-md py-sm text-label-md transition-colors",
-              active
-                ? "border-r-4 border-secondary-container bg-surface-container-low font-bold text-primary"
-                : "text-on-surface-variant hover:bg-surface-container-high",
-            )}
-          >
-            <Icon name={item.icon} filled={active} className="text-xl" />
-            <span>{item.label}</span>
-          </Link>
-        );
-      })}
+    <nav className="flex-1 space-y-1 overflow-y-auto">
+      {items.map((entry) =>
+        entry.kind === "link" ? (
+          <NavLinkItem
+            key={entry.to}
+            item={entry}
+            pathname={pathname}
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
+        ) : (
+          <NavGroupItem
+            key={entry.id}
+            entry={entry}
+            pathname={pathname}
+            onNavigate={onNavigate}
+            collapsed={collapsed}
+          />
+        ),
+      )}
     </nav>
   );
 }
@@ -114,11 +295,7 @@ function MobileBottomNav({
   pathname: string;
   user: AppUser | null;
 }) {
-  const items = NAV.filter((item) => {
-    if (item.adminOnly) return false;
-    if (item.module) return canAccessModule(user, item.module);
-    return true;
-  });
+  const items = leafItems(user, { includeAdmin: false });
   if (items.length === 0) return null;
 
   return (
@@ -129,7 +306,7 @@ function MobileBottomNav({
     >
       <div className="flex items-stretch overflow-x-auto px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {items.map((item) => {
-          const active = pathname === item.to || pathname.startsWith(`${item.to}/`);
+          const active = isPathActive(pathname, item.to);
           return (
             <Link
               key={item.to}
@@ -169,41 +346,67 @@ function SidebarInner({
   onNavigate,
   pathname,
   user,
+  collapsed = false,
+  onToggleCollapsed,
 }: {
   onNavigate?: (() => void) | undefined;
   pathname: string;
   user: AppUser | null;
+  collapsed?: boolean;
+  onToggleCollapsed?: (() => void) | undefined;
 }) {
   const navigate = useNavigate();
 
   return (
-    <div className="flex h-full flex-col px-md py-xl">
-      <div className="mb-xl flex items-center gap-md px-xs">
-        <BrandLogo className="h-12 w-auto shrink-0" />
-        <div className="min-w-0">
-          <p className="truncate text-title-lg leading-tight text-primary">{APP_NAME}</p>
-          <p className="text-label-md uppercase tracking-wider text-on-surface-variant">
-            Integração Omie + WAHA
-          </p>
-        </div>
+    <div className={cn("flex h-full flex-col py-xl", collapsed ? "px-sm" : "px-md")}>
+      <div className={cn("mb-lg flex items-center gap-md", collapsed ? "justify-center px-0" : "px-xs")}>
+        <BrandLogo className={cn("w-auto shrink-0", collapsed ? "h-9" : "h-12")} />
+        {!collapsed ? (
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-title-lg leading-tight text-primary">{APP_NAME}</p>
+            <p className="text-label-md uppercase tracking-wider text-on-surface-variant">
+              Integração Omie + WAHA
+            </p>
+          </div>
+        ) : null}
       </div>
 
-      <NavList pathname={pathname} user={user} onNavigate={onNavigate} />
+      {onToggleCollapsed ? (
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          aria-label={collapsed ? "Expandir menu" : "Encolher menu"}
+          title={collapsed ? "Expandir menu" : "Encolher menu"}
+          className={cn(
+            "mb-md flex items-center gap-sm rounded-lg py-sm text-label-md text-on-surface-variant transition-colors hover:bg-surface-container-high",
+            collapsed ? "justify-center px-sm" : "px-md",
+          )}
+        >
+          <Icon name={collapsed ? "keyboard_double_arrow_right" : "keyboard_double_arrow_left"} className="text-xl" />
+          {!collapsed ? <span>Encolher</span> : null}
+        </button>
+      ) : null}
+
+      <NavList pathname={pathname} user={user} onNavigate={onNavigate} collapsed={collapsed} />
 
       <div className="mt-auto space-y-1 border-t border-outline-variant pt-lg">
         <button
           type="button"
+          title={collapsed ? "Sair" : undefined}
           onClick={async () => {
             onNavigate?.();
             await logoutFn();
             await navigate({ to: "/" });
           }}
-          className="flex w-full items-center gap-sm rounded-lg px-md py-sm text-left text-label-md text-on-surface-variant transition-colors hover:bg-surface-container-high"
+          className={cn(
+            "flex w-full items-center gap-sm rounded-lg py-sm text-left text-label-md text-on-surface-variant transition-colors hover:bg-surface-container-high",
+            collapsed ? "justify-center px-sm" : "px-md",
+          )}
         >
           <Icon name="logout" className="text-xl" />
-          <span>Sair</span>
+          {!collapsed ? <span>Sair</span> : null}
         </button>
-        {isSuperadmin(user) ? (
+        {isSuperadmin(user) && !collapsed ? (
           <p className="px-xs pt-sm text-[0.65rem] uppercase tracking-wider text-on-surface-variant">
             Superadmin
           </p>
@@ -298,9 +501,18 @@ export function AppShell({
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { user } = RootRoute.useRouteContext();
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [query, setQuery] = useState("");
   const [enterAnim, setEnterAnim] = useState(false);
   const search = useMemo(() => ({ query, setQuery }), [query]);
+  const sidebarWidth = collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH;
 
   useEffect(() => {
     setQuery("");
@@ -313,6 +525,14 @@ export function AppShell({
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [collapsed]);
+
   return (
     <ShellSearchContext.Provider value={search}>
       <div
@@ -322,8 +542,16 @@ export function AppShell({
           enterAnim && "animate-[shell-enter_0.85s_cubic-bezier(0.22,1,0.36,1)_both]",
         )}
       >
-        <aside className="fixed left-0 top-0 z-40 hidden h-full w-[280px] border-r border-outline-variant bg-surface md:block">
-          <SidebarInner pathname={pathname} user={user} />
+        <aside
+          className="fixed left-0 top-0 z-40 hidden h-full border-r border-outline-variant bg-surface transition-[width] duration-200 ease-out md:block"
+          style={{ width: sidebarWidth }}
+        >
+          <SidebarInner
+            pathname={pathname}
+            user={user}
+            collapsed={collapsed}
+            onToggleCollapsed={() => setCollapsed((value) => !value)}
+          />
         </aside>
 
         {open ? (
@@ -341,7 +569,8 @@ export function AppShell({
 
         <div
           className={cn(
-            "flex min-w-0 flex-1 flex-col md:ml-[280px]",
+            "flex w-full min-w-0 flex-1 flex-col transition-[padding] duration-200 ease-out",
+            collapsed ? "md:pl-[76px]" : "md:pl-[280px]",
             fullHeight ? "h-dvh min-h-0 overflow-hidden" : "min-h-screen",
           )}
         >

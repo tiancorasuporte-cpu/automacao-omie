@@ -87,6 +87,8 @@ async function syncContasReceber(app: OmieAppConfig, from: Date, to: Date) {
     const mapped = {
       ...item,
       dDtVenc: item["dDtVenc"] ?? item["data_vencimento"],
+      dDtEmissao: item["dDtEmissao"] ?? item["data_emissao"] ?? item["dDtEmis"],
+      data_emissao: item["data_emissao"] ?? item["dDtEmissao"] ?? item["dDtEmis"],
       nCodTitulo: item["nCodTitulo"] ?? item["codigo_lancamento_omie"],
       nCodCliente: item["nCodCliente"] ?? item["codigo_cliente_fornecedor"],
       nValorTitulo: item["nValorTitulo"] ?? item["valor_documento"],

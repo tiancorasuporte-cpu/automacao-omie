@@ -172,20 +172,36 @@ export async function notifyCobrancaViaWabaTemplate(
   const uniqueIds = [...new Set(dueItemIds.filter((id) => Number.isFinite(id) && id > 0))];
   if (!uniqueIds.length) throw new Error("Nenhum documento para enviar.");
 
-  const docs: Array<{ templateLink: string; clientName: string | null }> = [];
   const errors: string[] = [];
-
-  for (const dueItemId of uniqueIds) {
-    try {
-      const doc = await resolveItemDocumentLink(dueItemId, phone);
+  const resolved = await Promise.all(
+    uniqueIds.map(async (dueItemId) => {
+      try {
+        const doc = await resolveItemDocumentLink(dueItemId, phone);
+        return {
+          ok: true as const,
+          dueItemId,
+          templateLink: doc.templateLink,
+          clientName: doc.item.clientName,
+        };
+      } catch (error) {
+        return {
+          ok: false as const,
+          error:
+            error instanceof Error ? error.message : `Falha ao resolver documento ${dueItemId}.`,
+        };
+      }
+    }),
+  );
+  const docs: Array<{ dueItemId: number; templateLink: string; clientName: string | null }> = [];
+  for (const entry of resolved) {
+    if (entry.ok) {
       docs.push({
-        templateLink: doc.templateLink,
-        clientName: doc.item.clientName,
+        dueItemId: entry.dueItemId,
+        templateLink: entry.templateLink,
+        clientName: entry.clientName,
       });
-    } catch (error) {
-      errors.push(
-        error instanceof Error ? error.message : `Falha ao resolver documento ${dueItemId}.`,
-      );
+    } else {
+      errors.push(entry.error);
     }
   }
 
@@ -206,10 +222,28 @@ export async function notifyCobrancaViaWabaTemplate(
       clientName,
       documentLinks: docs.map((d) => d.templateLink),
     });
-    if (errors.length) {
-      console.warn("[waba-cobranca] parcial (alguns docs sem link)", { errors, result });
+    const sentLinkSet = new Set(result.sentLinks);
+    const sentDueItemIds = docs
+      .filter((d) => sentLinkSet.has(d.templateLink))
+      .map((d) => d.dueItemId);
+    const skippedDueItemIds = uniqueIds.filter((id) => !sentDueItemIds.includes(id));
+    const allErrors = [...errors, ...result.errors];
+    if (allErrors.length || result.plannedMessages > result.messages) {
+      console.warn("[waba-cobranca] parcial", {
+        errors: allErrors,
+        templates: result.templates,
+        planned: result.plannedMessages,
+        sent: result.messages,
+        sentDueItemIds,
+        skippedDueItemIds,
+      });
     }
-    return result;
+    return {
+      ...result,
+      sentDueItemIds,
+      skippedDueItemIds,
+      resolveErrors: errors,
+    };
   } catch (error) {
     await sendWhatsAppCobrancaTemplate(phone);
     await queuePendingDueItems(phone, uniqueIds);

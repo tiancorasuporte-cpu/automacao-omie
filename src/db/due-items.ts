@@ -13,6 +13,7 @@ type DueItemRow = {
   client_name: string | null;
   client_phone: string | null;
   due_date: string;
+  issue_date: string | null;
   amount: string | null;
   status: string | null;
   notified_at: string | null;
@@ -41,6 +42,7 @@ function toDueItem(row: DueItemRow): DueItem {
     clientName: row.client_name,
     clientPhone: row.client_phone,
     dueDate: toIsoDate(row.due_date),
+    issueDate: row.issue_date ? toIsoDate(row.issue_date) : null,
     amount: row.amount == null ? null : Number(row.amount),
     status: row.status,
     notifiedAt: row.notified_at ? toIsoDate(row.notified_at) : null,
@@ -60,18 +62,20 @@ export async function upsertDueItem(input: {
   clientName: string | null;
   clientPhone: string | null;
   dueDate: string;
+  issueDate?: string | null;
   amount: number | null;
   status: string | null;
 }) {
   const db = await getDb();
+  const issueDate = input.issueDate?.trim() || null;
   await db`
     insert into due_items (
       omie_app_id, omie_app_name, item_type, omie_code, integration_code,
-      document_number, client_code, client_name, client_phone, due_date, amount, status, synced_at
+      document_number, client_code, client_name, client_phone, due_date, issue_date, amount, status, synced_at
     ) values (
       ${input.omieAppId}, ${input.omieAppName}, ${input.itemType}, ${input.omieCode},
       ${input.integrationCode}, ${input.documentNumber}, ${input.clientCode}, ${input.clientName},
-      ${input.clientPhone}, ${input.dueDate}, ${input.amount}, ${input.status}, now()
+      ${input.clientPhone}, ${input.dueDate}, ${issueDate}, ${input.amount}, ${input.status}, now()
     )
     on conflict (omie_app_id, item_type, omie_code, due_date) do update set
       omie_app_name = excluded.omie_app_name,
@@ -80,6 +84,7 @@ export async function upsertDueItem(input: {
       client_code = coalesce(excluded.client_code, due_items.client_code),
       client_name = coalesce(nullif(trim(excluded.client_name), ''), due_items.client_name),
       client_phone = coalesce(nullif(trim(excluded.client_phone), ''), due_items.client_phone),
+      issue_date = coalesce(excluded.issue_date, due_items.issue_date),
       amount = excluded.amount,
       status = excluded.status,
       synced_at = now()

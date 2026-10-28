@@ -1,6 +1,5 @@
 export const APP_MODULES = [
   { id: "dashboard", label: "Painel", path: "/dashboard" },
-  { id: "conversas", label: "Conversas", path: "/conversas" },
   { id: "vencimentos", label: "Vencimentos", path: "/vencimentos" },
   { id: "orcamentos", label: "Orçamentos", path: "/orcamentos" },
   { id: "produtos", label: "Produtos", path: "/produtos" },

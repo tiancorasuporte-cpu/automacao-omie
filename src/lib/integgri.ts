@@ -65,12 +65,18 @@ export const testInteggriFn = createServerFn({ method: "POST" })
       return { ok: false as const, error: "Número de WhatsApp inválido." };
     }
     try {
-      const { sendInteggriText, isInteggriConfigured } = await import("@/server/integgri");
+      const { isInteggriConfigured } = await import("@/server/integgri");
       if (!isInteggriConfigured()) {
         return { ok: false as const, error: "Salve URL e token da Integgri antes de testar." };
       }
-      await sendInteggriText(chatId, `${APP_NAME}: conexão com a Integgri ok.`);
-      return { ok: true as const };
+      // WABA Meta não aceita texto livre fora da janela — teste usa template de 1 documento.
+      const { prepareTestDocumentoPagamento } = await import("@/server/integgri-cobranca");
+      const result = await prepareTestDocumentoPagamento(chatId);
+      return {
+        ok: true as const,
+        templates: result.templates,
+        channel: result.channel,
+      };
     } catch (error) {
       return {
         ok: false as const,

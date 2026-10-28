@@ -25,21 +25,60 @@ import {
 } from "@/server/whatsapp";
 import { notifyCobrancaViaWabaTemplate } from "@/server/integgri-cobranca";
 
-const DEFAULT_SEND_DELAY_MS = 10_000;
+/** Pausa entre contatos no agendamento automático. */
+const DEFAULT_SEND_DELAY_MS = 3_000;
+/** Pausa entre contatos no envio manual em lote (UI). */
+const DEFAULT_MANUAL_BATCH_DELAY_MS = 1_500;
 const DEFAULT_HOURLY_LIMIT = 12;
 const DEFAULT_MAX_CONTACTS_PER_RUN = 8;
 const HARD_MAX_HOURLY_LIMIT = 40;
 
 let notifyInProgress = false;
+let notifyStartedAt = 0;
+const NOTIFY_LOCK_MAX_MS = 5 * 60_000;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function acquireNotifyLock() {
+  if (notifyInProgress) {
+    const age = notifyStartedAt > 0 ? Date.now() - notifyStartedAt : NOTIFY_LOCK_MAX_MS + 1;
+    // Lock sem timestamp (job abortado) ou muito antigo → libera.
+    if (age > NOTIFY_LOCK_MAX_MS) {
+      console.warn("[notify] lock antigo liberado após timeout", { age, notifyStartedAt });
+      notifyInProgress = false;
+      notifyStartedAt = 0;
+    } else {
+      return false;
+    }
+  }
+  notifyInProgress = true;
+  notifyStartedAt = Date.now();
+  return true;
+}
+
+/** Libera lock preso (ex.: job em background abortado). */
+export function forceReleaseNotifyLock() {
+  notifyInProgress = false;
+  notifyStartedAt = 0;
+}
+
+function releaseNotifyLock() {
+  notifyInProgress = false;
+  notifyStartedAt = 0;
 }
 
 function sendDelayMs() {
   const raw = process.env["NOTIFICATION_SEND_DELAY_MS"]?.trim();
   const parsed = raw ? Number(raw) : DEFAULT_SEND_DELAY_MS;
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_SEND_DELAY_MS;
+}
+
+function manualBatchDelayMs() {
+  const raw = process.env["NOTIFICATION_MANUAL_BATCH_DELAY_MS"]?.trim();
+  const parsed = raw ? Number(raw) : DEFAULT_MANUAL_BATCH_DELAY_MS;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_MANUAL_BATCH_DELAY_MS;
 }
 
 function maxContactsPerRun() {
@@ -243,8 +282,11 @@ async function resolveItemNotifyPhones(item: DueItem) {
   }
 
   if (testMode && testPhone) {
+    // Normaliza DDI 55 no número de teste (evita falha silenciosa na Integgri/Meta).
+    const normalizedTest =
+      toWhatsAppChatId(testPhone)?.replace(/@.*$/, "") ?? phoneDigits(testPhone);
     return {
-      phones: [testPhone],
+      phones: [normalizedTest],
       testMode: true,
       originalPhones,
     };
@@ -428,6 +470,10 @@ async function sendReminderBatch(
     delayMs: number;
     overdueDays?: number;
     contactBudget: number;
+    /** Força template WABA (manual em lote usa envio_*). */
+    wabaKind?: "lembrete" | "envio";
+    /** Como marcar notificado; padrão segue o kind. */
+    markAs?: NotificationKind;
   },
 ): Promise<ReminderBatchResult & { quotaUsed: number }> {
   let quota = await remainingHourlyQuota();
@@ -454,25 +500,47 @@ async function sendReminderBatch(
 
   const groups = new Map<string, PendingGroup>();
 
-  for (const rawItem of items) {
-    if (!isOpenReceivableStatus(rawItem.status)) {
+  // Resolve telefones em paralelo (Omie) — era o maior gargalo antes de enviar.
+  const prepared = await Promise.all(
+    items.map(async (rawItem) => {
+      if (!isOpenReceivableStatus(rawItem.status)) {
+        return {
+          ok: false as const,
+          error: `${rawItem.clientName ?? "Sem cliente"}: documento não está em aberto (${rawItem.status ?? "sem status"})`,
+        };
+      }
+      try {
+        const item = await enrichDueItem(rawItem);
+        const target = await resolveItemNotifyPhones(item);
+        if (target.phones.length === 0) {
+          const reason =
+            target.originalPhones.length > 0
+              ? "sem celular WhatsApp válido (telefone fixo ignorado)"
+              : "telefone inválido ou ausente";
+          return {
+            ok: false as const,
+            error: `${item.clientName ?? "Sem cliente"}: ${reason}`,
+          };
+        }
+        return { ok: true as const, item, target };
+      } catch (error) {
+        return {
+          ok: false as const,
+          error: `${rawItem.clientName ?? "Sem cliente"}: ${
+            error instanceof Error ? error.message : "Falha ao preparar envio"
+          }`,
+        };
+      }
+    }),
+  );
+
+  for (const entry of prepared) {
+    if (!entry.ok) {
       skipped += 1;
-      errors.push(`${rawItem.clientName ?? "Sem cliente"}: documento não está em aberto (${rawItem.status ?? "sem status"})`);
+      errors.push(entry.error);
       continue;
     }
-    const item = await enrichDueItem(rawItem);
-    const target = await resolveItemNotifyPhones(item);
-
-    if (target.phones.length === 0) {
-      skipped += 1;
-      const reason =
-        target.originalPhones.length > 0
-          ? "sem celular WhatsApp válido (telefone fixo ignorado)"
-          : "telefone inválido ou ausente";
-      errors.push(`${item.clientName ?? "Sem cliente"}: ${reason}`);
-      continue;
-    }
-
+    const { item, target } = entry;
     for (const phone of target.phones) {
       const chatId = toWhatsAppChatId(phone);
       if (!chatId) {
@@ -481,13 +549,19 @@ async function sendReminderBatch(
         continue;
       }
 
-      const existing = groups.get(chatId);
+      // Em modo teste o destino é o mesmo número — agrupa pelo cliente original
+      // para ainda disparar 1 template por cliente (com pausa), não um megabloco.
+      const groupKey = target.testMode
+        ? `test:${item.clientCode ?? target.originalPhones[0] ?? item.clientName ?? item.id}`
+        : chatId;
+
+      const existing = groups.get(groupKey);
       if (existing) {
-        if (!existing.items.some((entry) => entry.id === item.id)) {
+        if (!existing.items.some((row) => row.id === item.id)) {
           existing.items.push(item);
         }
       } else {
-        groups.set(chatId, {
+        groups.set(groupKey, {
           chatId,
           phone,
           testMode: target.testMode,
@@ -526,15 +600,32 @@ async function sendReminderBatch(
 
     try {
       let wabaTemplates: string[] = [];
+      let deliveredItems = group.items;
       if (usesWabaTemplateForCobranca()) {
-        // Pré-vencimento (D-1) → lembrete_*; atraso/cobrança → envio_*.
-        const wabaKind = kind === "pre_due" ? "lembrete" : "envio";
+        // Pré-vencimento (D-1) → lembrete_*; atraso/cobrança/manual → envio_*.
+        // >3 docs no mesmo WhatsApp → vários templates (3+3, 3+2, …).
+        const wabaKind =
+          options.wabaKind ?? (kind === "pre_due" ? "lembrete" : "envio");
         const result = await notifyCobrancaViaWabaTemplate(
           group.chatId,
           group.items.map((item) => item.id),
           { kind: wabaKind },
         );
         wabaTemplates = result?.templates ?? [];
+        const sentIdSet = new Set(result?.sentDueItemIds ?? []);
+        deliveredItems = group.items.filter((item) => sentIdSet.has(item.id));
+        const missed = group.items.filter((item) => !sentIdSet.has(item.id));
+        for (const item of missed) {
+          skipped += 1;
+          errors.push(
+            `${item.clientName ?? "Sem cliente"} (#${item.id}): não entrou no template (sem link ou falha no 2º envio).`,
+          );
+        }
+        if ((result?.plannedMessages ?? 0) > (result?.messages ?? 0)) {
+          errors.push(
+            `${group.items[0]?.clientName ?? "Cliente"}: parte dos templates falhou (${result?.messages ?? 0}/${result?.plannedMessages ?? 0}).`,
+          );
+        }
       } else {
         await sendWhatsAppText(group.chatId, message);
         for (const item of group.items) {
@@ -543,9 +634,10 @@ async function sendReminderBatch(
         }
       }
 
-      for (const item of group.items) {
+      const markAs = options.markAs ?? kind;
+      for (const item of deliveredItems) {
         if (!group.testMode) {
-          if (kind === "overdue") {
+          if (markAs === "overdue") {
             await markDueItemOverdueNotified(item.id);
           } else {
             await markDueItemNotified(item.id);
@@ -558,19 +650,22 @@ async function sendReminderBatch(
             ? `WABA ${wabaTemplates.join(", ") || "template"} (nome + links)`
             : message,
           success: true,
-          kind,
+          kind: markAs,
         });
       }
-      sent += group.items.length;
-      quota = { ...quota, used: quota.used + 1, remaining: Math.max(0, quota.remaining - 1) };
-      quotaUsed += 1;
-      contactsLeft -= 1;
+      sent += deliveredItems.length;
+      if (deliveredItems.length > 0) {
+        quota = { ...quota, used: quota.used + 1, remaining: Math.max(0, quota.remaining - 1) };
+        quotaUsed += 1;
+        contactsLeft -= 1;
+      }
 
       if (options.delayMs > 0 && groupIndex < groups.size && contactsLeft > 0 && quota.remaining > 0) {
         await sleep(options.delayMs);
       }
     } catch (error) {
       const err = error instanceof Error ? error.message : "Falha ao enviar";
+      const markAs = options.markAs ?? kind;
       for (const item of group.items) {
         await insertNotificationLog({
           dueItemId: item.id,
@@ -578,20 +673,85 @@ async function sendReminderBatch(
           message,
           success: false,
           error: err,
-          kind,
+          kind: markAs,
         });
         errors.push(`${item.clientName ?? "Sem cliente"}: ${err}`);
       }
-      // Pausa extra em erro (rate limit / política Meta)
-      if (options.delayMs > 0) await sleep(options.delayMs * 2);
+      // Pausa curta em erro (não dobra — travava o lote)
+      if (options.delayMs > 0) await sleep(options.delayMs);
     }
   }
 
   return { sent, skipped, errors, quotaUsed };
 }
 
+/** Envio manual em lote (Vencimentos): agrupa por WhatsApp e usa templates envio_*. */
+export async function sendSelectedDueItems(dueItemIds: number[]) {
+  if (!acquireNotifyLock()) {
+    return {
+      ok: false as const,
+      error: "Envio já em andamento. Aguarde a conclusão do lote anterior.",
+    };
+  }
+
+  try {
+    const uniqueIds = [...new Set(dueItemIds.filter((id) => Number.isFinite(id) && id > 0))];
+    if (!uniqueIds.length) {
+      return { ok: false as const, error: "Selecione ao menos um documento." };
+    }
+
+    const quota = await remainingHourlyQuota();
+    if (quota.remaining <= 0) {
+      return {
+        ok: false as const,
+        error: `Limite horário atingido (${quota.used}/${quota.limit} contatos na última hora). Aguarde antes de enviar de novo.`,
+      };
+    }
+
+    const rows = await Promise.all(uniqueIds.map((id) => getDueItemById(id)));
+    const items = rows.filter((row): row is DueItem => Boolean(row));
+    if (!items.length) {
+      return { ok: false as const, error: "Nenhum documento válido encontrado." };
+    }
+
+    const testMode = (await getSetting("test_mode_enabled")) === "true";
+    const contactBudget = Math.min(maxContactsPerRun(), quota.remaining, uniqueIds.length);
+
+    // Precisa await: fire-and-forget no serverFn é abortado ao fim da request.
+    const result = await sendReminderBatch(items, "overdue", {
+      testMode,
+      delayMs: manualBatchDelayMs(),
+      contactBudget,
+      wabaKind: "envio",
+      markAs: "pre_due",
+    });
+
+    if (result.sent === 0) {
+      return {
+        ok: false as const,
+        error: result.errors.join(" | ") || "Nenhum envio concluído.",
+        sent: 0,
+        skipped: result.skipped,
+        errors: result.errors,
+        testMode,
+      };
+    }
+
+    return {
+      ok: true as const,
+      sent: result.sent,
+      skipped: result.skipped,
+      errors: result.errors,
+      testMode,
+      contacts: result.quotaUsed,
+    };
+  } finally {
+    releaseNotifyLock();
+  }
+}
+
 export async function sendDueReminders(targetDate = new Date()) {
-  if (notifyInProgress) {
+  if (!acquireNotifyLock()) {
     return {
       ok: true as const,
       sent: 0,
@@ -600,8 +760,6 @@ export async function sendDueReminders(targetDate = new Date()) {
       testMode: false,
     };
   }
-
-  notifyInProgress = true;
 
   try {
     const enabled = (await getSetting("notifications_enabled")) ?? "true";
@@ -645,6 +803,6 @@ export async function sendDueReminders(targetDate = new Date()) {
       overdueSent: overdue.sent,
     };
   } finally {
-    notifyInProgress = false;
+    releaseNotifyLock();
   }
 }

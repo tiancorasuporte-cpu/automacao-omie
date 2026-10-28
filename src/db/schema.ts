@@ -42,6 +42,8 @@ export type DueItem = {
   clientName: string | null;
   clientPhone: string | null;
   dueDate: string;
+  /** Data de emissão no Omie (quando disponível). */
+  issueDate: string | null;
   amount: number | null;
   status: string | null;
   notifiedAt: string | null;
@@ -162,6 +164,12 @@ export async function ensureSchema() {
     await sql.unsafe(
       "create index due_items_overdue_notified_idx on due_items (due_date, overdue_notified_at) where overdue_notified_at is null",
     );
+  }
+  if (!(await columnExists("due_items", "issue_date"))) {
+    await sql.unsafe("alter table due_items add column issue_date date");
+  }
+  if (!(await indexExists("due_items_issue_date_idx"))) {
+    await sql.unsafe("create index due_items_issue_date_idx on due_items (issue_date)");
   }
 
   if (!(await tableExists("notification_log"))) {

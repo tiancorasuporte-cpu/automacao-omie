@@ -352,7 +352,11 @@ function InteggriSettings({
                 setError(result.error);
                 return;
               }
-              setMessage("Mensagem de teste enviada pela Integgri.");
+              const templates =
+                "templates" in result && Array.isArray(result.templates)
+                  ? result.templates.join(", ")
+                  : "envio_para_pagamento_1_documento";
+              setMessage(`Template WABA enviado (${templates}). Confira o WhatsApp.`);
             }}
             className="rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary"
           >

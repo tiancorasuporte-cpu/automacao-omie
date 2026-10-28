@@ -24,7 +24,7 @@ async function fetchRemotePdfAsBase64(url: string) {
   }
 }
 import { runManualNotifications, runManualSync } from "@/server/scheduler";
-import { sendDueItemReminder } from "@/server/omie/notifications";
+import { sendDueItemReminder, sendSelectedDueItems } from "@/server/omie/notifications";
 
 export const getOmieAppsFn = createServerFn({ method: "GET" }).handler(async () => {
   const { requireAuth } = await import("@/lib/require-auth");
@@ -46,7 +46,8 @@ export const getDashboardFn = createServerFn({ method: "GET" }).handler(async ()
 export const listDueItemsFn = createServerFn({ method: "GET" }).handler(async () => {
   const { requireModule } = await import("@/lib/require-auth");
   await requireModule("vencimentos");
-  return listDueItems({ currentMonthOnly: true, openOnly: true });
+  // Janela ampla para filtrar por vencimento e por emissão no front.
+  return listDueItems({ currentMonthOnly: false, openOnly: true });
 });
 
 export const listNotificationLogsFn = createServerFn({ method: "GET" })
@@ -75,6 +76,20 @@ export const sendDueItemNotificationFn = createServerFn({ method: "POST" })
     const { requireAdmin } = await import("@/lib/require-auth");
     await requireAdmin();
     return sendDueItemReminder(data.dueItemId);
+  });
+
+export const sendSelectedDueItemsFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        dueItemIds: z.array(z.number().int().positive()).min(1).max(80),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { requireAdmin } = await import("@/lib/require-auth");
+    await requireAdmin();
+    return sendSelectedDueItems(data.dueItemIds);
   });
 
 export const getDueItemBoletoViewFn = createServerFn({ method: "GET" })

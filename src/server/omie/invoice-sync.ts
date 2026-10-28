@@ -27,6 +27,37 @@ function pickDueDate(item: Record<string, unknown>) {
   );
 }
 
+function pickIssueDate(...sources: Array<Record<string, unknown> | null | undefined>) {
+  for (const item of sources) {
+    if (!item) continue;
+    const nestedSources = [
+      item,
+      (item["Emissao"] ?? item["emissao"]) as Record<string, unknown> | undefined,
+      (item["cabecTitulo"] ?? item["Cabecalho"] ?? item["cabecalho"]) as
+        | Record<string, unknown>
+        | undefined,
+      (item["detalhes"] ?? item["Detalhes"]) as Record<string, unknown> | undefined,
+    ];
+    for (const src of nestedSources) {
+      if (!src) continue;
+      const candidates = [
+        src["dDtEmis"],
+        src["dDtEmissao"],
+        src["data_emissao"],
+        src["dEmi"],
+        src["cDataEmissao"],
+        src["data_registro"],
+        src["dDtRegistro"],
+      ];
+      for (const value of candidates) {
+        const parsed = parseOmieDate(String(value ?? ""));
+        if (parsed) return parsed;
+      }
+    }
+  }
+  return null;
+}
+
 function isDueDateInWindow(dueDate: string, from: Date, to: Date) {
   const fromIso = parseOmieDate(formatOmieDate(from));
   const toIso = parseOmieDate(formatOmieDate(to));
@@ -79,6 +110,7 @@ export async function saveReceivableDueItem(
     clientCode: number | null;
     clientName: string | null;
     dueDate: string;
+    issueDate?: string | null;
     amount: number | null;
     status: string | null;
   },
@@ -95,6 +127,7 @@ export async function saveReceivableDueItem(
   }
 
   const client = input.clientCode ? await getCliente(app, input.clientCode) : undefined;
+  const issueDate = input.issueDate ?? pickIssueDate(input.detalhes);
 
   await upsertDueItem({
     omieAppId: app.id,
@@ -107,6 +140,7 @@ export async function saveReceivableDueItem(
     clientName: input.clientName || clientDisplayName(client) || pickClientNameFromRecord(input.detalhes),
     clientPhone: resolveStoredClientPhone(client, input.detalhes),
     dueDate: input.dueDate,
+    issueDate,
     amount: input.amount,
     status: input.status,
   });
@@ -210,6 +244,8 @@ async function syncNfeInvoices(app: OmieAppConfig, from: Date, to: Date) {
     const defaultAmount = parseAmount(icms["vNF"] ?? total["vNF"]);
 
     const titulos = (cadastro["titulos"] ?? []) as Record<string, unknown>[];
+    const nfeIssueDate = pickIssueDate(ide, cadastro);
+
     if (titulos.length > 0) {
       for (const titulo of titulos) {
         const dueDate = pickDueDate(titulo);
@@ -226,6 +262,7 @@ async function syncNfeInvoices(app: OmieAppConfig, from: Date, to: Date) {
             clientCode,
             clientName: null,
             dueDate,
+            issueDate: pickIssueDate(titulo) ?? nfeIssueDate,
             amount: parseAmount(titulo["nValor"] ?? titulo["nValorTitulo"]) ?? defaultAmount,
             status: String(titulo["cStatus"] ?? "") || null,
           },
@@ -252,6 +289,7 @@ async function syncNfeInvoices(app: OmieAppConfig, from: Date, to: Date) {
         clientCode,
         clientName: null,
         dueDate,
+        issueDate: nfeIssueDate,
         amount: defaultAmount,
         status: String(ide["cStatus"] ?? "") || null,
       },
@@ -315,6 +353,7 @@ async function syncNfseInvoices(app: OmieAppConfig, from: Date, to: Date) {
       pickDueDate(cab) ??
       parseOmieDate(String(cab["dDtVenc"] ?? emissao["cDataEmissao"] ?? cab["dDtEmissao"] ?? ""));
     if (!dueDate) continue;
+    const issueDate = pickIssueDate(cab, emissao, entry);
 
     const saved = await saveReceivableDueItem(
       app,
@@ -327,6 +366,7 @@ async function syncNfseInvoices(app: OmieAppConfig, from: Date, to: Date) {
         clientCode,
         clientName: String(cab["cRazaoSocial"] ?? cab["cNome"] ?? "").trim() || null,
         dueDate,
+        issueDate,
         amount: parseAmount(valores["nValorLiquido"] ?? valores["nValorTotalServicos"]),
         status: String(cab["cStatus"] ?? cab["cStatusNFSe"] ?? "").trim() || null,
       },

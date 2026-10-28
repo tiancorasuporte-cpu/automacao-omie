@@ -67,12 +67,26 @@ export async function sendWhatsAppDocumentoPagamentoTemplate(chatId: string, doc
   });
 }
 
+/** Pausa curta entre chunks (3+3) no mesmo número — evita flood sem travar o lote. */
+const DEFAULT_TEMPLATE_CHUNK_DELAY_MS = 1_200;
+
+function templateChunkDelayMs() {
+  const raw = process.env["WABA_TEMPLATE_CHUNK_DELAY_MS"]?.trim();
+  const parsed = raw ? Number(raw) : DEFAULT_TEMPLATE_CHUNK_DELAY_MS;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_TEMPLATE_CHUNK_DELAY_MS;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Templates novos:
  * - lembrete_de_vencimento_1|2_documento(s)
  * - envio_para_pagamento_1|2|3_documento(s)
  *
  * Variáveis: {{1}} nome, {{2}} link1, {{3}} link2, {{4}} link3
+ * Mais docs que o teto do template → vários envios em sequência (ex.: 6 → 3 + 3).
  */
 export async function sendWhatsAppDocsBundleTemplate(input: {
   chatId: string;
@@ -96,25 +110,51 @@ export async function sendWhatsAppDocsBundleTemplate(input: {
 
   let lastChannel: "integgri" | "soft10" = "integgri";
   const templates: string[] = [];
+  const sentLinks: string[] = [];
+  const errors: string[] = [];
+  const chunkDelayMs = templateChunkDelayMs();
 
-  for (const chunk of chunks) {
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index]!;
     const count = chunk.length as WabaLembreteDocCount | WabaEnvioDocCount;
     const templateName =
       input.kind === "lembrete"
         ? lembreteVencimentoTemplateName(Math.min(count, 2) as WabaLembreteDocCount)
         : envioPagamentoTemplateName(Math.min(count, 3) as WabaEnvioDocCount);
 
-    // msg1=nome, msg2..=links
-    const variables = [name, ...chunk];
-    const result = await sendInteggriTemplate(input.chatId, templateName, {
-      body: chunk[0],
-      variables,
-    });
-    lastChannel = result.channel;
-    templates.push(templateName);
+    try {
+      // msg1=nome, msg2..=links
+      const variables = [name, ...chunk];
+      const result = await sendInteggriTemplate(input.chatId, templateName, {
+        body: chunk[0],
+        variables,
+      });
+      lastChannel = result.channel;
+      templates.push(templateName);
+      sentLinks.push(...chunk);
+    } catch (error) {
+      const err = error instanceof Error ? error.message : "Falha ao enviar template";
+      errors.push(`${templateName}: ${err}`);
+      // Continua os próximos lotes (ex.: 1º de 3 ok, 2º tenta mesmo assim).
+    }
+
+    if (index < chunks.length - 1 && chunkDelayMs > 0) {
+      await sleep(chunkDelayMs);
+    }
   }
 
-  return { channel: lastChannel, templates, messages: chunks.length };
+  if (!sentLinks.length) {
+    throw new Error(errors.join(" | ") || "Nenhum template WABA enviado.");
+  }
+
+  return {
+    channel: lastChannel,
+    templates,
+    messages: templates.length,
+    sentLinks,
+    errors,
+    plannedMessages: chunks.length,
+  };
 }
 
 export async function sendWhatsAppDocument(
