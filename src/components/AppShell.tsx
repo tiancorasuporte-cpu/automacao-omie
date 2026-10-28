@@ -542,9 +542,10 @@ export function AppShell({
           enterAnim && "animate-[shell-enter_0.85s_cubic-bezier(0.22,1,0.36,1)_both]",
         )}
       >
+        {/* Desktop: sidebar no fluxo (não fixed) — conteúdo nunca passa por baixo. */}
         <aside
-          className="fixed left-0 top-0 z-40 hidden h-full border-r border-outline-variant bg-surface transition-[width] duration-200 ease-out md:block"
-          style={{ width: sidebarWidth }}
+          className="sticky top-0 z-40 hidden h-dvh shrink-0 border-r border-outline-variant transition-[width] duration-200 ease-out md:block"
+          style={{ width: sidebarWidth, backgroundColor: "var(--surface)" }}
         >
           <SidebarInner
             pathname={pathname}
@@ -561,7 +562,10 @@ export function AppShell({
               className="absolute inset-0 bg-inverse-surface/40"
               onClick={() => setOpen(false)}
             />
-            <div className="absolute left-0 top-0 h-full w-[280px] border-r border-outline-variant bg-surface">
+            <div
+              className="absolute left-0 top-0 h-full w-[280px] border-r border-outline-variant"
+              style={{ backgroundColor: "var(--surface)" }}
+            >
               <SidebarInner pathname={pathname} user={user} onNavigate={() => setOpen(false)} />
             </div>
           </div>
@@ -569,8 +573,7 @@ export function AppShell({
 
         <div
           className={cn(
-            "flex w-full min-w-0 flex-1 flex-col transition-[padding] duration-200 ease-out",
-            collapsed ? "md:pl-[76px]" : "md:pl-[280px]",
+            "flex min-w-0 flex-1 flex-col",
             fullHeight ? "h-dvh min-h-0 overflow-hidden" : "min-h-screen",
           )}
         >
