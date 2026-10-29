@@ -91,6 +91,28 @@ export function isBoletoMovement(detalhes: Record<string, unknown>) {
   return tipo === "BOL" || boletoGerado || Boolean(boleto);
 }
 
+/** Prefere nº da nota fiscal; se houver boleto diferente, mantém os dois na busca. */
+export function formatReceivableDocumentNumber(
+  detalhes: Record<string, unknown>,
+  itemType?: DueItemType | null,
+) {
+  const boleto = String(
+    detalhes["cNumBoleto"] ??
+      (detalhes["boleto"] as Record<string, unknown> | undefined)?.["cNumBoleto"] ??
+      "",
+  ).trim();
+  const fiscal = String(
+    detalhes["cNumDocFiscal"] ?? detalhes["numero_documento_fiscal"] ?? "",
+  ).trim();
+  const fallback = String(
+    detalhes["cNumTitulo"] ?? detalhes["numero_documento"] ?? "",
+  ).trim();
+
+  if (fiscal && boleto && fiscal !== boleto) return `${fiscal} (bol ${boleto})`;
+  if (itemType === "boleto") return boleto || fiscal || fallback || null;
+  return fiscal || boleto || fallback || null;
+}
+
 export function classifyReceivableType(detalhes: Record<string, unknown>): DueItemType | null {
   if (isBoletoMovement(detalhes)) return "boleto";
 
@@ -223,15 +245,7 @@ export async function saveDueItemFromMovement(
           : itemType === "nfse"
             ? nfseIntegrationCode(nCodNFSe, nCodTitulo)
             : String(detalhes["cCodIntTitulo"] ?? detalhes["codigo_lancamento_integracao"] ?? "") || null,
-      documentNumber:
-        String(
-          detalhes["cNumBoleto"] ??
-            detalhes["cNumDocFiscal"] ??
-            detalhes["numero_documento_fiscal"] ??
-            detalhes["cNumTitulo"] ??
-            detalhes["numero_documento"] ??
-            "",
-        ) || null,
+      documentNumber: formatReceivableDocumentNumber(detalhes, itemType),
       clientCode: pickClientCodeFromRecord(detalhes),
       clientName: pickClientNameFromRecord(detalhes),
       dueDate,
