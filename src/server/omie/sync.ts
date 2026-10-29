@@ -107,7 +107,9 @@ async function syncContasReceber(app: OmieAppConfig, from: Date, to: Date) {
       cChaveNFe: item["chave_nfe"],
       cNumDocFiscal: item["numero_documento_fiscal"] ?? item["cNumDocFiscal"],
       numero_documento_fiscal: item["numero_documento_fiscal"],
+      numero_documento: item["numero_documento"],
       nCodOS: item["nCodOS"],
+      id_origem: item["id_origem"],
       boleto,
     };
     const omieCode = Number(mapped.nCodTitulo ?? 0) || null;

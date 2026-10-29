@@ -91,7 +91,6 @@ export function isBoletoMovement(detalhes: Record<string, unknown>) {
   return tipo === "BOL" || boletoGerado || Boolean(boleto);
 }
 
-/** Prefere nº da nota fiscal; se houver boleto diferente, mantém os dois na busca. */
 export function formatReceivableDocumentNumber(
   detalhes: Record<string, unknown>,
   itemType?: DueItemType | null,
@@ -108,9 +107,36 @@ export function formatReceivableDocumentNumber(
     detalhes["cNumTitulo"] ?? detalhes["numero_documento"] ?? "",
   ).trim();
 
-  if (fiscal && boleto && fiscal !== boleto) return `${fiscal} (bol ${boleto})`;
   if (itemType === "boleto") return boleto || fiscal || fallback || null;
+  if (itemType === "nfe" || itemType === "nfse") return fiscal || fallback || boleto || null;
   return fiscal || boleto || fallback || null;
+}
+
+/** Quando o título é boleto mas tem NF/NFS-e ligada, classifica o tipo da nota. */
+export function companionFiscalType(detalhes: Record<string, unknown>): "nfe" | "nfse" | null {
+  const fiscal = String(
+    detalhes["cNumDocFiscal"] ?? detalhes["numero_documento_fiscal"] ?? "",
+  ).trim();
+  const chave = String(detalhes["cChaveNFe"] ?? detalhes["chave_nfe"] ?? "").replace(/\D/g, "");
+  const nIdNfe = Number(detalhes["nIdNfe"] ?? detalhes["nCodNF"] ?? 0) || null;
+  const nCodNFSe = Number(detalhes["nCodNFSe"] ?? 0) || null;
+  const nCodOS = Number(detalhes["nCodOS"] ?? detalhes["codigo_os"] ?? 0) || null;
+  const numDoc = String(detalhes["numero_documento"] ?? "").toUpperCase();
+  const origem = String(detalhes["id_origem"] ?? detalhes["cOrigem"] ?? "").toUpperCase();
+
+  const hasFiscalLink = Boolean(fiscal || chave.length >= 40 || nIdNfe || nCodNFSe || nCodOS);
+  if (!hasFiscalLink) return null;
+
+  if (nCodNFSe || /RPS|NFS/i.test(numDoc) || origem.includes("NFSE") || origem.includes("OS")) {
+    return "nfse";
+  }
+  if (nIdNfe || chave.length >= 40 || /NFE|DANFE/i.test(numDoc)) {
+    return "nfe";
+  }
+  // RPS / OS no Omie costuma ser serviço mesmo sem nCodNFSe no CR.
+  if (nCodOS || /RPS/i.test(numDoc)) return "nfse";
+  if (fiscal) return "nfe";
+  return null;
 }
 
 export function classifyReceivableType(detalhes: Record<string, unknown>): DueItemType | null {
@@ -224,16 +250,21 @@ export async function saveDueItemFromMovement(
   const nCodTitulo = Number(detalhes["nCodTitulo"] ?? detalhes["codigo_lancamento_omie"] ?? 0) || null;
   const nIdNfe = Number(detalhes["nIdNfe"] ?? detalhes["nCodNF"] ?? 0) || null;
   const nCodNFSe = Number(detalhes["nCodNFSe"] ?? 0) || null;
+  const nCodOS = Number(detalhes["nCodOS"] ?? detalhes["codigo_os"] ?? 0) || null;
   const chaveNfe = String(detalhes["chave_nfe"] ?? detalhes["cChaveNFe"] ?? "").trim() || null;
+  const clientCode = pickClientCodeFromRecord(detalhes);
+  const clientName = pickClientNameFromRecord(detalhes);
+  const amount = parseAmount(detalhes["nValorTitulo"] ?? detalhes["valor_documento"]);
+  const status = String(detalhes["cStatus"] ?? detalhes["status_titulo"] ?? "") || null;
 
   const omieCode =
     itemType === "nfe"
       ? nIdNfe ?? nCodTitulo
       : itemType === "nfse"
-        ? nCodNFSe ?? nCodTitulo
+        ? nCodNFSe ?? nCodOS ?? nCodTitulo
         : nCodTitulo;
 
-  return saveReceivableDueItem(
+  const savedPrimary = await saveReceivableDueItem(
     app,
     {
       itemType,
@@ -243,17 +274,53 @@ export async function saveDueItemFromMovement(
         itemType === "nfe"
           ? nfeIntegrationCode(nIdNfe, nCodTitulo, chaveNfe)
           : itemType === "nfse"
-            ? nfseIntegrationCode(nCodNFSe, nCodTitulo)
-            : String(detalhes["cCodIntTitulo"] ?? detalhes["codigo_lancamento_integracao"] ?? "") || null,
+            ? nfseIntegrationCode(nCodNFSe ?? nCodOS, nCodTitulo)
+            : String(detalhes["cCodIntTitulo"] ?? detalhes["codigo_lancamento_integracao"] ?? "") ||
+              (nCodTitulo ? `titulo:${nCodTitulo}` : null),
       documentNumber: formatReceivableDocumentNumber(detalhes, itemType),
-      clientCode: pickClientCodeFromRecord(detalhes),
-      clientName: pickClientNameFromRecord(detalhes),
+      clientCode,
+      clientName,
       dueDate,
-      amount: parseAmount(detalhes["nValorTitulo"] ?? detalhes["valor_documento"]),
-      status: String(detalhes["cStatus"] ?? detalhes["status_titulo"] ?? "") || null,
+      amount,
+      status,
     },
     window,
   );
+
+  // Boleto com nota ligada → grava também a NF-e/NFS-e (envio conjunto na cobrança).
+  let savedCompanion = false;
+  if (itemType === "boleto") {
+    const fiscalType = companionFiscalType(detalhes);
+    if (fiscalType) {
+      const fiscalOmieCode =
+        fiscalType === "nfse" ? nCodOS ?? nCodNFSe ?? nCodTitulo : nIdNfe ?? nCodTitulo;
+      // Preferir titulo: para o PDF resolver nCodOS/NF via ConsultarContaReceber.
+      const fiscalIntegration =
+        fiscalType === "nfse"
+          ? nCodTitulo
+            ? `titulo:${nCodTitulo}`
+            : nfseIntegrationCode(nCodNFSe ?? nCodOS, null)
+          : nfeIntegrationCode(nIdNfe, nCodTitulo, chaveNfe);
+      savedCompanion = await saveReceivableDueItem(
+        app,
+        {
+          itemType: fiscalType,
+          detalhes,
+          omieCode: fiscalOmieCode,
+          integrationCode: fiscalIntegration,
+          documentNumber: formatReceivableDocumentNumber(detalhes, fiscalType),
+          clientCode,
+          clientName,
+          dueDate,
+          amount,
+          status,
+        },
+        window,
+      );
+    }
+  }
+
+  return savedPrimary || savedCompanion;
 }
 
 async function syncNfeInvoices(app: OmieAppConfig, from: Date, to: Date) {

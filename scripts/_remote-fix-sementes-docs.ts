@@ -53,7 +53,25 @@ for (const target of targets) {
       numero_documento_fiscal: r["numero_documento_fiscal"],
       boleto,
     };
-    const saved = await saveDueItemFromMovement(app, mapped);
-    console.log(app.name, r["codigo_lancamento_omie"], "fiscal", r["numero_documento_fiscal"], "bol", boleto["cNumBoleto"], "=>", saved);
+    const mappedWithOs = {
+      ...mapped,
+      nCodOS: r["nCodOS"],
+      numero_documento: r["numero_documento"],
+    };
+    const saved = await saveDueItemFromMovement(app, mappedWithOs);
+    console.log(
+      app.name,
+      r["codigo_lancamento_omie"],
+      "fiscal",
+      r["numero_documento_fiscal"],
+      "bol",
+      boleto["cNumBoleto"],
+      "os",
+      r["nCodOS"],
+      "rps",
+      r["numero_documento"],
+      "=>",
+      saved,
+    );
   }
 }
