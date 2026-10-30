@@ -107,14 +107,14 @@ function phoneDigits(value: string) {
   return value.replace(/\D/g, "");
 }
 
-/** Celular BR com 9 após o DDD — evita disparo em telefone fixo (piora qualidade Meta). */
+/** Telefone BR válido para WhatsApp: celular (11) ou fixo (10), com ou sem DDI 55. */
 export function isLikelyWhatsAppMobile(value: string | null | undefined) {
   if (!value) return false;
   let digits = phoneDigits(value);
   if (digits.startsWith("55") && (digits.length === 12 || digits.length === 13)) {
     digits = digits.slice(2);
   }
-  return digits.length === 11 && digits[2] === "9";
+  return digits.length === 10 || digits.length === 11;
 }
 
 export function toWhatsAppChatId(value: string | null | undefined) {
@@ -513,13 +513,9 @@ async function sendReminderBatch(
         const item = await enrichDueItem(rawItem);
         const target = await resolveItemNotifyPhones(item);
         if (target.phones.length === 0) {
-          const reason =
-            target.originalPhones.length > 0
-              ? "sem celular WhatsApp válido (telefone fixo ignorado)"
-              : "telefone inválido ou ausente";
           return {
             ok: false as const,
-            error: `${item.clientName ?? "Sem cliente"}: ${reason}`,
+            error: `${item.clientName ?? "Sem cliente"}: telefone inválido ou ausente`,
           };
         }
         return { ok: true as const, item, target };

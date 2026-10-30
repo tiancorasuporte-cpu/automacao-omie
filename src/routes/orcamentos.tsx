@@ -1,5 +1,5 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
@@ -179,6 +179,8 @@ function OrcamentosPage() {
   const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileOrcamentoTab>("montar");
   const [lastAddedLabel, setLastAddedLabel] = useState<string | null>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
 
   const total = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantidade * item.valorUnitario, 0),
@@ -493,6 +495,50 @@ function OrcamentosPage() {
     });
     setLastAddedLabel(product.descricao);
     window.setTimeout(() => setLastAddedLabel(null), 1800);
+  }
+
+  function reorderCart(fromKey: string, toKey: string) {
+    if (locked || fromKey === toKey) return;
+    setCart((prev) => {
+      const from = prev.findIndex((item) => item.key === fromKey);
+      const to = prev.findIndex((item) => item.key === toKey);
+      if (from < 0 || to < 0 || from === to) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }
+
+  function cartDragProps(itemKey: string) {
+    if (locked) return {};
+    return {
+      draggable: true as const,
+      onDragStart: (event: DragEvent) => {
+        setDragKey(itemKey);
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", itemKey);
+      },
+      onDragOver: (event: DragEvent) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        if (dragOverKey !== itemKey) setDragOverKey(itemKey);
+      },
+      onDragLeave: () => {
+        if (dragOverKey === itemKey) setDragOverKey(null);
+      },
+      onDrop: (event: DragEvent) => {
+        event.preventDefault();
+        const fromKey = event.dataTransfer.getData("text/plain") || dragKey;
+        if (fromKey) reorderCart(fromKey, itemKey);
+        setDragKey(null);
+        setDragOverKey(null);
+      },
+      onDragEnd: () => {
+        setDragKey(null);
+        setDragOverKey(null);
+      },
+    };
   }
 
   function buildPayload() {
@@ -1621,7 +1667,14 @@ function OrcamentosPage() {
 
             <div>
               <div className="mb-xs flex items-center justify-between gap-sm">
-                <p className="text-title-md text-on-surface">Itens do orçamento</p>
+                <div>
+                  <p className="text-title-md text-on-surface">Itens do orçamento</p>
+                  {!locked && cart.length > 1 ? (
+                    <p className="text-label-md text-on-surface-variant">
+                      Arraste pelo ícone para reordenar
+                    </p>
+                  ) : null}
+                </div>
                 <p className="text-label-md text-on-surface-variant">Total {formatMoney(total)}</p>
               </div>
               {cart.length > 0 && (belowCmcCount > 0 || belowSuggestedCount > 0) ? (
@@ -1670,15 +1723,33 @@ function OrcamentosPage() {
                       return (
                         <article
                           key={item.key}
-                          className="rounded-xl border border-outline-variant bg-surface p-md"
+                          {...cartDragProps(item.key)}
+                          className={cn(
+                            "rounded-xl border bg-surface p-md",
+                            dragOverKey === item.key && dragKey !== item.key
+                              ? "border-secondary border-dashed"
+                              : "border-outline-variant",
+                            dragKey === item.key && "opacity-60",
+                          )}
                         >
                           <div className="flex items-start justify-between gap-sm">
-                            <div className="min-w-0">
-                              <p className="text-title-md text-primary">{item.descricao}</p>
-                              <p className="text-label-md text-on-surface-variant">
-                                #{item.codigoProduto}
-                                {item.unidade ? ` · ${item.unidade}` : ""}
-                              </p>
+                            <div className="flex min-w-0 items-start gap-sm">
+                              {!locked ? (
+                                <span
+                                  className="mt-xs shrink-0 cursor-grab touch-none text-on-surface-variant active:cursor-grabbing"
+                                  title="Arrastar para reordenar"
+                                  aria-hidden
+                                >
+                                  <Icon name="drag_indicator" className="text-[20px]" />
+                                </span>
+                              ) : null}
+                              <div className="min-w-0">
+                                <p className="text-title-md text-primary">{item.descricao}</p>
+                                <p className="text-label-md text-on-surface-variant">
+                                  #{item.codigoProduto}
+                                  {item.unidade ? ` · ${item.unidade}` : ""}
+                                </p>
+                              </div>
                             </div>
                             {!locked ? (
                               <button
@@ -1773,6 +1844,7 @@ function OrcamentosPage() {
                   <table className="min-w-full text-left text-body-md">
                     <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
                       <tr>
+                        {!locked ? <th className="w-8 px-sm py-xs" aria-label="Reordenar" /> : null}
                         <th className="px-sm py-xs">Produto</th>
                         <th className="px-sm py-xs">Qtd</th>
                         <th className="px-sm py-xs">Unitário</th>
@@ -1789,7 +1861,26 @@ function OrcamentosPage() {
                         const belowSuggested =
                           !belowCmc && isUnitBelowSuggested(item.valorUnitario, sugerido);
                         return (
-                        <tr key={item.key} className="border-t border-outline-variant">
+                        <tr
+                          key={item.key}
+                          {...cartDragProps(item.key)}
+                          className={cn(
+                            "border-t border-outline-variant",
+                            dragOverKey === item.key && dragKey !== item.key && "bg-secondary-container/30",
+                            dragKey === item.key && "opacity-60",
+                          )}
+                        >
+                          {!locked ? (
+                            <td className="px-sm py-xs align-middle">
+                              <span
+                                className="inline-flex cursor-grab touch-none text-on-surface-variant active:cursor-grabbing"
+                                title="Arrastar para reordenar"
+                                aria-label="Arrastar para reordenar"
+                              >
+                                <Icon name="drag_indicator" className="text-[18px]" />
+                              </span>
+                            </td>
+                          ) : null}
                           <td className="px-sm py-xs">
                             <p>{item.descricao}</p>
                             <p className="text-label-md text-on-surface-variant">

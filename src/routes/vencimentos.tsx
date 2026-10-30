@@ -12,8 +12,9 @@ import {
   listDueItemsFn,
   sendDueItemNotificationFn,
   sendSelectedDueItemsFn,
+  updateDueItemClientPhoneFn,
 } from "@/lib/omie";
-import { isAdmin, requireModule } from "@/lib/require-auth";
+import { requireModule } from "@/lib/require-auth";
 import { APP_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import type { DueItem, DueItemType } from "@/db/schema";
@@ -166,8 +167,6 @@ function VencimentosPage() {
   const testMode = Boolean(notifySettings?.testModeEnabled);
   const navigate = Route.useNavigate();
   const router = useRouter();
-  const { user } = Route.useRouteContext();
-  const admin = isAdmin(user);
   const { page: urlPage } = Route.useSearch();
   const { query } = useShellSearch();
   const [appFilter, setAppFilter] = useState<string>("all");
@@ -184,8 +183,12 @@ function VencimentosPage() {
   const [bulkSending, setBulkSending] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [viewingId, setViewingId] = useState<number | null>(null);
+  const [editingPhoneId, setEditingPhoneId] = useState<number | null>(null);
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [savingPhoneId, setSavingPhoneId] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
-  const busy = sendingId !== null || bulkSending || viewingId !== null;
+  const busy =
+    sendingId !== null || bulkSending || viewingId !== null || savingPhoneId !== null;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -324,6 +327,39 @@ function VencimentosPage() {
       }
       return next;
     });
+  }
+
+  function startEditPhone(item: DueItem) {
+    if (!item.clientCode) {
+      setFeedback({ type: "error", text: "Cliente Omie não vinculado — não é possível alterar o telefone." });
+      return;
+    }
+    setEditingPhoneId(item.id);
+    setPhoneDraft(item.clientPhone ?? "");
+    setFeedback(null);
+  }
+
+  async function savePhone(item: DueItem) {
+    if (!item.clientCode) return;
+    setSavingPhoneId(item.id);
+    setFeedback(null);
+    try {
+      const result = await updateDueItemClientPhoneFn({
+        data: { dueItemId: item.id, phone: phoneDraft },
+      });
+      if (!result.ok) {
+        setFeedback({ type: "error", text: result.error });
+        return;
+      }
+      setEditingPhoneId(null);
+      setFeedback({
+        type: "ok",
+        text: `Telefone atualizado na Omie e nos vencimentos deste cliente (${result.phone}).`,
+      });
+      await router.invalidate();
+    } finally {
+      setSavingPhoneId(null);
+    }
   }
 
   async function sendAlert(item: DueItem) {
@@ -588,7 +624,7 @@ function VencimentosPage() {
             </p>
           ) : null}
 
-          {admin && selectedIds.size > 0 ? (
+          {selectedIds.size > 0 ? (
             <div className="flex flex-wrap items-center justify-between gap-sm rounded-xl border border-secondary-container/60 bg-secondary-container/25 px-md py-sm">
               <p className="text-body-md text-primary">
                 <span className="font-semibold tabular-nums">{selectedIds.size}</span>{" "}
@@ -621,18 +657,16 @@ function VencimentosPage() {
               <table className="min-w-full text-left text-body-md">
                 <thead className="sticky top-0 z-10 border-b border-outline-variant bg-surface-container-low/95 backdrop-blur">
                   <tr>
-                    {admin ? (
-                      <th className="w-10 px-md py-sm">
-                        <input
-                          type="checkbox"
-                          checked={allPageSelected}
-                          disabled={pageIds.length === 0 || busy}
-                          onChange={toggleSelectPage}
-                          aria-label="Selecionar página"
-                          className="size-4 accent-[var(--color-secondary)]"
-                        />
-                      </th>
-                    ) : null}
+                    <th className="w-10 px-md py-sm">
+                      <input
+                        type="checkbox"
+                        checked={allPageSelected}
+                        disabled={pageIds.length === 0 || busy}
+                        onChange={toggleSelectPage}
+                        aria-label="Selecionar página"
+                        className="size-4 accent-[var(--color-secondary)]"
+                      />
+                    </th>
                     <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Tipo</th>
                     <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Cliente</th>
                     <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Documento</th>
@@ -650,7 +684,7 @@ function VencimentosPage() {
                   {pagination.items.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={admin ? 10 : 9}
+                        colSpan={10}
                         className="px-md py-2xl text-center text-on-surface-variant"
                       >
                         {items.length === 0
@@ -670,18 +704,16 @@ function VencimentosPage() {
                             selected && "bg-secondary-container/20",
                           )}
                         >
-                          {admin ? (
-                            <td className="px-md py-sm">
-                              <input
-                                type="checkbox"
-                                checked={selected}
-                                disabled={busy}
-                                onChange={() => toggleSelected(item.id)}
-                                aria-label={`Selecionar ${item.clientName ?? item.documentNumber ?? item.id}`}
-                                className="size-4 accent-[var(--color-secondary)]"
-                              />
-                            </td>
-                          ) : null}
+                          <td className="px-md py-sm">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              disabled={busy}
+                              onChange={() => toggleSelected(item.id)}
+                              aria-label={`Selecionar ${item.clientName ?? item.documentNumber ?? item.id}`}
+                              className="size-4 accent-[var(--color-secondary)]"
+                            />
+                          </td>
                           <td className="px-md py-sm">
                             <TypeBadge type={item.itemType} />
                           </td>
@@ -714,15 +746,63 @@ function VencimentosPage() {
                           </td>
                           <td className="px-md py-sm">
                             <div className="flex flex-col gap-0.5">
+                              {editingPhoneId === item.id ? (
+                                <div className="flex flex-wrap items-center gap-xs">
+                                  <input
+                                    type="tel"
+                                    value={phoneDraft}
+                                    disabled={savingPhoneId === item.id}
+                                    onChange={(event) => setPhoneDraft(event.target.value)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Enter") void savePhone(item);
+                                      if (event.key === "Escape") setEditingPhoneId(null);
+                                    }}
+                                    placeholder="DDD + número"
+                                    className="w-36 rounded-md border border-outline-variant bg-surface px-sm py-xs text-label-md tabular-nums"
+                                    autoFocus
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={savingPhoneId === item.id}
+                                    onClick={() => void savePhone(item)}
+                                    className="rounded-md bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+                                  >
+                                    {savingPhoneId === item.id ? "..." : "Salvar"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={savingPhoneId === item.id}
+                                    onClick={() => setEditingPhoneId(null)}
+                                    className="rounded-md border border-outline-variant px-sm py-xs text-label-md text-on-surface-variant disabled:opacity-50"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={busy || !item.clientCode}
+                                  onClick={() => startEditPhone(item)}
+                                  title={
+                                    item.clientCode
+                                      ? "Alterar telefone no cadastro Omie"
+                                      : "Sem código de cliente Omie"
+                                  }
+                                  className="inline-flex max-w-full items-center gap-xs rounded-md text-left hover:bg-surface-container-high disabled:opacity-60"
+                                >
+                                  {item.clientPhone ? (
+                                    <span className="text-label-md tabular-nums text-on-surface-variant">
+                                      {item.clientPhone}
+                                    </span>
+                                  ) : (
+                                    <span className="text-label-md text-error">Sem telefone</span>
+                                  )}
+                                  <Icon name="edit" className="text-[14px] text-on-surface-variant" />
+                                </button>
+                              )}
                               {item.notifiedAt ? (
                                 <span className="text-label-md text-secondary">Pré-vencimento</span>
-                              ) : item.clientPhone ? (
-                                <span className="text-label-md text-on-surface-variant">
-                                  {item.clientPhone}
-                                </span>
-                              ) : (
-                                <span className="text-label-md text-error">Sem telefone</span>
-                              )}
+                              ) : null}
                               {item.overdueNotifiedAt ? (
                                 <span className="text-label-md text-error">Atraso alertado</span>
                               ) : null}
@@ -757,21 +837,19 @@ function VencimentosPage() {
                                     ? "Boleto"
                                     : "PDF"}
                               </button>
-                              {admin ? (
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => sendAlert(item)}
-                                  className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container hover:opacity-90 disabled:opacity-50"
-                                  title="Enviar alerta WhatsApp"
-                                >
-                                  <Icon
-                                    name={sendingId === item.id ? "hourglass_empty" : "send"}
-                                    className="text-[16px]"
-                                  />
-                                  {sendingId === item.id ? "..." : "Enviar"}
-                                </button>
-                              ) : null}
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => sendAlert(item)}
+                                className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container hover:opacity-90 disabled:opacity-50"
+                                title="Enviar alerta WhatsApp"
+                              >
+                                <Icon
+                                  name={sendingId === item.id ? "hourglass_empty" : "send"}
+                                  className="text-[16px]"
+                                />
+                                {sendingId === item.id ? "..." : "Enviar"}
+                              </button>
                             </div>
                           </td>
                         </tr>

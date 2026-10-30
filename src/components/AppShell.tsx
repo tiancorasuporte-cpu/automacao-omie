@@ -13,7 +13,7 @@ import { BrandLogo } from "@/components/BrandLogo";
 import { HelpChat } from "@/components/HelpChat";
 import { Icon } from "@/components/Icon";
 import { logoutFn } from "@/lib/auth";
-import { APP_NAME } from "@/lib/brand";
+import { APP_NAME, APP_VERSION } from "@/lib/brand";
 import { consumeLoginEnter } from "@/lib/login-enter";
 import { isAdmin, isSuperadmin, canAccessModule, roleLabel } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,7 @@ type NavPath =
   | "/dashboard"
   | "/vencimentos"
   | "/orcamentos"
+  | "/orcamentos-postos"
   | "/produtos"
   | "/facilities"
   | "/uniformes"
@@ -79,6 +80,12 @@ const NAV: NavEntry[] = [
     icon: "storefront",
     children: [
       { to: "/orcamentos", label: "Orçamentos", icon: "request_quote", module: "orcamentos" },
+      {
+        to: "/orcamentos-postos",
+        label: "Orçamento Postos",
+        icon: "apartment",
+        module: "orcamentos",
+      },
       { to: "/produtos", label: "Produtos", icon: "inventory_2", module: "produtos" },
     ],
   },
@@ -449,6 +456,9 @@ function ProfileMenu({ user }: { user: AppUser | null }) {
           <div className="border-b border-outline-variant px-md py-sm">
             <p className="truncate text-title-lg text-primary">{user.name}</p>
             <p className="text-label-md text-on-surface-variant">{roleLabel(user.role)}</p>
+            <p className="mt-xs text-[0.65rem] tabular-nums text-on-surface-variant">
+              Versão {APP_VERSION}
+            </p>
           </div>
           <Link
             to="/profile"

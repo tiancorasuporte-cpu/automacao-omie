@@ -234,8 +234,118 @@ export async function getCliente(app: OmieAppConfig, clientCode: number) {
   return undefined;
 }
 
-export function clearClienteCache() {
+export function clearClienteCache(appId?: string, clientCode?: number) {
+  if (appId && clientCode) {
+    clientCache.delete(`${appId}:${clientCode}`);
+    return;
+  }
   clientCache.clear();
+}
+
+/** Divide telefone BR em DDD + número (aceita com ou sem 55). */
+export function splitBrazilPhone(value: string) {
+  let digits = digitsPhone(value);
+  if (digits.startsWith("55") && digits.length >= 12) digits = digits.slice(2);
+  if (digits.length < 10 || digits.length > 11) return null;
+  return { ddd: digits.slice(0, 2), numero: digits.slice(2), digits };
+}
+
+/** Campos que a Omie devolve no ConsultarCliente mas rejeita / invalida no AlterarCliente. */
+const ALTERAR_CLIENTE_OMIT = new Set([
+  "celular",
+  "info",
+  "tags",
+  "recomendacoes",
+  "características",
+  "caracteristicas",
+  // ConsultarCliente pode devolver código/texto que AlterarCliente não aceita.
+  "tipo_atividade",
+  "cnae",
+  "cnae_municipal",
+  "nif",
+  "documento_exterior",
+]);
+
+/** Flags Omie que só aceitam S/N no AlterarCliente. */
+const ALTERAR_CLIENTE_SN_FLAGS = new Set([
+  "bloqueado",
+  "inativo",
+  "enviar_anexos",
+  "optante_simples_nacional",
+  "pessoa_fisica",
+  "produtor_rural",
+  "contribuinte",
+  "importado_api",
+  "nao_gerar_boleto",
+  "cnae_secundario",
+]);
+
+function toOmieSN(value: unknown, fallback: "S" | "N" = "N"): "S" | "N" {
+  if (value === true || value === 1) return "S";
+  if (value === false || value === 0) return "N";
+  const text = String(value ?? "")
+    .trim()
+    .toUpperCase();
+  if (text === "S" || text === "SIM" || text === "TRUE" || text === "1") return "S";
+  if (text === "N" || text === "NAO" || text === "NÃO" || text === "FALSE" || text === "0") return "N";
+  if (!text) return fallback;
+  return fallback;
+}
+
+/**
+ * Atualiza Telefone 2 (preferido no WhatsApp) no cadastro Omie.
+ * Consulta o cliente e reenvia o cadastro completo — AlterarCliente exige endereço/UF.
+ */
+export async function updateClientePhoneInOmie(
+  app: OmieAppConfig,
+  clientCode: number,
+  phone: string,
+) {
+  const split = splitBrazilPhone(phone);
+  if (!split) {
+    throw new Error("Informe um telefone válido com DDD (10 ou 11 dígitos).");
+  }
+
+  const response = await omieCall<Record<string, unknown>>(app, "/geral/clientes/", "ConsultarCliente", {
+    codigo_cliente_omie: clientCode,
+  });
+  const root = (
+    (response["clientes_cadastro"] as Record<string, unknown> | undefined) ?? response
+  ) as Record<string, unknown>;
+
+  const payload: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(root)) {
+    if (ALTERAR_CLIENTE_OMIT.has(key)) continue;
+    if (value === undefined || value === null) continue;
+    // Omie não gosta de objetos aninhados vazios / arrays de metadados no Alterar.
+    if (Array.isArray(value)) continue;
+    if (typeof value === "object") continue;
+    if (ALTERAR_CLIENTE_SN_FLAGS.has(key)) {
+      payload[key] = toOmieSN(value);
+      continue;
+    }
+    // Evita reenviar string vazia em flags/campos sensíveis.
+    if (typeof value === "string" && !value.trim() && ALTERAR_CLIENTE_SN_FLAGS.has(key)) continue;
+    payload[key] = value;
+  }
+
+  payload["codigo_cliente_omie"] = clientCode;
+  payload["telefone2_ddd"] = split.ddd;
+  payload["telefone2_numero"] = split.numero;
+  payload["bloqueado"] = toOmieSN(root["bloqueado"], "N");
+  payload["inativo"] = toOmieSN(root["inativo"], "N");
+
+  const estado = String(payload["estado"] ?? "").trim();
+  if (!estado) {
+    throw new Error(
+      "Cadastro Omie sem Estado (UF). Preencha o endereço do cliente na Omie e tente de novo.",
+    );
+  }
+
+  await omieCall(app, "/geral/clientes/", "AlterarCliente", payload);
+
+  clearClienteCache(app.id, clientCode);
+  return { phone: split.digits, ddd: split.ddd, numero: split.numero };
 }
 
 function clientInactive(raw: Record<string, unknown>) {

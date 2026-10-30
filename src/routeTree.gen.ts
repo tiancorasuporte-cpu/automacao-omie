@@ -16,6 +16,7 @@ import { Route as FacilitiesRouteImport } from './routes/facilities'
 import { Route as FrotaRouteImport } from './routes/frota'
 import { Route as NotificacoesRouteImport } from './routes/notificacoes'
 import { Route as OrcamentosRouteImport } from './routes/orcamentos'
+import { Route as OrcamentosPostosRouteImport } from './routes/orcamentos-postos'
 import { Route as ProdutosRouteImport } from './routes/produtos'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -60,6 +61,11 @@ const NotificacoesRoute = NotificacoesRouteImport.update({
 const OrcamentosRoute = OrcamentosRouteImport.update({
   id: '/orcamentos',
   path: '/orcamentos',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrcamentosPostosRoute = OrcamentosPostosRouteImport.update({
+  id: '/orcamentos-postos',
+  path: '/orcamentos-postos',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProdutosRoute = ProdutosRouteImport.update({
@@ -121,6 +127,7 @@ export interface FileRoutesByFullPath {
   '/frota': typeof FrotaRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
+  '/orcamentos-postos': typeof OrcamentosPostosRoute
   '/produtos': typeof ProdutosRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
@@ -140,6 +147,7 @@ export interface FileRoutesByTo {
   '/frota': typeof FrotaRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
+  '/orcamentos-postos': typeof OrcamentosPostosRoute
   '/produtos': typeof ProdutosRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
@@ -160,6 +168,7 @@ export interface FileRoutesById {
   '/frota': typeof FrotaRoute
   '/notificacoes': typeof NotificacoesRoute
   '/orcamentos': typeof OrcamentosRoute
+  '/orcamentos-postos': typeof OrcamentosPostosRoute
   '/produtos': typeof ProdutosRoute
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
@@ -181,6 +190,7 @@ export interface FileRouteTypes {
     | '/frota'
     | '/notificacoes'
     | '/orcamentos'
+    | '/orcamentos-postos'
     | '/produtos'
     | '/profile'
     | '/settings'
@@ -200,6 +210,7 @@ export interface FileRouteTypes {
     | '/frota'
     | '/notificacoes'
     | '/orcamentos'
+    | '/orcamentos-postos'
     | '/produtos'
     | '/profile'
     | '/settings'
@@ -219,6 +230,7 @@ export interface FileRouteTypes {
     | '/frota'
     | '/notificacoes'
     | '/orcamentos'
+    | '/orcamentos-postos'
     | '/produtos'
     | '/profile'
     | '/settings'
@@ -239,6 +251,7 @@ export interface RootRouteChildren {
   FrotaRoute: typeof FrotaRoute
   NotificacoesRoute: typeof NotificacoesRoute
   OrcamentosRoute: typeof OrcamentosRoute
+  OrcamentosPostosRoute: typeof OrcamentosPostosRoute
   ProdutosRoute: typeof ProdutosRoute
   ProfileRoute: typeof ProfileRoute
   SettingsRoute: typeof SettingsRoute
@@ -300,6 +313,13 @@ declare module '@tanstack/react-router' {
       path: '/orcamentos'
       fullPath: '/orcamentos'
       preLoaderRoute: typeof OrcamentosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orcamentos-postos': {
+      id: '/orcamentos-postos'
+      path: '/orcamentos-postos'
+      fullPath: '/orcamentos-postos'
+      preLoaderRoute: typeof OrcamentosPostosRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/produtos': {
@@ -383,6 +403,7 @@ const rootRouteChildren: RootRouteChildren = {
   FrotaRoute: FrotaRoute,
   NotificacoesRoute: NotificacoesRoute,
   OrcamentosRoute: OrcamentosRoute,
+  OrcamentosPostosRoute: OrcamentosPostosRoute,
   ProdutosRoute: ProdutosRoute,
   ProfileRoute: ProfileRoute,
   SettingsRoute: SettingsRoute,

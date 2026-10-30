@@ -51,6 +51,21 @@ function toDueItem(row: DueItemRow): DueItem {
   };
 }
 
+export async function updateDueItemsClientPhone(input: {
+  omieAppId: string;
+  clientCode: number;
+  clientPhone: string;
+}) {
+  const db = await getDb();
+  const phone = input.clientPhone.replace(/\D/g, "");
+  await db`
+    update due_items
+    set client_phone = ${phone}
+    where omie_app_id = ${input.omieAppId}
+      and client_code = ${input.clientCode}
+  `;
+}
+
 export async function upsertDueItem(input: {
   omieAppId: string;
   omieAppName: string;

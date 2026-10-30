@@ -114,9 +114,6 @@ export function formatReceivableDocumentNumber(
 
 /** Quando o título é boleto mas tem NF/NFS-e ligada, classifica o tipo da nota. */
 export function companionFiscalType(detalhes: Record<string, unknown>): "nfe" | "nfse" | null {
-  const fiscal = String(
-    detalhes["cNumDocFiscal"] ?? detalhes["numero_documento_fiscal"] ?? "",
-  ).trim();
   const chave = String(detalhes["cChaveNFe"] ?? detalhes["chave_nfe"] ?? "").replace(/\D/g, "");
   const nIdNfe = Number(detalhes["nIdNfe"] ?? detalhes["nCodNF"] ?? 0) || null;
   const nCodNFSe = Number(detalhes["nCodNFSe"] ?? 0) || null;
@@ -124,18 +121,13 @@ export function companionFiscalType(detalhes: Record<string, unknown>): "nfe" | 
   const numDoc = String(detalhes["numero_documento"] ?? "").toUpperCase();
   const origem = String(detalhes["id_origem"] ?? detalhes["cOrigem"] ?? "").toUpperCase();
 
-  const hasFiscalLink = Boolean(fiscal || chave.length >= 40 || nIdNfe || nCodNFSe || nCodOS);
-  if (!hasFiscalLink) return null;
-
-  if (nCodNFSe || /RPS|NFS/i.test(numDoc) || origem.includes("NFSE") || origem.includes("OS")) {
+  // Exige vínculo resolvível no Omie (id/chave/OS). Só "número fiscal" gera NF-e fantasma sem PDF.
+  if (nCodNFSe || nCodOS || /RPS|NFS/i.test(numDoc) || origem.includes("NFSE") || origem.includes("OS")) {
     return "nfse";
   }
-  if (nIdNfe || chave.length >= 40 || /NFE|DANFE/i.test(numDoc)) {
+  if (nIdNfe || chave.length >= 40 || /NFE|DANFE/i.test(numDoc) || origem.includes("NFE")) {
     return "nfe";
   }
-  // RPS / OS no Omie costuma ser serviço mesmo sem nCodNFSe no CR.
-  if (nCodOS || /RPS/i.test(numDoc)) return "nfse";
-  if (fiscal) return "nfe";
   return null;
 }
 
@@ -144,30 +136,49 @@ export function classifyReceivableType(detalhes: Record<string, unknown>): DueIt
 
   const tipo = documentoTipo(detalhes);
   const origem = String(detalhes["cOrigem"] ?? detalhes["cGrupo"] ?? detalhes["id_origem"] ?? "").toUpperCase();
-  const chave = String(detalhes["cChaveNFe"] ?? detalhes["chave_nfe"] ?? "").trim();
+  const chave = String(detalhes["cChaveNFe"] ?? detalhes["chave_nfe"] ?? "").replace(/\D/g, "");
+  const nIdNfe = Number(detalhes["nIdNfe"] ?? detalhes["nCodNF"] ?? 0) || null;
+  const nCodNFSe = Number(detalhes["nCodNFSe"] ?? 0) || null;
+  const nCodOS = Number(detalhes["nCodOS"] ?? detalhes["codigo_os"] ?? 0) || null;
   const docFiscal = String(
-    detalhes["cNumDocFiscal"] ??
-      detalhes["numero_documento_fiscal"] ??
-      detalhes["cNumTitulo"] ??
-      "",
+    detalhes["cNumDocFiscal"] ?? detalhes["numero_documento_fiscal"] ?? "",
   ).trim();
-  const doc = String(detalhes["numero_documento"] ?? docFiscal ?? "");
+  const doc = String(detalhes["numero_documento"] ?? "").trim();
 
-  if (tipo.includes("NFS") || origem.includes("NFSE") || /nfs-?e/i.test(doc) || /nfs-?e/i.test(docFiscal)) {
+  if (
+    tipo.includes("NFS") ||
+    nCodNFSe ||
+    nCodOS ||
+    origem.includes("NFSE") ||
+    /nfs-?e|rps/i.test(doc) ||
+    /nfs-?e/i.test(docFiscal)
+  ) {
     return "nfse";
   }
+  // NF-e só com tipo/id/chave reais. Nº fiscal sozinho vira fantasma sem DANFE;
+  // o sync ListarNF cobre as notas de produto.
   if (
     tipo.includes("NFE") ||
     tipo === "NF" ||
-    chave.length > 40 ||
-    /nf-?e/i.test(doc) ||
-    // Conta a receber ligada a NF (número fiscal) sem tipo explícito.
-    Boolean(docFiscal)
+    nIdNfe ||
+    chave.length >= 40 ||
+    /nf-?e|danfe/i.test(doc) ||
+    origem.includes("NFE")
   ) {
     return "nfe";
   }
 
   return null;
+}
+
+function decodeOmieText(value: string | null | undefined) {
+  return String(value ?? "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
 }
 
 function nfeIntegrationCode(nIdNfe: number | null, nCodTitulo: number | null, chaveNfe?: string | null) {
@@ -257,12 +268,11 @@ export async function saveDueItemFromMovement(
   const amount = parseAmount(detalhes["nValorTitulo"] ?? detalhes["valor_documento"]);
   const status = String(detalhes["cStatus"] ?? detalhes["status_titulo"] ?? "") || null;
 
+  // Unique key usa o título sempre que existir — evita colisão nIdNF/nCodOS ↔ outro lançamento.
   const omieCode =
-    itemType === "nfe"
-      ? nIdNfe ?? nCodTitulo
-      : itemType === "nfse"
-        ? nCodNFSe ?? nCodOS ?? nCodTitulo
-        : nCodTitulo;
+    itemType === "boleto"
+      ? nCodTitulo
+      : nCodTitulo ?? (itemType === "nfse" ? nCodNFSe ?? nCodOS : nIdNfe);
 
   const savedPrimary = await saveReceivableDueItem(
     app,
@@ -292,8 +302,10 @@ export async function saveDueItemFromMovement(
   if (itemType === "boleto") {
     const fiscalType = companionFiscalType(detalhes);
     if (fiscalType) {
-      const fiscalOmieCode =
-        fiscalType === "nfse" ? nCodOS ?? nCodNFSe ?? nCodTitulo : nIdNfe ?? nCodTitulo;
+      // Sempre preferir nCodTitulo no omie_code: nIdNF/nCodOS convivem no mesmo
+      // espaço numérico do Omie e colidem no unique (app, tipo, omie_code, due_date),
+      // sobrescrevendo o cliente de outro título.
+      const fiscalOmieCode = nCodTitulo ?? (fiscalType === "nfse" ? nCodOS ?? nCodNFSe : nIdNfe);
       // Preferir titulo: para o PDF resolver nCodOS/NF via ConsultarContaReceber.
       const fiscalIntegration =
         fiscalType === "nfse"
@@ -352,28 +364,58 @@ async function syncNfeInvoices(app: OmieAppConfig, from: Date, to: Date) {
   for (const raw of items) {
     const cadastro = raw as Record<string, unknown>;
     const ide = (cadastro["ide"] ?? {}) as Record<string, unknown>;
+    const compl = (cadastro["compl"] ?? {}) as Record<string, unknown>;
     const dest = (cadastro["nfDestInt"] ?? cadastro["dest"] ?? {}) as Record<string, unknown>;
     const total = (cadastro["total"] ?? {}) as Record<string, unknown>;
     const icms = (total["ICMSTot"] ?? {}) as Record<string, unknown>;
 
+    // Omie ListarNF coloca o id interno em compl.nIdNF (não em ide).
     const nIdNfe =
-      Number(ide["nCodNF"] ?? ide["nIdNF"] ?? ide["nIdNfe"] ?? cadastro["nCodNF"] ?? 0) || null;
+      Number(
+        compl["nIdNF"] ??
+          compl["nIdNfe"] ??
+          ide["nCodNF"] ??
+          ide["nIdNF"] ??
+          ide["nIdNfe"] ??
+          cadastro["nCodNF"] ??
+          0,
+      ) || null;
     const chaveNfe =
-      String(ide["cChaveNFe"] ?? ide["chave_nfe"] ?? cadastro["cChaveNFe"] ?? cadastro["chave_nfe"] ?? "")
-        .replace(/\D/g, "") || null;
+      String(
+        compl["cChaveNFe"] ??
+          ide["cChaveNFe"] ??
+          ide["chave_nfe"] ??
+          cadastro["cChaveNFe"] ??
+          cadastro["chave_nfe"] ??
+          "",
+      ).replace(/\D/g, "") || null;
     const documentNumber = String(ide["nNF"] ?? ide["cNumNF"] ?? "").trim() || null;
     const clientCode = Number(dest["nCodCli"] ?? dest["nCodCliente"] ?? dest["nCodigoCliente"] ?? 0) || null;
+    const clientName = decodeOmieText(String(dest["cRazao"] ?? dest["cNome"] ?? "")) || null;
     const defaultAmount = parseAmount(icms["vNF"] ?? total["vNF"]);
+    const tpAmb = String(ide["tpAmb"] ?? "").trim();
+    const denegada = String(ide["cDeneg"] ?? "").trim().toUpperCase() === "S";
+    const cancelada = Boolean(String(ide["dCan"] ?? "").trim());
+    // Homologação / NF sem número / denegada: não entram na cobrança (geram "sem vínculo" no PDF).
+    if (tpAmb === "2" || denegada || cancelada || !documentNumber) {
+      continue;
+    }
 
     const titulos = (cadastro["titulos"] ?? []) as Record<string, unknown>[];
-    const nfeIssueDate = pickIssueDate(ide, cadastro);
+    const nfeIssueDate = pickIssueDate(ide, cadastro, compl);
 
     if (titulos.length > 0) {
       for (const titulo of titulos) {
         const dueDate = pickDueDate(titulo);
         if (!dueDate) continue;
         const nCodTitulo = Number(titulo["nCodTitulo"] ?? 0) || null;
-        const detalhesTitulo = { ...titulo, nIdNfe, nCodCliente: clientCode, chave_nfe: chaveNfe };
+        const detalhesTitulo = {
+          ...titulo,
+          nIdNfe,
+          nCodCliente: clientCode,
+          chave_nfe: chaveNfe,
+          cChaveNFe: chaveNfe,
+        };
         // NF com parcela em boleto → registra como boleto (cobrança/PDF).
         const itemType = isBoletoMovement(detalhesTitulo) ? ("boleto" as const) : ("nfe" as const);
         const saved = await saveReceivableDueItem(
@@ -381,7 +423,8 @@ async function syncNfeInvoices(app: OmieAppConfig, from: Date, to: Date) {
           {
             itemType,
             detalhes: detalhesTitulo,
-            omieCode: itemType === "boleto" ? nCodTitulo ?? nIdNfe : nIdNfe ?? nCodTitulo,
+            // Preferir título no unique key — nIdNF colide com códigos de outros lançamentos.
+            omieCode: nCodTitulo ?? nIdNfe,
             integrationCode:
               itemType === "boleto"
                 ? String(titulo["cCodIntTitulo"] ?? "") || (nCodTitulo ? `titulo:${nCodTitulo}` : null)
@@ -391,7 +434,7 @@ async function syncNfeInvoices(app: OmieAppConfig, from: Date, to: Date) {
                 ? String(titulo["cNumBoleto"] ?? documentNumber ?? "").trim() || documentNumber
                 : documentNumber,
             clientCode,
-            clientName: null,
+            clientName,
             dueDate,
             issueDate: pickIssueDate(titulo) ?? nfeIssueDate,
             amount: parseAmount(titulo["nValor"] ?? titulo["nValorTitulo"]) ?? defaultAmount,
@@ -415,10 +458,10 @@ async function syncNfeInvoices(app: OmieAppConfig, from: Date, to: Date) {
         itemType: "nfe",
         detalhes: cadastro,
         omieCode: nIdNfe,
-        integrationCode: nfeIntegrationCode(nIdNfe, null),
+        integrationCode: nfeIntegrationCode(nIdNfe, null, chaveNfe),
         documentNumber,
         clientCode,
-        clientName: null,
+        clientName,
         dueDate,
         issueDate: nfeIssueDate,
         amount: defaultAmount,

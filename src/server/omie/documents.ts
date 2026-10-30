@@ -31,14 +31,21 @@ function safeFilename(value: string) {
 }
 
 function parseIntegrationRef(integrationCode: string | null | undefined, prefix: string) {
-  if (!integrationCode?.startsWith(`${prefix}:`)) return null;
-  const value = Number(integrationCode.slice(prefix.length + 1));
+  if (!integrationCode) return null;
+  // Aceita "nfe:123", "nfe:123:titulo:456", "...:titulo:456", etc.
+  const re = new RegExp(`(?:^|:)${prefix}:(\\d+)`);
+  const match = integrationCode.match(re);
+  if (!match) return null;
+  const value = Number(match[1]);
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function parseChaveRef(integrationCode: string | null | undefined) {
   if (!integrationCode?.startsWith("chave:")) return null;
-  const chave = integrationCode.slice("chave:".length).replace(/\D/g, "");
+  // "chave:44DIGITS" ou "chave:44DIGITS:titulo:123" — não misturar dígitos do título.
+  const rest = integrationCode.slice("chave:".length);
+  const chavePart = rest.split(":")[0] ?? "";
+  const chave = chavePart.replace(/\D/g, "");
   return chave.length >= 40 ? chave : null;
 }
 
@@ -245,13 +252,13 @@ async function resolveNfeLookup(
     return { nIdNfe: nfeFromCode, chaveNfe: null as string | null, numeroNfe: item.documentNumber };
   }
 
+  const chaveFromCode = parseChaveRef(item.integrationCode);
   const tituloId =
-    parseIntegrationRef(item.integrationCode, "titulo") ??
-    (item.integrationCode == null && item.omieCode ? item.omieCode : null);
+    parseIntegrationRef(item.integrationCode, "titulo") ?? item.omieCode ?? null;
   const titulo = tituloId ? await lookupTituloFinanceiro(app, tituloId) : null;
 
   const chaveRaw =
-    parseChaveRef(item.integrationCode) ??
+    chaveFromCode ??
     String(titulo?.["cChaveNFe"] ?? titulo?.["chave_nfe"] ?? "").replace(/\D/g, "");
   const chaveNfe = chaveRaw.length >= 40 ? chaveRaw : null;
 
@@ -275,9 +282,7 @@ async function resolveNfeLookup(
       numero,
     });
   }
-  if (!nIdNfe && numero) {
-    nIdNfe = await lookupFiscalDocumentId(app, { modelo: "55", numero });
-  }
+  // Não buscar só por número: o mesmo nNF existe em clientes diferentes.
 
   return { nIdNfe, chaveNfe, numeroNfe: item.documentNumber };
 }
@@ -292,8 +297,7 @@ async function resolveNfseLookup(
   }
 
   const tituloId =
-    parseIntegrationRef(item.integrationCode, "titulo") ??
-    (item.integrationCode == null && item.omieCode ? item.omieCode : null);
+    parseIntegrationRef(item.integrationCode, "titulo") ?? item.omieCode ?? null;
   const titulo = tituloId ? await lookupTituloFinanceiro(app, tituloId) : null;
   const nCodOS = Number(titulo?.["nCodOS"] ?? titulo?.["nCodigoOS"] ?? 0) || null;
   const nCodNF = Number(titulo?.["nCodNF"] ?? titulo?.["nCodNFSe"] ?? 0) || null;
@@ -318,9 +322,7 @@ async function resolveNfseLookup(
       numero,
     });
   }
-  if (!nIdNf && numero) {
-    nIdNf = await lookupFiscalDocumentId(app, { modelo: "99", numero });
-  }
+  // Não buscar só por número: NFS-e reutiliza numeração entre clientes.
 
   return { nIdNf, nCodOS };
 }
@@ -776,7 +778,12 @@ export async function resolveDueItemPdfWithStatus(app: OmieAppConfig, item: DueI
     });
   }
   if (item.itemType === "nfe") {
-    return resolveNfePdfWithStatus(app, item);
+    const nfe = await resolveNfePdfWithStatus(app, item);
+    if (nfe.document?.base64 || nfe.document?.url || nfe.link) return nfe;
+    // Título de OS/serviço às vezes cai como NF-e (NF homolog vazia no Omie) — tenta NFS-e.
+    const nfse = await resolveNfsePdfWithStatus(app, item);
+    if (nfse.document?.base64 || nfse.document?.url || nfse.link) return nfse;
+    return nfe;
   }
   if (item.itemType === "nfse") {
     return resolveNfsePdfWithStatus(app, item);

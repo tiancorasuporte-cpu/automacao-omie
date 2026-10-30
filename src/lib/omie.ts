@@ -73,8 +73,8 @@ export const sendNotificationsFn = createServerFn({ method: "POST" }).handler(as
 export const sendDueItemNotificationFn = createServerFn({ method: "POST" })
   .validator((input) => z.object({ dueItemId: z.number().int().positive() }).parse(input))
   .handler(async ({ data }) => {
-    const { requireAdmin } = await import("@/lib/require-auth");
-    await requireAdmin();
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("vencimentos");
     return sendDueItemReminder(data.dueItemId);
   });
 
@@ -87,9 +87,49 @@ export const sendSelectedDueItemsFn = createServerFn({ method: "POST" })
       .parse(input),
   )
   .handler(async ({ data }) => {
-    const { requireAdmin } = await import("@/lib/require-auth");
-    await requireAdmin();
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("vencimentos");
     return sendSelectedDueItems(data.dueItemIds);
+  });
+
+export const updateDueItemClientPhoneFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        dueItemId: z.number().int().positive(),
+        phone: z.string().min(8).max(20),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("vencimentos");
+
+    const item = await getDueItemById(data.dueItemId);
+    if (!item) return { ok: false as const, error: "Documento não encontrado." };
+    if (!item.clientCode) {
+      return { ok: false as const, error: "Cliente Omie não vinculado a este documento." };
+    }
+
+    const app = listOmieApps().find((entry) => entry.id === item.omieAppId);
+    if (!app) return { ok: false as const, error: "App Omie não configurado." };
+
+    try {
+      const { updateClientePhoneInOmie } = await import("@/server/omie/clients");
+      const { updateDueItemsClientPhone } = await import("@/db/due-items");
+      const updated = await updateClientePhoneInOmie(app, item.clientCode, data.phone);
+      await updateDueItemsClientPhone({
+        omieAppId: item.omieAppId,
+        clientCode: item.clientCode,
+        clientPhone: updated.phone,
+      });
+      return { ok: true as const, phone: updated.phone };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao atualizar telefone na Omie.",
+      };
+    }
   });
 
 export const getDueItemBoletoViewFn = createServerFn({ method: "GET" })
