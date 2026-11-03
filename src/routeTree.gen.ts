@@ -22,10 +22,12 @@ import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TabelaPrecosRouteImport } from './routes/tabela-precos'
+import { Route as TerceirosRouteImport } from './routes/terceiros'
 import { Route as UniformesRouteImport } from './routes/uniformes'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as VencimentosRouteImport } from './routes/vencimentos'
 import { Route as DTokenRouteImport } from './routes/d.$token'
+import { Route as TerceirosTerceiroIdRouteImport } from './routes/terceiros_.$terceiroId'
 import { Route as ApiInteggriWebhookRouteImport } from './routes/api/integgri/webhook'
 import { Route as ApiWahaWebhookRouteImport } from './routes/api/waha/webhook'
 
@@ -94,6 +96,11 @@ const TabelaPrecosRoute = TabelaPrecosRouteImport.update({
   path: '/tabela-precos',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TerceirosRoute = TerceirosRouteImport.update({
+  id: '/terceiros',
+  path: '/terceiros',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UniformesRoute = UniformesRouteImport.update({
   id: '/uniformes',
   path: '/uniformes',
@@ -112,6 +119,11 @@ const VencimentosRoute = VencimentosRouteImport.update({
 const DTokenRoute = DTokenRouteImport.update({
   id: '/d/$token',
   path: '/d/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TerceirosTerceiroIdRoute = TerceirosTerceiroIdRouteImport.update({
+  id: '/terceiros_/$terceiroId',
+  path: '/terceiros/$terceiroId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiInteggriWebhookRoute = ApiInteggriWebhookRouteImport.update({
@@ -139,10 +151,12 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/tabela-precos': typeof TabelaPrecosRoute
+  '/terceiros': typeof TerceirosRoute
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
   '/d/$token': typeof DTokenRoute
+  '/terceiros/$terceiroId': typeof TerceirosTerceiroIdRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
 }
@@ -160,10 +174,12 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/tabela-precos': typeof TabelaPrecosRoute
+  '/terceiros': typeof TerceirosRoute
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
   '/d/$token': typeof DTokenRoute
+  '/terceiros/$terceiroId': typeof TerceirosTerceiroIdRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
 }
@@ -182,10 +198,12 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/tabela-precos': typeof TabelaPrecosRoute
+  '/terceiros': typeof TerceirosRoute
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
   '/d/$token': typeof DTokenRoute
+  '/terceiros_/$terceiroId': typeof TerceirosTerceiroIdRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
 }
@@ -205,10 +223,12 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/tabela-precos'
+    | '/terceiros'
     | '/uniformes'
     | '/users'
     | '/vencimentos'
     | '/d/$token'
+    | '/terceiros/$terceiroId'
     | '/api/integgri/webhook'
     | '/api/waha/webhook'
   fileRoutesByTo: FileRoutesByTo
@@ -226,10 +246,12 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/tabela-precos'
+    | '/terceiros'
     | '/uniformes'
     | '/users'
     | '/vencimentos'
     | '/d/$token'
+    | '/terceiros/$terceiroId'
     | '/api/integgri/webhook'
     | '/api/waha/webhook'
   id:
@@ -247,10 +269,12 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/tabela-precos'
+    | '/terceiros'
     | '/uniformes'
     | '/users'
     | '/vencimentos'
     | '/d/$token'
+    | '/terceiros_/$terceiroId'
     | '/api/integgri/webhook'
     | '/api/waha/webhook'
   fileRoutesById: FileRoutesById
@@ -269,10 +293,12 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
   TabelaPrecosRoute: typeof TabelaPrecosRoute
+  TerceirosRoute: typeof TerceirosRoute
   UniformesRoute: typeof UniformesRoute
   UsersRoute: typeof UsersRoute
   VencimentosRoute: typeof VencimentosRoute
   DTokenRoute: typeof DTokenRoute
+  TerceirosTerceiroIdRoute: typeof TerceirosTerceiroIdRoute
   ApiInteggriWebhookRoute: typeof ApiInteggriWebhookRoute
   ApiWahaWebhookRoute: typeof ApiWahaWebhookRoute
 }
@@ -370,6 +396,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TabelaPrecosRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/terceiros': {
+      id: '/terceiros'
+      path: '/terceiros'
+      fullPath: '/terceiros'
+      preLoaderRoute: typeof TerceirosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/uniformes': {
       id: '/uniformes'
       path: '/uniformes'
@@ -396,6 +429,13 @@ declare module '@tanstack/react-router' {
       path: '/d/$token'
       fullPath: '/d/$token'
       preLoaderRoute: typeof DTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terceiros_/$terceiroId': {
+      id: '/terceiros_/$terceiroId'
+      path: '/terceiros/$terceiroId'
+      fullPath: '/terceiros/$terceiroId'
+      preLoaderRoute: typeof TerceirosTerceiroIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/integgri/webhook': {
@@ -429,10 +469,12 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
   TabelaPrecosRoute: TabelaPrecosRoute,
+  TerceirosRoute: TerceirosRoute,
   UniformesRoute: UniformesRoute,
   UsersRoute: UsersRoute,
   VencimentosRoute: VencimentosRoute,
   DTokenRoute: DTokenRoute,
+  TerceirosTerceiroIdRoute: TerceirosTerceiroIdRoute,
   ApiInteggriWebhookRoute: ApiInteggriWebhookRoute,
   ApiWahaWebhookRoute: ApiWahaWebhookRoute,
 }

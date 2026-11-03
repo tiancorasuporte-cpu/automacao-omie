@@ -27,6 +27,9 @@ function sanitizeOperatorModules(next: AppModuleId[]): AppModuleId[] {
   if (!out.includes("orcamentos") && out.includes("orcamentos_servicos_mensais")) {
     out = out.filter((id) => id !== "orcamentos_servicos_mensais");
   }
+  if (!out.includes("terceiros") && out.includes("terceiros_checar")) {
+    out = out.filter((id) => id !== "terceiros_checar");
+  }
   return out;
 }
 
@@ -67,22 +70,23 @@ function ModulesPicker({
         <div className="grid gap-sm sm:grid-cols-2">
           {APP_PERMISSIONS.map((permission) => {
             const checked = value.includes(permission.id);
-            const needsOrcamentos =
-              (permission.id === "orcamentos_excluir" ||
+            const needsParent =
+              ((permission.id === "orcamentos_excluir" ||
                 permission.id === "orcamentos_servicos_mensais") &&
-              !value.includes("orcamentos");
+                !value.includes("orcamentos")) ||
+              (permission.id === "terceiros_checar" && !value.includes("terceiros"));
             return (
               <label
                 key={permission.id}
                 className={`flex flex-col gap-xs rounded-lg border border-outline-variant px-sm py-sm text-body-md text-on-surface ${
-                  needsOrcamentos ? "opacity-60" : ""
+                  needsParent ? "opacity-60" : ""
                 }`}
               >
                 <span className="flex items-center gap-sm">
                   <input
                     type="checkbox"
                     checked={checked}
-                    disabled={needsOrcamentos}
+                    disabled={needsParent}
                     onChange={(event) => toggle(permission.id, event.target.checked)}
                   />
                   {permission.label}

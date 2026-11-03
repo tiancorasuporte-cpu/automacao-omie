@@ -4,6 +4,7 @@ export const APP_MODULES = [
   { id: "orcamentos", label: "Orçamentos", path: "/orcamentos" },
   { id: "produtos", label: "Produtos", path: "/produtos" },
   { id: "facilities", label: "Facilities", path: "/facilities" },
+  { id: "terceiros", label: "Terceiros", path: "/terceiros" },
   { id: "uniformes", label: "Uniformes", path: "/uniformes" },
   { id: "frota", label: "Frota", path: "/frota" },
   { id: "notificacoes", label: "Notificações", path: "/notificacoes" },
@@ -20,6 +21,12 @@ export const APP_PERMISSIONS = [
     id: "orcamentos_servicos_mensais",
     label: "Cadastrar serviços / tabela de preços",
     hint: "Permite cadastrar, editar e desativar serviços na Tabela de preços e nos orçamentos.",
+  },
+  {
+    id: "terceiros_checar",
+    label: "Checar alterações de terceiros",
+    hint:
+      "Para faturamento: ver alterações pendentes em contas/serviços/particularidades e marcar como visto.",
   },
 ] as const;
 

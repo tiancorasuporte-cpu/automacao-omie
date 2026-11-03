@@ -51,6 +51,14 @@ export function canManageMonthlyServices(
   return hasPermission(user.modules, "orcamentos_servicos_mensais");
 }
 
+export function canChecarTerceiros(
+  user: Pick<AppUser, "role" | "modules"> | null | undefined,
+) {
+  if (!user) return false;
+  if (isAdmin(user)) return true;
+  return hasPermission(user.modules, "terceiros_checar");
+}
+
 export function firstAccessiblePath(user: Pick<AppUser, "role" | "modules">) {
   if (isAdmin(user)) return "/dashboard";
   const first = APP_MODULES.find((module) => canAccessModule(user, module.id));

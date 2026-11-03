@@ -883,6 +883,180 @@ export async function ensureSchema() {
     `;
   }
 
+  if (!(await tableExists("terceiros"))) {
+    await sql`
+      create table terceiros (
+        id serial primary key,
+        nome varchar(200) not null,
+        documento varchar(32),
+        contato varchar(200),
+        observacao text not null default '',
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("terceiro_monitoramento"))) {
+    await sql`
+      create table terceiro_monitoramento (
+        terceiro_id integer primary key references terceiros(id) on delete cascade,
+        qtd_contas integer not null default 0,
+        preco_unitario numeric(15, 4) not null default 0,
+        observacao text not null default '',
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("terceiro_contas_excecao"))) {
+    await sql`
+      create table terceiro_contas_excecao (
+        id serial primary key,
+        terceiro_id integer not null references terceiros(id) on delete cascade,
+        identificador varchar(200) not null,
+        valor numeric(15, 4) not null default 0,
+        observacao text not null default '',
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("terceiro_servicos"))) {
+    await sql`
+      create table terceiro_servicos (
+        id serial primary key,
+        terceiro_id integer not null references terceiros(id) on delete cascade,
+        nome varchar(200) not null,
+        quantidade numeric(15, 4) not null default 1,
+        valor numeric(15, 4) not null default 0,
+        observacao text not null default '',
+        active boolean not null default true,
+        pending_review boolean not null default false,
+        last_change_at timestamptz,
+        last_change_by integer references users(id) on delete set null,
+        last_change_by_name varchar(120),
+        last_change_summary varchar(200),
+        reviewed_at timestamptz,
+        reviewed_by integer references users(id) on delete set null,
+        reviewed_by_name varchar(120),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+  if ((await tableExists("terceiro_servicos")) && !(await columnExists("terceiro_servicos", "pending_review"))) {
+    await sql.unsafe(
+      "alter table terceiro_servicos add column pending_review boolean not null default false",
+    );
+  }
+  if ((await tableExists("terceiro_servicos")) && !(await columnExists("terceiro_servicos", "last_change_at"))) {
+    await sql.unsafe("alter table terceiro_servicos add column last_change_at timestamptz");
+  }
+  if ((await tableExists("terceiro_servicos")) && !(await columnExists("terceiro_servicos", "last_change_by"))) {
+    await sql.unsafe(
+      "alter table terceiro_servicos add column last_change_by integer references users(id) on delete set null",
+    );
+  }
+  if ((await tableExists("terceiro_servicos")) && !(await columnExists("terceiro_servicos", "last_change_by_name"))) {
+    await sql.unsafe("alter table terceiro_servicos add column last_change_by_name varchar(120)");
+  }
+  if ((await tableExists("terceiro_servicos")) && !(await columnExists("terceiro_servicos", "last_change_summary"))) {
+    await sql.unsafe("alter table terceiro_servicos add column last_change_summary varchar(200)");
+  }
+  if ((await tableExists("terceiro_servicos")) && !(await columnExists("terceiro_servicos", "reviewed_at"))) {
+    await sql.unsafe("alter table terceiro_servicos add column reviewed_at timestamptz");
+  }
+  if ((await tableExists("terceiro_servicos")) && !(await columnExists("terceiro_servicos", "reviewed_by"))) {
+    await sql.unsafe(
+      "alter table terceiro_servicos add column reviewed_by integer references users(id) on delete set null",
+    );
+  }
+  if ((await tableExists("terceiro_servicos")) && !(await columnExists("terceiro_servicos", "reviewed_by_name"))) {
+    await sql.unsafe("alter table terceiro_servicos add column reviewed_by_name varchar(120)");
+  }
+  if ((await tableExists("terceiro_servicos")) && !(await columnExists("terceiro_servicos", "monthly_service_id"))) {
+    await sql.unsafe(
+      "alter table terceiro_servicos add column monthly_service_id integer references monthly_services(id) on delete set null",
+    );
+  }
+
+  if (!(await tableExists("terceiro_contas_proporcionais"))) {
+    await sql`
+      create table terceiro_contas_proporcionais (
+        id serial primary key,
+        terceiro_id integer not null references terceiros(id) on delete cascade,
+        identificador varchar(200) not null,
+        valor_base_tipo varchar(32) not null,
+        valor_mensal numeric(15, 4) not null default 0,
+        data_inicio date not null,
+        data_fim date not null,
+        dias integer not null default 0,
+        valor_proporcional numeric(15, 4) not null default 0,
+        observacao text not null default '',
+        status varchar(32) not null default 'aberta',
+        lancada_at timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await columnExists("terceiros", "omie_client_code"))) {
+    await sql.unsafe("alter table terceiros add column omie_client_code bigint");
+  } else {
+    // Códigos Omie passam de 2^31-1; integer estoura (ex.: 4734509501).
+    const typeRows = await sql<{ data_type: string }[]>`
+      select data_type
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'terceiros'
+        and column_name = 'omie_client_code'
+      limit 1
+    `;
+    if (typeRows[0]?.data_type === "integer") {
+      await sql.unsafe(
+        "alter table terceiros alter column omie_client_code type bigint using omie_client_code::bigint",
+      );
+    }
+  }
+  if (!(await columnExists("terceiros", "omie_app_id"))) {
+    await sql.unsafe("alter table terceiros add column omie_app_id varchar(64)");
+  }
+  if (!(await columnExists("terceiros", "pending_review"))) {
+    await sql.unsafe(
+      "alter table terceiros add column pending_review boolean not null default false",
+    );
+  }
+  if (!(await columnExists("terceiros", "last_change_at"))) {
+    await sql.unsafe("alter table terceiros add column last_change_at timestamptz");
+  }
+  if (!(await columnExists("terceiros", "last_change_by"))) {
+    await sql.unsafe(
+      "alter table terceiros add column last_change_by integer references users(id) on delete set null",
+    );
+  }
+  if (!(await columnExists("terceiros", "last_change_by_name"))) {
+    await sql.unsafe("alter table terceiros add column last_change_by_name varchar(120)");
+  }
+  if (!(await columnExists("terceiros", "last_change_summary"))) {
+    await sql.unsafe("alter table terceiros add column last_change_summary varchar(200)");
+  }
+  if (!(await columnExists("terceiros", "reviewed_at"))) {
+    await sql.unsafe("alter table terceiros add column reviewed_at timestamptz");
+  }
+  if (!(await columnExists("terceiros", "reviewed_by"))) {
+    await sql.unsafe(
+      "alter table terceiros add column reviewed_by integer references users(id) on delete set null",
+    );
+  }
+  if (!(await columnExists("terceiros", "reviewed_by_name"))) {
+    await sql.unsafe("alter table terceiros add column reviewed_by_name varchar(120)");
+  }
+
   const superUsername = process.env["APP_SUPERADMIN_USERNAME"] ?? "superadmin";
   const superPassword = process.env["APP_SUPERADMIN_PASSWORD"] ?? "ancora";
   const superName = process.env["APP_SUPERADMIN_NAME"] ?? "Super Admin";

@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState, type FormEvent } from "react";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
@@ -61,6 +61,18 @@ function marginPct(custo: number, venda: number) {
   return ((venda - custo) / venda) * 100;
 }
 
+function toServiceRow(s: Bootstrap["services"][number]): ServiceRow {
+  return {
+    id: s.id,
+    nome: s.nome,
+    descricao: s.descricao ?? "",
+    valor: Number(s.valor) || 0,
+    custo: Number(s.custo) || 0,
+    active: Boolean(s.active),
+    showInOrcamento: s.showInOrcamento !== false,
+  };
+}
+
 function TabelaPrecosPage() {
   const bootstrap = Route.useLoaderData();
   return (
@@ -72,16 +84,18 @@ function TabelaPrecosPage() {
 
 function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
   // Precisa ficar DENTRO do AppShell para o search do header funcionar.
+  const router = useRouter();
   const { query, setQuery } = useShellSearch();
   const canManage = bootstrap.canManage === true;
 
   const [services, setServices] = useState<ServiceRow[]>(
-    (bootstrap.services ?? []).map((s) => ({
-      ...s,
-      descricao: s.descricao ?? "",
-      showInOrcamento: s.showInOrcamento !== false,
-    })),
+    () => (bootstrap.services ?? []).map(toServiceRow),
   );
+
+  useEffect(() => {
+    setServices((bootstrap.services ?? []).map(toServiceRow));
+  }, [bootstrap.services]);
+
   const [showInactive, setShowInactive] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -158,20 +172,14 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
         setFeedback({ type: "error", text: result.error });
         return;
       }
-      setServices((prev) => [
-        ...prev,
-        {
-          ...result.service,
-          descricao: result.service.descricao ?? "",
-          showInOrcamento: result.service.showInOrcamento !== false,
-        },
-      ]);
+      setServices((prev) => [...prev, toServiceRow(result.service)]);
       setNome("");
       setDescricao("");
       setCustoText("");
       setVendaText("");
       setShowInOrcamento(true);
       setFeedback({ type: "ok", text: "Serviço cadastrado." });
+      await router.invalidate();
     } catch (error) {
       setFeedback({
         type: "error",
@@ -217,18 +225,11 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
         return;
       }
       setServices((prev) =>
-        prev.map((s) =>
-          s.id === id
-            ? {
-                ...result.service,
-                descricao: result.service.descricao ?? "",
-                showInOrcamento: result.service.showInOrcamento !== false,
-              }
-            : s,
-        ),
+        prev.map((s) => (s.id === id ? toServiceRow(result.service) : s)),
       );
       setEditingId(null);
       setFeedback({ type: "ok", text: "Serviço atualizado." });
+      await router.invalidate();
     } catch (error) {
       setFeedback({
         type: "error",
@@ -260,15 +261,7 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
         return;
       }
       setServices((prev) =>
-        prev.map((s) =>
-          s.id === row.id
-            ? {
-                ...result.service,
-                descricao: result.service.descricao ?? "",
-                showInOrcamento: result.service.showInOrcamento !== false,
-              }
-            : s,
-        ),
+        prev.map((s) => (s.id === row.id ? toServiceRow(result.service) : s)),
       );
       setFeedback({
         type: "ok",
@@ -276,6 +269,7 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
           ? "Serviço visível no orçamento."
           : "Serviço oculto no orçamento.",
       });
+      await router.invalidate();
     } catch (error) {
       setFeedback({
         type: "error",
@@ -303,6 +297,7 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
       setServices((prev) => prev.filter((s) => s.id !== row.id));
       if (editingId === row.id) setEditingId(null);
       setFeedback({ type: "ok", text: "Serviço apagado." });
+      await router.invalidate();
     } catch (error) {
       setFeedback({
         type: "error",
