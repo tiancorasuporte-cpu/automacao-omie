@@ -47,6 +47,7 @@ import {
   readFacilitiesSpreadsheetMatrix,
 } from "@/lib/facilities-cadastro-excel";
 import { downloadFacilitiesFechamentoExcel } from "@/lib/facilities-excel";
+import { downloadFacilitiesFechamentoPdf } from "@/lib/facilities-fechamento-pdf";
 import { requireModule } from "@/lib/require-auth";
 import { matchesQuery } from "@/lib/text-search";
 import { cn } from "@/lib/utils";
@@ -282,6 +283,10 @@ function durationPartsFromHours(value: number | string) {
     horasHoras: String(parts.hours),
     horasMinutos: String(parts.minutes),
   };
+}
+
+function hasObservacao(value: string | null | undefined) {
+  return Boolean(value && value.trim());
 }
 
 function monthLabel(monthKey: string) {
@@ -550,6 +555,7 @@ function FacilitiesPage() {
   const [fechPostoPage, setFechPostoPage] = useState(1);
   const [fechLancPage, setFechLancPage] = useState(1);
   const [copied, setCopied] = useState(false);
+  const [obsDialog, setObsDialog] = useState<(typeof data.substitutions)[number] | null>(null);
 
   const activePosts = useMemo(() => data.posts.filter((p) => p.active), [data.posts]);
   const activeCollaborators = useMemo(
@@ -798,6 +804,29 @@ function FacilitiesPage() {
     setError(err);
     if (ok || err) setImportReport(null);
   };
+
+  const buildFechamentoExport = () => ({
+    monthKey: data.monthKey,
+    monthLabel: monthLabel(data.monthKey),
+    horasPagar: data.summary.horas,
+    trocas: data.summary.trocas,
+    permutas: data.summary.permutas,
+    bySubstituto: data.summary.bySubstituto,
+    byPosto: data.summary.byPosto,
+    lancamentos: data.substitutions.map((row) => ({
+      data: row.data,
+      postoNome: row.postoNome,
+      ausenteNome: row.ausenteNome,
+      ausenteEmpresa: row.ausenteEmpresa,
+      substitutoNome: row.substitutoNome,
+      substitutoEmpresa: row.substitutoEmpresa,
+      motivoLabel: row.motivoLabel,
+      horas: row.horas,
+      pagaHoras: row.pagaHoras,
+      observacao: row.observacao,
+      registradoPor: row.createdByName,
+    })),
+  });
 
   const onSelectSubstituto = (id: string) => {
     const person = activeCollaborators.find((c) => String(c.id) === id);
@@ -1405,14 +1434,26 @@ function FacilitiesPage() {
                             <p className="text-label-md text-secondary">Fora do posto base</p>
                           ) : null}
                         </div>
-                        <button
-                          type="button"
-                          className="mt-sm text-label-md font-semibold text-error"
-                          disabled={pending}
-                          onClick={() => void removeSubstitution(row.id)}
-                        >
-                          Excluir
-                        </button>
+                        <div className="mt-sm flex flex-wrap gap-sm">
+                          {hasObservacao(row.observacao) ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-primary"
+                              onClick={() => setObsDialog(row)}
+                            >
+                              <Icon name="notes" className="text-[16px]" />
+                              Ver observação
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="text-label-md font-semibold text-error"
+                            disabled={pending}
+                            onClick={() => void removeSubstitution(row.id)}
+                          >
+                            Excluir
+                          </button>
+                        </div>
                       </article>
                     ))
                   )}
@@ -1477,14 +1518,27 @@ function FacilitiesPage() {
                               {row.createdByName ?? "—"}
                             </td>
                             <td className="px-md py-sm text-right">
-                              <button
-                                type="button"
-                                className="text-label-md text-error hover:underline"
-                                disabled={pending}
-                                onClick={() => void removeSubstitution(row.id)}
-                              >
-                                Excluir
-                              </button>
+                              <div className="inline-flex flex-wrap items-center justify-end gap-sm">
+                                {hasObservacao(row.observacao) ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-xs text-label-md font-semibold text-primary hover:underline"
+                                    onClick={() => setObsDialog(row)}
+                                    title="Ver observação"
+                                  >
+                                    <Icon name="notes" className="text-[16px]" />
+                                    Obs.
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  className="text-label-md text-error hover:underline"
+                                  disabled={pending}
+                                  onClick={() => void removeSubstitution(row.id)}
+                                >
+                                  Excluir
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))
@@ -2311,28 +2365,7 @@ function FacilitiesPage() {
                       type="button"
                       onClick={() => {
                         try {
-                          downloadFacilitiesFechamentoExcel({
-                            monthKey: data.monthKey,
-                            monthLabel: monthLabel(data.monthKey),
-                            horasPagar: data.summary.horas,
-                            trocas: data.summary.trocas,
-                            permutas: data.summary.permutas,
-                            bySubstituto: data.summary.bySubstituto,
-                            byPosto: data.summary.byPosto,
-                            lancamentos: data.substitutions.map((row) => ({
-                              data: row.data,
-                              postoNome: row.postoNome,
-                              ausenteNome: row.ausenteNome,
-                              ausenteEmpresa: row.ausenteEmpresa,
-                              substitutoNome: row.substitutoNome,
-                              substitutoEmpresa: row.substitutoEmpresa,
-                              motivoLabel: row.motivoLabel,
-                              horas: row.horas,
-                              pagaHoras: row.pagaHoras,
-                              observacao: row.observacao,
-                              registradoPor: row.createdByName,
-                            })),
-                          });
+                          downloadFacilitiesFechamentoExcel(buildFechamentoExport());
                           flash("Excel do fechamento baixado.");
                         } catch (err) {
                           flash(
@@ -2345,6 +2378,30 @@ function FacilitiesPage() {
                     >
                       <Icon name="download" className="text-[18px]" />
                       Exportar Excel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => {
+                        void (async () => {
+                          setPending(true);
+                          try {
+                            await downloadFacilitiesFechamentoPdf(buildFechamentoExport());
+                            flash("PDF do fechamento baixado.");
+                          } catch (err) {
+                            flash(
+                              null,
+                              err instanceof Error ? err.message : "Falha ao exportar PDF.",
+                            );
+                          } finally {
+                            setPending(false);
+                          }
+                        })();
+                      }}
+                      className="inline-flex w-full items-center justify-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold text-primary disabled:opacity-60 sm:w-auto"
+                    >
+                      <Icon name="picture_as_pdf" className="text-[18px]" />
+                      {pending ? "Gerando PDF..." : "Exportar PDF"}
                     </button>
                     <button
                       type="button"
@@ -2550,7 +2607,23 @@ function FacilitiesPage() {
                               {row.createdByName}
                             </p>
                           ) : null}
+                          {hasObservacao(row.observacao) ? (
+                            <p className="text-body-md">
+                              <span className="text-on-surface-variant">Observação: </span>
+                              {row.observacao}
+                            </p>
+                          ) : null}
                         </div>
+                        {hasObservacao(row.observacao) ? (
+                          <button
+                            type="button"
+                            className="mt-sm inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-primary"
+                            onClick={() => setObsDialog(row)}
+                          >
+                            <Icon name="notes" className="text-[16px]" />
+                            Ver observação
+                          </button>
+                        ) : null}
                       </article>
                     ))
                   )}
@@ -2565,13 +2638,14 @@ function FacilitiesPage() {
                         <th className="px-md py-sm">Substituto</th>
                         <th className="px-md py-sm">Motivo</th>
                         <th className="px-md py-sm">Horas</th>
+                        <th className="px-md py-sm">Observação</th>
                         <th className="px-md py-sm">Registrado por</th>
                       </tr>
                     </thead>
                     <tbody>
                       {pagedFechLancamentos.totalItems === 0 ? (
                         <tr>
-                          <td colSpan={7} className="px-md py-xl text-center text-on-surface-variant">
+                          <td colSpan={8} className="px-md py-xl text-center text-on-surface-variant">
                             Nenhum lançamento neste mês.
                           </td>
                         </tr>
@@ -2600,6 +2674,21 @@ function FacilitiesPage() {
                                 <span className="text-label-md text-on-surface-variant">
                                   Sem pagamento
                                 </span>
+                              )}
+                            </td>
+                            <td className="px-md py-sm">
+                              {hasObservacao(row.observacao) ? (
+                                <button
+                                  type="button"
+                                  className="inline-flex max-w-[14rem] items-center gap-xs text-left text-label-md font-semibold text-primary hover:underline"
+                                  onClick={() => setObsDialog(row)}
+                                  title={row.observacao ?? undefined}
+                                >
+                                  <Icon name="notes" className="shrink-0 text-[16px]" />
+                                  <span className="truncate">{row.observacao}</span>
+                                </button>
+                              ) : (
+                                <span className="text-on-surface-variant">—</span>
                               )}
                             </td>
                             <td className="px-md py-sm text-on-surface-variant">
@@ -2906,6 +2995,52 @@ function FacilitiesPage() {
               </button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(obsDialog)} onOpenChange={(open) => !open && setObsDialog(null)}>
+        <DialogContent className="max-w-[32rem]">
+          <DialogHeader>
+            <DialogTitle>Observação do lançamento</DialogTitle>
+            <DialogDescription>
+              {obsDialog
+                ? `${formatDateBr(obsDialog.data)} · ${obsDialog.postoNome} · ${obsDialog.motivoLabel}`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          {obsDialog ? (
+            <div className="space-y-md">
+              <div className="grid gap-xs text-body-md">
+                <p>
+                  <span className="text-on-surface-variant">Ausente: </span>
+                  {obsDialog.ausenteNome}
+                </p>
+                <p>
+                  <span className="text-on-surface-variant">Substituto: </span>
+                  {obsDialog.substitutoNome}
+                </p>
+                <p>
+                  <span className="text-on-surface-variant">Horas: </span>
+                  {obsDialog.pagaHoras ? formatHours(obsDialog.horas) : "Sem pagamento"}
+                </p>
+              </div>
+              <div className="rounded-lg border border-outline-variant bg-surface-container-low px-md py-sm">
+                <p className="text-label-md text-on-surface-variant">Observação</p>
+                <p className="mt-xs whitespace-pre-wrap text-body-md text-primary">
+                  {obsDialog.observacao?.trim() || "—"}
+                </p>
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <button
+              type="button"
+              className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
+              onClick={() => setObsDialog(null)}
+            >
+              Fechar
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </AppShell>
