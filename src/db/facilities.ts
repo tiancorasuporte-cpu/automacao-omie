@@ -401,7 +401,7 @@ export async function createFacilitiesSubstitution(input: {
     throw new Error("Data inválida.");
   }
   if (!Number.isFinite(input.horas) || input.horas <= 0) {
-    throw new Error("Informe as horas da substituição.");
+    throw new Error("Informe duração maior que zero.");
   }
   const db = await getDb();
   const rows = (await db`

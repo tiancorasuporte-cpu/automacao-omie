@@ -262,7 +262,7 @@ export const createFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
         postoId: z.number().int().positive(),
         ausenteId: z.number().int().positive(),
         substitutoId: z.number().int().positive(),
-        horas: z.number().positive().max(24),
+        horas: z.number().positive("Informe horas e minutos maiores que zero."),
         observacao: z.string().trim().nullable().optional(),
       })
       .parse(input ?? {}),

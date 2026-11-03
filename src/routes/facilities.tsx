@@ -28,9 +28,12 @@ import {
   updateFacilitiesPostFn,
 } from "@/lib/facilities";
 import {
+  combineHoursAndMinutes,
   currentMonthKey,
   defaultHoursForEscala,
   facilitiesMotivoPagaHoras,
+  formatDurationHours,
+  splitDecimalHours,
   type FacilitiesEmpresaId,
   type FacilitiesEscalaId,
   type FacilitiesFuncaoId,
@@ -270,10 +273,15 @@ function DateInputBr({
 }
 
 function formatHours(value: number) {
-  return Number(value).toLocaleString("pt-BR", {
-    minimumFractionDigits: value % 1 === 0 ? 0 : 1,
-    maximumFractionDigits: 2,
-  });
+  return formatDurationHours(value);
+}
+
+function durationPartsFromHours(value: number | string) {
+  const parts = splitDecimalHours(Number(value) || 0);
+  return {
+    horasHoras: String(parts.hours),
+    horasMinutos: String(parts.minutes),
+  };
 }
 
 function monthLabel(monthKey: string) {
@@ -495,7 +503,8 @@ function FacilitiesPage() {
     postoId: "",
     ausenteId: "",
     substitutoId: "",
-    horas: "12",
+    horasHoras: "12",
+    horasMinutos: "0",
     observacao: "",
   });
 
@@ -795,23 +804,28 @@ function FacilitiesPage() {
     setSubForm((prev) => ({
       ...prev,
       substitutoId: id,
-      horas: person ? String(person.defaultHours) : prev.horas,
+      ...(person ? durationPartsFromHours(person.defaultHours) : {}),
     }));
   };
 
   const onSelectAusente = (id: string) => {
     const person = activeCollaborators.find((c) => String(c.id) === id);
-    setSubForm((prev) => ({
-      ...prev,
-      ausenteId: id,
-      postoId: person?.postoBaseId ? String(person.postoBaseId) : prev.postoId,
-      horas:
-        prev.substitutoId && activeCollaborators.find((c) => String(c.id) === prev.substitutoId)
-          ? prev.horas
+    setSubForm((prev) => {
+      const hasSubstituto = Boolean(
+        prev.substitutoId &&
+          activeCollaborators.find((c) => String(c.id) === prev.substitutoId),
+      );
+      return {
+        ...prev,
+        ausenteId: id,
+        postoId: person?.postoBaseId ? String(person.postoBaseId) : prev.postoId,
+        ...(hasSubstituto
+          ? {}
           : person
-            ? String(defaultHoursForEscala(person.escala))
-            : prev.horas,
-    }));
+            ? durationPartsFromHours(defaultHoursForEscala(person.escala))
+            : {}),
+      };
+    });
   };
 
   const submitSubstitution = async () => {
@@ -821,6 +835,23 @@ function FacilitiesPage() {
     }
     if (!subForm.ausenteId || !subForm.substitutoId || !subForm.postoId) {
       flash(null, "Selecione ausente, posto e substituto.");
+      return;
+    }
+    const horasNum = Number.parseInt(subForm.horasHoras || "0", 10);
+    const minutosNum = Number.parseInt(subForm.horasMinutos || "0", 10);
+    if (
+      !Number.isFinite(horasNum) ||
+      !Number.isFinite(minutosNum) ||
+      horasNum < 0 ||
+      minutosNum < 0 ||
+      minutosNum > 59
+    ) {
+      flash(null, "Informe horas e minutos válidos (minutos de 0 a 59).");
+      return;
+    }
+    const horas = combineHoursAndMinutes(horasNum, minutosNum);
+    if (!(horas > 0)) {
+      flash(null, "A duração deve ser maior que zero.");
       return;
     }
     setPending(true);
@@ -833,7 +864,7 @@ function FacilitiesPage() {
           postoId: Number(subForm.postoId),
           ausenteId: Number(subForm.ausenteId),
           substitutoId: Number(subForm.substitutoId),
-          horas: Number(subForm.horas),
+          horas,
           observacao: subForm.observacao.trim() || null,
         },
       });
@@ -843,7 +874,7 @@ function FacilitiesPage() {
       }
       flash(
         result.substitution.pagaHoras
-          ? `Troca lançada: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${formatHours(result.substitution.horas)}h a pagar).`
+          ? `Troca lançada: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${formatHours(result.substitution.horas)} a pagar).`
           : `Solicitação de troca registrada: ${result.substitution.substitutoNome} ↔ ${result.substitution.ausenteNome} (sem horas a pagar).`,
       );
       setSubForm((prev) => ({
@@ -851,7 +882,8 @@ function FacilitiesPage() {
         ausenteId: "",
         substitutoId: "",
         observacao: "",
-        horas: "12",
+        horasHoras: "12",
+        horasMinutos: "0",
       }));
       await router.invalidate();
       navigate({ search: (prev) => ({ ...prev, tab: "painel" }) });
@@ -863,7 +895,7 @@ function FacilitiesPage() {
   const paymentText = useMemo(() => {
     const lines = [
       `Facilities — fechamento ${monthLabel(data.monthKey)}`,
-      `Horas a pagar: ${formatHours(data.summary.horas)}h · ${data.summary.trocas - data.summary.permutas} cobertura(s) pagáveis` +
+      `Horas a pagar: ${formatHours(data.summary.horas)} · ${data.summary.trocas - data.summary.permutas} cobertura(s) pagáveis` +
         (data.summary.permutas > 0
           ? ` · ${data.summary.permutas} solicitação(ões) de troca (sem pagamento)`
           : ""),
@@ -871,12 +903,12 @@ function FacilitiesPage() {
       "Por colaborador (substituto — horas a pagar):",
       ...data.summary.bySubstituto.map(
         (row) =>
-          `- ${row.nome} (${row.empresa}) · ${row.trocas} cobertura(s) · ${formatHours(row.horas)}h · escala ${row.escala}`,
+          `- ${row.nome} (${row.empresa}) · ${row.trocas} cobertura(s) · ${formatHours(row.horas)} · escala ${row.escala}`,
       ),
       "",
       "Por posto (horas a pagar):",
       ...data.summary.byPosto.map(
-        (row) => `- ${row.nome} · ${row.trocas} lançamento(s) · ${formatHours(row.horas)}h`,
+        (row) => `- ${row.nome} · ${row.trocas} lançamento(s) · ${formatHours(row.horas)}`,
       ),
     ];
     return lines.join("\n");
@@ -1137,7 +1169,7 @@ function FacilitiesPage() {
                   },
                   {
                     label: "Horas a pagar",
-                    value: `${formatHours(data.summary.horas)}h`,
+                    value: `${formatHours(data.summary.horas)}`,
                     icon: "schedule",
                   },
                   {
@@ -1195,7 +1227,7 @@ function FacilitiesPage() {
                             <tr key={row.id} className="border-t border-outline-variant/60">
                               <td className="px-md py-sm text-primary">{row.nome}</td>
                               <td className="px-md py-sm">{row.trocas}</td>
-                              <td className="px-md py-sm font-semibold">{formatHours(row.horas)}h</td>
+                              <td className="px-md py-sm font-semibold">{formatHours(row.horas)}</td>
                             </tr>
                           ))
                         )}
@@ -1234,7 +1266,7 @@ function FacilitiesPage() {
                               <td className="px-md py-sm text-primary">{row.nome}</td>
                               <td className="px-md py-sm text-on-surface-variant">{row.empresa}</td>
                               <td className="px-md py-sm">{row.trocas}</td>
-                              <td className="px-md py-sm font-semibold">{formatHours(row.horas)}h</td>
+                              <td className="px-md py-sm font-semibold">{formatHours(row.horas)}</td>
                             </tr>
                           ))
                         )}
@@ -1345,7 +1377,7 @@ function FacilitiesPage() {
                           <div className="text-right">
                             {row.pagaHoras ? (
                               <p className="text-title-md font-semibold text-primary">
-                                {formatHours(row.horas)}h
+                                {formatHours(row.horas)}
                               </p>
                             ) : (
                               <p className="text-label-md font-semibold text-on-surface-variant">
@@ -1434,7 +1466,7 @@ function FacilitiesPage() {
                             <td className="px-md py-sm">{row.motivoLabel}</td>
                             <td className="px-md py-sm font-semibold">
                               {row.pagaHoras ? (
-                                `${formatHours(row.horas)}h`
+                                `${formatHours(row.horas)}`
                               ) : (
                                 <span className="text-label-md font-semibold text-on-surface-variant">
                                   Sem pagamento
@@ -1479,7 +1511,7 @@ function FacilitiesPage() {
                       <p className="text-label-md text-on-surface-variant">{row.motivoLabel}</p>
                       <p className="text-title-md text-primary">
                         {row.trocas}
-                        {row.pagaHoras ? ` · ${formatHours(row.horas)}h` : " · sem pgto"}
+                        {row.pagaHoras ? ` · ${formatHours(row.horas)}` : " · sem pgto"}
                       </p>
                     </div>
                   ))}
@@ -1587,26 +1619,51 @@ function FacilitiesPage() {
                   </div>
 
                   <div className="grid gap-md sm:grid-cols-2">
-                    <label className="block space-y-xs">
+                    <div className="space-y-xs">
                       <span className="text-label-md text-primary">
                         {isPermuta ? "Duração do plantão (registro)" : "Horas a pagar"}
                       </span>
-                      <input
-                        type="number"
-                        min={0.5}
-                        max={24}
-                        step={0.5}
-                        required
-                        value={subForm.horas}
-                        onChange={(e) => setSubForm((p) => ({ ...p, horas: e.target.value }))}
-                        className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
-                      />
+                      <div className="grid grid-cols-2 gap-sm">
+                        <label className="block space-y-xs">
+                          <span className="text-label-md text-on-surface-variant">Horas</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            required
+                            value={subForm.horasHoras}
+                            onChange={(e) =>
+                              setSubForm((p) => ({ ...p, horasHoras: e.target.value }))
+                            }
+                            className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                          />
+                        </label>
+                        <label className="block space-y-xs">
+                          <span className="text-label-md text-on-surface-variant">Minutos</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={59}
+                            step={1}
+                            required
+                            value={subForm.horasMinutos}
+                            onChange={(e) =>
+                              setSubForm((p) => ({ ...p, horasMinutos: e.target.value }))
+                            }
+                            className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                          />
+                        </label>
+                      </div>
                       {isPermuta ? (
                         <span className="text-label-md text-on-surface-variant">
                           Só para histórico — não entra no fechamento.
                         </span>
-                      ) : null}
-                    </label>
+                      ) : (
+                        <span className="text-label-md text-on-surface-variant">
+                          Ex.: 7h30 → horas 7 e minutos 30.
+                        </span>
+                      )}
+                    </div>
                     <label className="block space-y-xs">
                       <span className="text-label-md text-primary">Observação</span>
                       <input
@@ -2241,7 +2298,7 @@ function FacilitiesPage() {
                       entre colegas ficam de fora.
                     </p>
                     <p className="mt-md text-headline-md font-semibold text-primary">
-                      {formatHours(data.summary.horas)}h a pagar
+                      {formatHours(data.summary.horas)} a pagar
                       {data.summary.permutas > 0 ? (
                         <span className="ml-sm text-title-md font-normal text-on-surface-variant">
                           · {data.summary.permutas} permuta(s)
@@ -2333,7 +2390,7 @@ function FacilitiesPage() {
                           </p>
                         </div>
                         <p className="shrink-0 text-title-md font-semibold text-primary">
-                          {formatHours(row.horas)}h
+                          {formatHours(row.horas)}
                         </p>
                       </article>
                     ))
@@ -2369,7 +2426,7 @@ function FacilitiesPage() {
                             <td className="px-md py-sm text-on-surface-variant">{row.escala}</td>
                             <td className="px-md py-sm">{row.trocas}</td>
                             <td className="px-md py-sm text-title-md font-semibold text-primary">
-                              {formatHours(row.horas)}h
+                              {formatHours(row.horas)}
                             </td>
                           </tr>
                         ))
@@ -2408,7 +2465,7 @@ function FacilitiesPage() {
                           </p>
                         </div>
                         <p className="shrink-0 text-title-md font-semibold text-primary">
-                          {formatHours(row.horas)}h
+                          {formatHours(row.horas)}
                         </p>
                       </article>
                     ))
@@ -2428,7 +2485,7 @@ function FacilitiesPage() {
                         <tr key={row.id} className="border-t border-outline-variant/60">
                           <td className="px-md py-sm text-primary">{row.nome}</td>
                           <td className="px-md py-sm">{row.trocas}</td>
-                          <td className="px-md py-sm font-semibold">{formatHours(row.horas)}h</td>
+                          <td className="px-md py-sm font-semibold">{formatHours(row.horas)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2470,7 +2527,7 @@ function FacilitiesPage() {
                           </div>
                           {row.pagaHoras ? (
                             <p className="text-title-md font-semibold text-primary">
-                              {formatHours(row.horas)}h
+                              {formatHours(row.horas)}
                             </p>
                           ) : (
                             <p className="text-label-md font-semibold text-on-surface-variant">
@@ -2538,7 +2595,7 @@ function FacilitiesPage() {
                             <td className="px-md py-sm">{row.motivoLabel}</td>
                             <td className="px-md py-sm font-semibold">
                               {row.pagaHoras ? (
-                                `${formatHours(row.horas)}h`
+                                `${formatHours(row.horas)}`
                               ) : (
                                 <span className="text-label-md text-on-surface-variant">
                                   Sem pagamento

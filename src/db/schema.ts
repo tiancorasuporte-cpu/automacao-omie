@@ -499,7 +499,7 @@ export async function ensureSchema() {
         posto_id integer not null references facilities_posts(id),
         ausente_id integer not null references facilities_collaborators(id),
         substituto_id integer not null references facilities_collaborators(id),
-        horas numeric(8, 2) not null default 12,
+        horas numeric(10, 4) not null default 12,
         observacao text,
         created_by integer references users(id) on delete set null,
         created_at timestamptz not null default now(),
@@ -510,6 +510,11 @@ export async function ensureSchema() {
   if (!(await indexExists("facilities_substitutions_data_idx"))) {
     await sql.unsafe(
       "create index facilities_substitutions_data_idx on facilities_substitutions (data)",
+    );
+  }
+  if (await tableExists("facilities_substitutions")) {
+    await sql.unsafe(
+      "alter table facilities_substitutions alter column horas type numeric(10, 4)",
     );
   }
 

@@ -73,6 +73,33 @@ export function defaultHoursForEscala(escalaId: string) {
   return FACILITIES_ESCALAS.find((e) => e.id === escalaId)?.defaultHours ?? 12;
 }
 
+/** Converte horas decimais (ex.: 7.5) em partes { hours, minutes }. */
+export function splitDecimalHours(value: number) {
+  const totalMinutes = Math.max(0, Math.round(Number(value) * 60));
+  return {
+    hours: Math.floor(totalMinutes / 60),
+    minutes: totalMinutes % 60,
+  };
+}
+
+/** Monta horas decimais a partir de horas + minutos. */
+export function combineHoursAndMinutes(hours: number, minutes: number) {
+  const h = Number.isFinite(hours) ? Math.trunc(hours) : 0;
+  const m = Number.isFinite(minutes) ? Math.trunc(minutes) : 0;
+  const totalMinutes = h * 60 + m;
+  return Math.round((totalMinutes / 60) * 10000) / 10000;
+}
+
+/** Ex.: 12 → "12h", 7.5 → "7h30", 0.75 → "45min". */
+export function formatDurationHours(value: number) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "0h";
+  const { hours, minutes } = splitDecimalHours(n);
+  if (hours === 0) return `${minutes}min`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h${String(minutes).padStart(2, "0")}`;
+}
+
 export function isFacilitiesEmpresaId(value: string): value is FacilitiesEmpresaId {
   return FACILITIES_EMPRESAS.some((e) => e.id === value);
 }
