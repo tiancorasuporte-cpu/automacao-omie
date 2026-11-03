@@ -57,6 +57,10 @@ export type FleetHistoryItem = {
   subtitle: string | null;
   amount: number;
   odometer: number | null;
+  /** Km rodados desde a leitura anterior (só para reading). */
+  kmDay: number | null;
+  driverName: string | null;
+  createdByName: string | null;
   hasAttachment: boolean;
 };
 
@@ -521,21 +525,129 @@ export async function createReading(input: {
   occurredAt: string;
   odometer: number;
   kind?: string;
+  reason?: string | null;
   notes?: string | null;
   createdBy?: number | null;
 }) {
+  if (!Number.isFinite(input.odometer) || input.odometer < 0) {
+    throw new Error("Informe o odômetro (km) válido.");
+  }
+  const reason = nullableStr(input.reason);
+  if (!reason) throw new Error("Informe o motivo da atualização do KM.");
   const db = await getDb();
+  const [vehicle] = (await db`
+    select current_odometer::float as current_odometer
+    from fleet_vehicles
+    where id = ${input.vehicleId}
+    limit 1
+  `) as Array<{ current_odometer: number }>;
+  if (!vehicle) throw new Error("Veículo não encontrado.");
+  const previousOdometer = Number(vehicle.current_odometer ?? 0);
+  if (input.odometer + 0.05 < previousOdometer) {
+    throw new Error(
+      `Odômetro (${input.odometer} km) não pode ser menor que o atual do veículo (${previousOdometer} km).`,
+    );
+  }
   const [row] = (await db`
     insert into fleet_readings (
-      vehicle_id, driver_id, occurred_at, odometer, kind, notes, created_by
+      vehicle_id, driver_id, occurred_at, odometer, previous_odometer, kind, reason, notes, created_by
     ) values (
       ${input.vehicleId}, ${input.driverId ?? null}, ${input.occurredAt}, ${input.odometer},
-      ${input.kind ?? "odometer"}, ${nullableStr(input.notes)}, ${input.createdBy ?? null}
+      ${previousOdometer}, ${input.kind ?? "daily_km"}, ${reason.slice(0, 200)},
+      ${nullableStr(input.notes)}, ${input.createdBy ?? null}
     )
     returning id
   `) as Array<{ id: number }>;
   await bumpVehicleOdometer(input.vehicleId, input.odometer);
   return row!.id;
+}
+
+export type FleetDailyKmRow = {
+  id: number;
+  vehicleId: number;
+  vehicleName: string;
+  vehiclePlate: string | null;
+  occurredAt: string;
+  previousOdometer: number | null;
+  odometer: number;
+  kmDay: number | null;
+  reason: string | null;
+  notes: string | null;
+  driverName: string | null;
+  createdByName: string | null;
+};
+
+export async function listDailyKmReadings(input: {
+  vehicleId?: number | null;
+  driverId?: number | null;
+  from?: string | null;
+  to?: string | null;
+  limit?: number;
+}): Promise<FleetDailyKmRow[]> {
+  const db = await getDb();
+  const limit = Math.min(Math.max(input.limit ?? 500, 1), 2000);
+  const vehicleId = input.vehicleId && input.vehicleId > 0 ? input.vehicleId : null;
+  const driverId = input.driverId && input.driverId > 0 ? input.driverId : null;
+  const from = input.from?.trim() || null;
+  const to = input.to?.trim() || null;
+
+  const rows = (await db`
+    with base as (
+      select
+        r.id,
+        r.vehicle_id,
+        r.occurred_at,
+        r.odometer,
+        r.previous_odometer,
+        r.reason,
+        r.notes,
+        r.driver_id,
+        r.created_by,
+        lag(r.odometer) over (partition by r.vehicle_id order by r.occurred_at, r.id) as lag_odometer
+      from fleet_readings r
+      where (${vehicleId}::int is null or r.vehicle_id = ${vehicleId})
+        and (${driverId}::int is null or r.driver_id = ${driverId})
+        and (${from}::timestamptz is null or r.occurred_at >= ${from}::timestamptz)
+        and (${to}::timestamptz is null or r.occurred_at <= ${to}::timestamptz)
+    )
+    select
+      b.id,
+      b.vehicle_id,
+      v.name as vehicle_name,
+      v.plate as vehicle_plate,
+      b.occurred_at::text as occurred_at,
+      coalesce(b.previous_odometer, b.lag_odometer)::float as previous_odometer,
+      b.odometer::float as odometer,
+      case
+        when coalesce(b.previous_odometer, b.lag_odometer) is null then null
+        else greatest(b.odometer - coalesce(b.previous_odometer, b.lag_odometer), 0)::float
+      end as km_day,
+      b.reason,
+      b.notes,
+      d.name as driver_name,
+      u.name as created_by_name
+    from base b
+    join fleet_vehicles v on v.id = b.vehicle_id
+    left join fleet_drivers d on d.id = b.driver_id
+    left join users u on u.id = b.created_by
+    order by b.occurred_at desc, b.id desc
+    limit ${limit}
+  `) as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: num(r["id"]),
+    vehicleId: num(r["vehicle_id"]),
+    vehicleName: str(r["vehicle_name"]),
+    vehiclePlate: r["vehicle_plate"] == null ? null : str(r["vehicle_plate"]),
+    occurredAt: str(r["occurred_at"]),
+    previousOdometer: r["previous_odometer"] == null ? null : num(r["previous_odometer"]),
+    odometer: num(r["odometer"]),
+    kmDay: r["km_day"] == null ? null : num(r["km_day"]),
+    reason: r["reason"] == null ? null : str(r["reason"]),
+    notes: r["notes"] == null ? null : str(r["notes"]),
+    driverName: r["driver_name"] == null ? null : str(r["driver_name"]),
+    createdByName: r["created_by_name"] == null ? null : str(r["created_by_name"]),
+  }));
 }
 
 export async function createChecklist(input: {
@@ -639,49 +751,94 @@ export async function listVehicleHistory(vehicleId: number, limit = 200): Promis
   const db = await getDb();
   const rows = (await db`
     (
-      select id, 'refueling'::text as kind, vehicle_id, occurred_at::text as occurred_at,
-             fuel_type as title, station as subtitle, total_amount as amount, odometer,
-             (attachment_data is not null and length(attachment_data) > 0) as has_attachment
-      from fleet_refuelings where vehicle_id = ${vehicleId}
+      select r.id, 'refueling'::text as kind, r.vehicle_id, r.occurred_at::text as occurred_at,
+             r.fuel_type as title, r.station as subtitle, r.total_amount as amount, r.odometer,
+             null::float as km_day,
+             d.name as driver_name, u.name as created_by_name,
+             (r.attachment_data is not null and length(r.attachment_data) > 0) as has_attachment
+      from fleet_refuelings r
+      left join fleet_drivers d on d.id = r.driver_id
+      left join users u on u.id = r.created_by
+      where r.vehicle_id = ${vehicleId}
     )
     union all
     (
-      select id, 'expense', vehicle_id, occurred_at::text, coalesce(nullif(title,''), expense_type),
-             location, amount, odometer,
-             (attachment_data is not null and length(attachment_data) > 0) as has_attachment
-      from fleet_expenses where vehicle_id = ${vehicleId}
+      select r.id, 'expense', r.vehicle_id, r.occurred_at::text,
+             coalesce(nullif(r.title,''), r.expense_type), r.location, r.amount, r.odometer,
+             null::float, d.name, u.name,
+             (r.attachment_data is not null and length(r.attachment_data) > 0)
+      from fleet_expenses r
+      left join fleet_drivers d on d.id = r.driver_id
+      left join users u on u.id = r.created_by
+      where r.vehicle_id = ${vehicleId}
     )
     union all
     (
-      select id, 'income', vehicle_id, occurred_at::text, coalesce(nullif(title,''), income_type),
-             location, amount, odometer, false as has_attachment
-      from fleet_incomes where vehicle_id = ${vehicleId}
+      select r.id, 'income', r.vehicle_id, r.occurred_at::text,
+             coalesce(nullif(r.title,''), r.income_type), r.location, r.amount, r.odometer,
+             null::float, d.name, u.name, false
+      from fleet_incomes r
+      left join fleet_drivers d on d.id = r.driver_id
+      left join users u on u.id = r.created_by
+      where r.vehicle_id = ${vehicleId}
     )
     union all
     (
-      select id, 'service', vehicle_id, occurred_at::text, coalesce(nullif(title,''), service_type),
-             location, amount, odometer,
-             (attachment_data is not null and length(attachment_data) > 0) as has_attachment
-      from fleet_services where vehicle_id = ${vehicleId}
+      select r.id, 'service', r.vehicle_id, r.occurred_at::text,
+             coalesce(nullif(r.title,''), r.service_type), r.location, r.amount, r.odometer,
+             null::float, d.name, u.name,
+             (r.attachment_data is not null and length(r.attachment_data) > 0)
+      from fleet_services r
+      left join fleet_drivers d on d.id = r.driver_id
+      left join users u on u.id = r.created_by
+      where r.vehicle_id = ${vehicleId}
     )
     union all
     (
-      select id, 'route', vehicle_id, occurred_at::text,
-             coalesce(origin,'') || ' → ' || coalesce(destination,''),
-             purpose, freight_amount, odometer_end, false as has_attachment
-      from fleet_routes where vehicle_id = ${vehicleId}
+      select r.id, 'route', r.vehicle_id, r.occurred_at::text,
+             coalesce(r.origin,'') || ' → ' || coalesce(r.destination,''),
+             r.purpose, r.freight_amount, r.odometer_end,
+             r.distance_km::float, d.name, u.name, false
+      from fleet_routes r
+      left join fleet_drivers d on d.id = r.driver_id
+      left join users u on u.id = r.created_by
+      where r.vehicle_id = ${vehicleId}
     )
     union all
     (
-      select id, 'reading', vehicle_id, occurred_at::text, 'Leitura de odômetro', kind, 0, odometer,
-             false as has_attachment
-      from fleet_readings where vehicle_id = ${vehicleId}
+      select r.id, 'reading', r.vehicle_id, r.occurred_at::text,
+             'KM do dia',
+             trim(both ' · ' from concat_ws(' · ',
+               case
+                 when r.prev_odo is null then 'Primeira leitura'
+                 else 'Rodou ' || trim(to_char(greatest(r.odometer - r.prev_odo, 0), 'FM999999990.0999')) || ' km'
+               end,
+               nullif(r.reason, '')
+             )),
+             0, r.odometer,
+             case when r.prev_odo is null then null
+                  else greatest(r.odometer - r.prev_odo, 0)::float end,
+             d.name, u.name, false
+      from (
+        select rd.*,
+               coalesce(
+                 rd.previous_odometer,
+                 lag(rd.odometer) over (partition by rd.vehicle_id order by rd.occurred_at, rd.id)
+               ) as prev_odo
+        from fleet_readings rd
+        where rd.vehicle_id = ${vehicleId}
+      ) r
+      left join fleet_drivers d on d.id = r.driver_id
+      left join users u on u.id = r.created_by
     )
     union all
     (
-      select id, 'checklist', vehicle_id, occurred_at::text, title, null, 0, odometer,
-             false as has_attachment
-      from fleet_checklists where vehicle_id = ${vehicleId}
+      select r.id, 'checklist', r.vehicle_id, r.occurred_at::text, r.title, null, 0, r.odometer,
+             null::float, d.name, u.name, false
+      from fleet_checklists r
+      left join fleet_drivers d on d.id = r.driver_id
+      left join users u on u.id = r.created_by
+      where r.vehicle_id = ${vehicleId}
     )
     order by occurred_at desc
     limit ${limit}
@@ -696,6 +853,9 @@ export async function listVehicleHistory(vehicleId: number, limit = 200): Promis
     subtitle: r["subtitle"] == null ? null : str(r["subtitle"]),
     amount: num(r["amount"]),
     odometer: r["odometer"] == null ? null : num(r["odometer"]),
+    kmDay: r["km_day"] == null ? null : num(r["km_day"]),
+    driverName: r["driver_name"] == null ? null : str(r["driver_name"]),
+    createdByName: r["created_by_name"] == null ? null : str(r["created_by_name"]),
     hasAttachment: Boolean(r["has_attachment"]),
   }));
 }

@@ -19,7 +19,7 @@ export const FLEET_ENTRY_LABELS: Record<FleetEntryType, string> = {
   income: "Receita",
   service: "Serviço",
   route: "Percurso",
-  reading: "Leitura",
+  reading: "KM do dia",
   checklist: "Checklist",
   reminder: "Lembrete",
 };

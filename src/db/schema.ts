@@ -843,12 +843,23 @@ export async function ensureSchema() {
         driver_id integer references fleet_drivers(id) on delete set null,
         occurred_at timestamptz not null,
         odometer numeric(12, 1) not null,
-        kind varchar(40) not null default 'odometer',
+        kind varchar(40) not null default 'daily_km',
         notes text,
         created_by integer references users(id) on delete set null,
         created_at timestamptz not null default now()
       )
     `;
+  }
+  if (!(await indexExists("fleet_readings_vehicle_idx"))) {
+    await sql.unsafe(
+      "create index fleet_readings_vehicle_idx on fleet_readings (vehicle_id, occurred_at desc)",
+    );
+  }
+  if ((await tableExists("fleet_readings")) && !(await columnExists("fleet_readings", "previous_odometer"))) {
+    await sql.unsafe("alter table fleet_readings add column previous_odometer numeric(12, 1)");
+  }
+  if ((await tableExists("fleet_readings")) && !(await columnExists("fleet_readings", "reason"))) {
+    await sql.unsafe("alter table fleet_readings add column reason varchar(200)");
   }
 
   if (!(await tableExists("fleet_reminders"))) {

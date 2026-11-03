@@ -17,6 +17,7 @@ import {
   listFleetCatalog,
   listFleetDrivers,
   listFleetVehicles,
+  listDailyKmReadings,
   listReminders,
   listVehicleHistory,
   saveFleetDriver,
@@ -68,6 +69,28 @@ export const getFrotaHistoryFn = createServerFn({ method: "GET" })
     await auth();
     await boot();
     return listVehicleHistory(data.vehicleId);
+  });
+
+export const getFrotaDailyKmFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        vehicleId: z.number().int().positive().nullable().optional(),
+        driverId: z.number().int().positive().nullable().optional(),
+        from: z.string().nullable().optional(),
+        to: z.string().nullable().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    return listDailyKmReadings({
+      vehicleId: data.vehicleId ?? null,
+      driverId: data.driverId ?? null,
+      from: data.from ?? null,
+      to: data.to ?? null,
+    });
   });
 
 export const getFrotaReportFn = createServerFn({ method: "GET" })
@@ -401,6 +424,7 @@ export const createReadingFn = createServerFn({ method: "POST" })
         ...baseEntry,
         odometer: z.number(),
         kind: z.string().optional(),
+        reason: z.string().trim().min(1, "Informe o motivo da atualização."),
       })
       .parse(input ?? {}),
   )
@@ -412,7 +436,8 @@ export const createReadingFn = createServerFn({ method: "POST" })
       driverId: data.driverId ?? null,
       occurredAt: data.occurredAt,
       odometer: data.odometer,
-      kind: data.kind ?? "odometer",
+      kind: data.kind ?? "daily_km",
+      reason: data.reason,
       notes: data.notes ?? null,
       createdBy: user.id,
     });

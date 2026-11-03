@@ -31,6 +31,7 @@ import {
   createRouteFn,
   createServiceFn,
   getFrotaBootstrapFn,
+  getFrotaDailyKmFn,
   getFrotaHistoryFn,
   getFrotaReportFn,
   getRefuelingAttachmentsFn,
@@ -48,11 +49,13 @@ import {
   parseMoney,
   type FleetEntryType,
 } from "@/lib/frota-domain";
+import { downloadFrotaKmExcel } from "@/lib/frota-km-excel";
+import { downloadFrotaKmPdf } from "@/lib/frota-km-pdf";
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
-const TAB_IDS = ["historico", "relatorios", "lembretes", "veiculos", "motoristas"] as const;
+const TAB_IDS = ["historico", "km", "relatorios", "lembretes", "veiculos", "motoristas"] as const;
 const searchSchema = z.object({ tab: z.enum(TAB_IDS).catch("historico") });
 
 export const Route = createFileRoute("/frota")({
@@ -68,10 +71,12 @@ type Boot = Awaited<ReturnType<typeof getFrotaBootstrapFn>>;
 type Vehicle = Boot["vehicles"][number];
 type Driver = Boot["drivers"][number];
 type HistoryItem = Awaited<ReturnType<typeof getFrotaHistoryFn>>[number];
+type DailyKmItem = Awaited<ReturnType<typeof getFrotaDailyKmFn>>[number];
 type Report = Awaited<ReturnType<typeof getFrotaReportFn>>;
 
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   { id: "historico", label: "Histórico", icon: "history" },
+  { id: "km", label: "KM do dia", icon: "speed" },
   { id: "relatorios", label: "Relatórios", icon: "monitoring" },
   { id: "lembretes", label: "Lembretes", icon: "alarm" },
   { id: "veiculos", label: "Veículos", icon: "directions_car" },
@@ -89,7 +94,7 @@ const ADD_TYPES: Array<{
   { type: "income", icon: "trending_up", hint: "Frete, corrida, receita", accent: "bg-emerald-500/15 text-emerald-700" },
   { type: "service", icon: "build", hint: "Óleo, pneu, revisão", accent: "bg-stone-500/15 text-stone-700" },
   { type: "route", icon: "route", hint: "Origem, destino e km", accent: "bg-sky-500/15 text-sky-700" },
-  { type: "reading", icon: "speed", hint: "Odômetro avulso", accent: "bg-rose-500/15 text-rose-700" },
+  { type: "reading", icon: "speed", hint: "Odômetro e km do dia", accent: "bg-rose-500/15 text-rose-700" },
   { type: "checklist", icon: "checklist", hint: "Inspeção do veículo", accent: "bg-blue-500/15 text-blue-700" },
   { type: "reminder", icon: "alarm", hint: "Por data ou quilometragem", accent: "bg-violet-500/15 text-violet-700" },
 ];
@@ -119,6 +124,7 @@ function FrotaPage() {
     boot.vehicles.find((v) => v.active)?.id ?? boot.vehicles[0]?.id ?? null,
   );
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [dailyKm, setDailyKm] = useState<DailyKmItem[]>([]);
   const [report, setReport] = useState<Report | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +132,10 @@ function FrotaPage() {
   const [formType, setFormType] = useState<FleetEntryType | null>(null);
   const [vehicleFormOpen, setVehicleFormOpen] = useState(false);
   const [driverFormOpen, setDriverFormOpen] = useState(false);
+  const [kmFilterVehicleId, setKmFilterVehicleId] = useState<number | "">("");
+  const [kmFilterDriverId, setKmFilterDriverId] = useState<number | "">("");
+  const [kmFilterFrom, setKmFilterFrom] = useState("");
+  const [kmFilterTo, setKmFilterTo] = useState("");
 
   const selected = useMemo(
     () => vehicles.find((v) => v.id === vehicleId) ?? null,
@@ -193,11 +203,37 @@ function FrotaPage() {
     }
   }
 
+  async function reloadDailyKm() {
+    setLoading(true);
+    setError(null);
+    try {
+      const fromIso = kmFilterFrom
+        ? new Date(`${kmFilterFrom}T00:00:00`).toISOString()
+        : null;
+      const toIso = kmFilterTo ? new Date(`${kmFilterTo}T23:59:59`).toISOString() : null;
+      setDailyKm(
+        await getFrotaDailyKmFn({
+          data: {
+            vehicleId: kmFilterVehicleId === "" ? null : Number(kmFilterVehicleId),
+            driverId: kmFilterDriverId === "" ? null : Number(kmFilterDriverId),
+            from: fromIso,
+            to: toIso,
+          },
+        }),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao carregar KM do dia.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (tab === "historico") void reloadHistory();
     if (tab === "relatorios") void reloadReport();
+    if (tab === "km") void reloadDailyKm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, vehicleId]);
+  }, [tab, vehicleId, kmFilterVehicleId, kmFilterDriverId, kmFilterFrom, kmFilterTo]);
 
   function setTab(next: TabId) {
     void navigate({ search: { tab: next } });
@@ -239,14 +275,25 @@ function FrotaPage() {
                 </div>
               ) : null}
             </div>
-            <button
-              type="button"
-              className="inline-flex items-center justify-center gap-sm rounded-xl bg-primary px-lg py-sm text-label-md font-semibold text-on-primary shadow-sm transition hover:opacity-90"
-              onClick={() => setAddOpen(true)}
-            >
-              <Icon name="add" className="text-xl" />
-              Novo registro
-            </button>
+            <div className="flex flex-wrap gap-sm">
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-sm rounded-xl border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold text-primary shadow-sm transition hover:bg-surface-container-low"
+                onClick={() => setFormType("reading")}
+                disabled={!vehicleId}
+              >
+                <Icon name="speed" className="text-xl" />
+                Lançar KM
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-sm rounded-xl bg-primary px-lg py-sm text-label-md font-semibold text-on-primary shadow-sm transition hover:opacity-90"
+                onClick={() => setAddOpen(true)}
+              >
+                <Icon name="add" className="text-xl" />
+                Novo registro
+              </button>
+            </div>
           </div>
 
           <nav className="mt-lg flex gap-xs overflow-x-auto border-t border-outline-variant pt-md">
@@ -282,6 +329,38 @@ function FrotaPage() {
               groups={historyByMonth}
               empty={!vehicleId ? "Cadastre um veículo para começar." : "Sem registros ainda."}
               onAdd={() => setAddOpen(true)}
+            />
+          ) : null}
+
+          {tab === "km" ? (
+            <DailyKmPanel
+              loading={loading}
+              rows={dailyKm}
+              vehicles={vehicles}
+              drivers={drivers}
+              filterVehicleId={kmFilterVehicleId}
+              filterDriverId={kmFilterDriverId}
+              filterFrom={kmFilterFrom}
+              filterTo={kmFilterTo}
+              onFilterVehicleId={setKmFilterVehicleId}
+              onFilterDriverId={setKmFilterDriverId}
+              onFilterFrom={setKmFilterFrom}
+              onFilterTo={setKmFilterTo}
+              onAdd={() => setFormType("reading")}
+              onExportExcel={() => {
+                downloadFrotaKmExcel({
+                  title: "Frota — KM do dia",
+                  generatedAt: new Date().toLocaleString("pt-BR"),
+                  rows: dailyKm,
+                });
+              }}
+              onExportPdf={async () => {
+                await downloadFrotaKmPdf({
+                  title: "Frota — KM do dia",
+                  generatedAt: new Date().toLocaleString("pt-BR"),
+                  rows: dailyKm,
+                });
+              }}
             />
           ) : null}
 
@@ -371,6 +450,7 @@ function FrotaPage() {
             await reloadBoot();
             await router.invalidate();
             if (tab === "historico") await reloadHistory();
+            if (tab === "km") await reloadDailyKm();
             if (tab === "relatorios") await reloadReport();
           }}
         />
@@ -396,6 +476,257 @@ function FrotaPage() {
         />
       ) : null}
     </AppShell>
+  );
+}
+
+function DailyKmPanel({
+  loading,
+  rows,
+  vehicles,
+  drivers,
+  filterVehicleId,
+  filterDriverId,
+  filterFrom,
+  filterTo,
+  onFilterVehicleId,
+  onFilterDriverId,
+  onFilterFrom,
+  onFilterTo,
+  onAdd,
+  onExportExcel,
+  onExportPdf,
+}: {
+  loading: boolean;
+  rows: DailyKmItem[];
+  vehicles: Vehicle[];
+  drivers: Driver[];
+  filterVehicleId: number | "";
+  filterDriverId: number | "";
+  filterFrom: string;
+  filterTo: string;
+  onFilterVehicleId: (v: number | "") => void;
+  onFilterDriverId: (v: number | "") => void;
+  onFilterFrom: (v: string) => void;
+  onFilterTo: (v: string) => void;
+  onAdd: () => void;
+  onExportExcel: () => void;
+  onExportPdf: () => Promise<void>;
+}) {
+  const [exporting, setExporting] = useState(false);
+  const totalKm = rows.reduce((acc, row) => acc + (row.kmDay ?? 0), 0);
+
+  return (
+    <div className="space-y-md">
+      <div className="flex flex-col gap-md lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h3 className="text-title-md text-primary">KM do dia</h3>
+          <p className="text-body-sm text-on-surface-variant">
+            Controle diário com odômetro anterior/atual, motivo e quem lançou.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-sm">
+          <button
+            type="button"
+            onClick={onAdd}
+            className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary"
+          >
+            <Icon name="speed" className="text-[18px]" />
+            Lançar KM
+          </button>
+          <button
+            type="button"
+            onClick={onExportExcel}
+            disabled={!rows.length}
+            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary disabled:opacity-50"
+          >
+            <Icon name="download" className="text-[18px]" />
+            Excel
+          </button>
+          <button
+            type="button"
+            disabled={!rows.length || exporting}
+            onClick={() => {
+              void (async () => {
+                setExporting(true);
+                try {
+                  await onExportPdf();
+                } finally {
+                  setExporting(false);
+                }
+              })();
+            }}
+            className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold text-primary disabled:opacity-50"
+          >
+            <Icon name="picture_as_pdf" className="text-[18px]" />
+            {exporting ? "Gerando…" : "PDF"}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-sm rounded-xl border border-outline-variant bg-surface p-md sm:grid-cols-2 lg:grid-cols-4">
+        <label className="grid gap-xs text-label-sm">
+          <span className="text-on-surface-variant">Veículo</span>
+          <select
+            className={inputClass}
+            value={filterVehicleId === "" ? "" : String(filterVehicleId)}
+            onChange={(e) => onFilterVehicleId(e.target.value ? Number(e.target.value) : "")}
+          >
+            <option value="">Todos</option>
+            {vehicles.map((v) => (
+              <option key={v.id} value={v.id}>
+                {vehicleLabel(v)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-xs text-label-sm">
+          <span className="text-on-surface-variant">Motorista</span>
+          <select
+            className={inputClass}
+            value={filterDriverId === "" ? "" : String(filterDriverId)}
+            onChange={(e) => onFilterDriverId(e.target.value ? Number(e.target.value) : "")}
+          >
+            <option value="">Todos</option>
+            {drivers.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-xs text-label-sm">
+          <span className="text-on-surface-variant">De</span>
+          <input
+            type="date"
+            className={inputClass}
+            value={filterFrom}
+            onChange={(e) => onFilterFrom(e.target.value)}
+          />
+        </label>
+        <label className="grid gap-xs text-label-sm">
+          <span className="text-on-surface-variant">Até</span>
+          <input
+            type="date"
+            className={inputClass}
+            value={filterTo}
+            onChange={(e) => onFilterTo(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="rounded-xl border border-outline-variant bg-surface-container-low px-md py-sm text-body-sm text-on-surface-variant">
+        {rows.length} lançamento(s) · Total rodado{" "}
+        <span className="font-semibold text-primary">{formatKm(totalKm)}</span>
+      </div>
+
+      {loading ? (
+        <p className="py-xl text-center text-body-sm text-on-surface-variant">Carregando KM…</p>
+      ) : !rows.length ? (
+        <div className="flex min-h-[12rem] flex-col items-center justify-center gap-sm text-center">
+          <p className="text-title-md font-semibold text-on-surface">Nenhum lançamento neste filtro.</p>
+          <button
+            type="button"
+            onClick={onAdd}
+            className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary"
+          >
+            <Icon name="speed" className="text-[18px]" />
+            Lançar KM
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-sm md:hidden">
+            {rows.map((row) => (
+              <article
+                key={row.id}
+                className="rounded-xl border border-outline-variant bg-surface p-md"
+              >
+                <div className="flex items-start justify-between gap-sm">
+                  <div>
+                    <p className="text-label-md text-on-surface-variant">
+                      {new Date(row.occurredAt).toLocaleString("pt-BR")}
+                    </p>
+                    <p className="mt-xs text-title-md text-primary">
+                      {row.vehicleName}
+                      {row.vehiclePlate ? ` · ${row.vehiclePlate}` : ""}
+                    </p>
+                  </div>
+                  <p className="text-title-md font-semibold text-primary">
+                    {row.kmDay != null ? `+${formatKm(row.kmDay)}` : "—"}
+                  </p>
+                </div>
+                <div className="mt-sm grid gap-xs text-body-md">
+                  <p>
+                    <span className="text-on-surface-variant">Anterior: </span>
+                    {row.previousOdometer != null ? formatKm(row.previousOdometer) : "—"}
+                    <span className="text-on-surface-variant"> → Atual: </span>
+                    {formatKm(row.odometer)}
+                  </p>
+                  <p>
+                    <span className="text-on-surface-variant">Motivo: </span>
+                    {row.reason || "—"}
+                  </p>
+                  <p className="text-label-md text-on-surface-variant">
+                    {[
+                      row.driverName ? `Motorista: ${row.driverName}` : null,
+                      row.createdByName ? `Lançado por: ${row.createdByName}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="hidden overflow-x-auto md:block">
+            <table className="min-w-full text-left text-body-md">
+              <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                <tr>
+                  <th className="px-md py-sm">Data/hora</th>
+                  <th className="px-md py-sm">Veículo</th>
+                  <th className="px-md py-sm">KM anterior</th>
+                  <th className="px-md py-sm">KM atual</th>
+                  <th className="px-md py-sm">KM do dia</th>
+                  <th className="px-md py-sm">Motivo</th>
+                  <th className="px-md py-sm">Motorista</th>
+                  <th className="px-md py-sm">Lançado por</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.id} className="border-t border-outline-variant/60">
+                    <td className="px-md py-sm whitespace-nowrap">
+                      {new Date(row.occurredAt).toLocaleString("pt-BR")}
+                    </td>
+                    <td className="px-md py-sm text-primary">
+                      <div>{row.vehicleName}</div>
+                      {row.vehiclePlate ? (
+                        <div className="text-label-md text-on-surface-variant">{row.vehiclePlate}</div>
+                      ) : null}
+                    </td>
+                    <td className="px-md py-sm">
+                      {row.previousOdometer != null ? formatKm(row.previousOdometer) : "—"}
+                    </td>
+                    <td className="px-md py-sm font-semibold">{formatKm(row.odometer)}</td>
+                    <td className="px-md py-sm font-semibold text-primary">
+                      {row.kmDay != null ? `+${formatKm(row.kmDay)}` : "—"}
+                    </td>
+                    <td className="px-md py-sm max-w-[14rem]">
+                      <span className="line-clamp-2">{row.reason || "—"}</span>
+                    </td>
+                    <td className="px-md py-sm text-on-surface-variant">{row.driverName || "—"}</td>
+                    <td className="px-md py-sm text-on-surface-variant">
+                      {row.createdByName || "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -479,10 +810,12 @@ function HistoryPanel({
                       <div className="mt-2xs text-body-sm text-on-surface-variant">
                         {FLEET_ENTRY_LABELS[item.kind as FleetEntryType] ?? item.kind}
                         {item.subtitle ? ` · ${item.subtitle}` : ""}
-                        {item.odometer != null ? ` · ${formatKm(item.odometer)}` : ""}
+                        {item.odometer != null ? ` · odômetro ${formatKm(item.odometer)}` : ""}
                       </div>
                       <div className="mt-2xs flex flex-wrap items-center gap-sm text-body-sm text-on-surface-variant">
                         <span>{new Date(item.occurredAt).toLocaleString("pt-BR")}</span>
+                        {item.driverName ? <span>· Motorista: {item.driverName}</span> : null}
+                        {item.createdByName ? <span>· Lançado por: {item.createdByName}</span> : null}
                         {item.hasAttachment && item.kind === "refueling" ? (
                           <button
                             type="button"
@@ -495,7 +828,12 @@ function HistoryPanel({
                         ) : null}
                       </div>
                     </div>
-                    {item.amount ? (
+                    {item.kind === "reading" && item.kmDay != null ? (
+                      <div className="shrink-0 text-right">
+                        <div className="text-label-md font-bold text-primary">+{formatKm(item.kmDay)}</div>
+                        <div className="text-label-sm text-on-surface-variant">no dia</div>
+                      </div>
+                    ) : item.amount ? (
                       <div className="shrink-0 text-label-md font-bold text-primary">{formatBRL(item.amount)}</div>
                     ) : null}
                   </div>
@@ -562,7 +900,7 @@ const REPORT_SECTIONS: Array<{ id: ReportSection; label: string; icon: string }>
   { id: "income", label: "Receita", icon: "trending_up" },
   { id: "service", label: "Serviço", icon: "build" },
   { id: "route", label: "Percurso", icon: "route" },
-  { id: "reading", label: "Leitura", icon: "speed" },
+  { id: "reading", label: "KM do dia", icon: "speed" },
   { id: "checklist", label: "Checklist", icon: "checklist" },
   { id: "reminder", label: "Lembrete", icon: "alarm" },
 ];
@@ -860,8 +1198,8 @@ function ReportPanel({ report, loading }: { report: Report | null; loading: bool
         </div>
       ) : null}
 
-      {section === "reading" ? (
-        <ReportKpi label="Leituras no período" value={String(report.counts.reading)} accent />
+        {section === "reading" ? (
+        <ReportKpi label="Lançamentos de KM no período" value={String(report.counts.reading)} accent />
       ) : null}
       {section === "checklist" ? (
         <ReportKpi label="Checklists no período" value={String(report.counts.checklist)} accent />
@@ -1108,10 +1446,14 @@ function EntryFormDialog({
     defaultDriverId ?? drivers.find((d) => d.active)?.id ?? drivers[0]?.id ?? "",
   );
   const [occurredAt, setOccurredAt] = useState(nowLocalInput());
-  const [odometer, setOdometer] = useState("");
+  const [odometer, setOdometer] = useState(() => {
+    const v = vehicles.find((x) => x.id === (defaultVehicleId ?? vehicles[0]?.id ?? 0));
+    return type === "reading" && v ? String(v.currentOdometer || "") : "";
+  });
   const [amount, setAmount] = useState("");
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
+  const [reason, setReason] = useState("");
   const [fuelType, setFuelType] = useState(catalog.fuels[0]?.name ?? "Gas. Comum");
   const [pricePerLiter, setPricePerLiter] = useState("");
   const [liters, setLiters] = useState("");
@@ -1130,6 +1472,15 @@ function EntryFormDialog({
   const [intervalDays, setIntervalDays] = useState("180");
   const [checklistText, setChecklistText] = useState("Pneus\nFaróis\nÓleo\nDocumentos");
   const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
+
+  const selectedVehicle = vehicles.find((v) => v.id === vehicleId);
+  const readingKmDay = useMemo(() => {
+    if (type !== "reading") return null;
+    const next = Number(odometer);
+    const prev = selectedVehicle?.currentOdometer ?? 0;
+    if (!Number.isFinite(next)) return null;
+    return Math.max(0, Math.round((next - prev) * 10) / 10);
+  }, [type, odometer, selectedVehicle?.currentOdometer]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -1223,12 +1574,18 @@ function EntryFormDialog({
           },
         });
       } else if (type === "reading") {
+        if (!reason.trim()) {
+          setErr("Informe o motivo da atualização do KM.");
+          setBusy(false);
+          return;
+        }
         await createReadingFn({
           data: {
             vehicleId,
             driverId: driver,
             occurredAt: iso,
             odometer: Number(odometer),
+            reason: reason.trim(),
             notes: notes || null,
           },
         });
@@ -1280,7 +1637,14 @@ function EntryFormDialog({
           <Field label="Veículo">
             <SuggestInput
               value={vehicleId ? String(vehicleId) : ""}
-              onChange={(v) => setVehicleId(Number(v) || 0)}
+              onChange={(v) => {
+                const id = Number(v) || 0;
+                setVehicleId(id);
+                if (type === "reading") {
+                  const next = vehicles.find((x) => x.id === id);
+                  if (next) setOdometer(String(next.currentOdometer || ""));
+                }
+              }}
               freeText={false}
               required
               placeholder="Digite nome, marca ou placa…"
@@ -1333,12 +1697,47 @@ function EntryFormDialog({
           {["refueling", "expense", "income", "service", "reading", "checklist", "route"].includes(
             type,
           ) ? (
-            <Field label="Odômetro (km)">
+            <div className="space-y-xs">
+              <Field label={type === "reading" ? "Odômetro atual (km)" : "Odômetro (km)"}>
+                <input
+                  className={inputClass}
+                  value={odometer}
+                  onChange={(e) => setOdometer(e.target.value)}
+                  required={type === "refueling" || type === "reading"}
+                  inputMode="decimal"
+                  placeholder={
+                    type === "reading" && selectedVehicle
+                      ? `Atual no sistema: ${selectedVehicle.currentOdometer}`
+                      : undefined
+                  }
+                />
+              </Field>
+              {type === "reading" ? (
+                <p className="text-body-sm text-on-surface-variant">
+                  Odômetro no sistema:{" "}
+                  <span className="font-semibold text-on-surface">
+                    {formatKm(selectedVehicle?.currentOdometer ?? 0)}
+                  </span>
+                  {readingKmDay != null ? (
+                    <>
+                      {" "}
+                      · KM do dia:{" "}
+                      <span className="font-semibold text-primary">+{formatKm(readingKmDay)}</span>
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {type === "reading" ? (
+            <Field label="Motivo da atualização">
               <input
                 className={inputClass}
-                value={odometer}
-                onChange={(e) => setOdometer(e.target.value)}
-                required={type === "refueling" || type === "reading"}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                required
+                placeholder="Ex.: Fim do expediente, troca de motorista, correção…"
               />
             </Field>
           ) : null}
