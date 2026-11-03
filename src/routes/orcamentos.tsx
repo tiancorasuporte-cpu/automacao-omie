@@ -1567,7 +1567,9 @@ function OrcamentosPage() {
                           )
                           .map((service) => (
                             <option key={service.id} value={service.id}>
-                              {service.nome} ({formatMoney(service.valor)}/mês)
+                              {service.nome}
+                              {service.descricao ? ` — ${service.descricao.slice(0, 60)}` : ""} (
+                              {formatMoney(service.valor)}/mês)
                             </option>
                           ))}
                       </select>

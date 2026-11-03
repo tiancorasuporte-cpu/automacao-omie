@@ -51,7 +51,7 @@ export const getOrcamentosBootstrapFn = createServerFn({ method: "GET" }).handle
     countOmieClients(app.id),
     listQuotes({ omieAppId: app.id, limit: null }),
     getOmieEmpresaInfo(app),
-    listMonthlyServices(true),
+    listMonthlyServices({ activeOnly: true, forOrcamento: true }),
   ]);
   return {
     apps,
@@ -193,7 +193,19 @@ export const listMonthlyServicesFn = createServerFn({ method: "GET" }).handler(a
   const { requireModule } = await import("@/lib/require-auth");
   await requireModule("orcamentos");
   const { listMonthlyServices } = await import("@/db/monthly-services");
-  return listMonthlyServices(true);
+  return listMonthlyServices({ activeOnly: true, forOrcamento: true });
+});
+
+/** Catálogo comercial: custo + venda, visível para quem tem orçamentos. */
+export const getTabelaPrecosBootstrapFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireModule, canManageMonthlyServices } = await import("@/lib/require-auth");
+  const { user } = await requireModule("orcamentos");
+  const { listMonthlyServices } = await import("@/db/monthly-services");
+  const services = await listMonthlyServices({ activeOnly: false });
+  return {
+    services,
+    canManage: canManageMonthlyServices(user),
+  };
 });
 
 export const createMonthlyServiceFn = createServerFn({ method: "POST" })
@@ -201,8 +213,10 @@ export const createMonthlyServiceFn = createServerFn({ method: "POST" })
     z
       .object({
         nome: z.string().trim().min(1).max(200),
+        descricao: z.string().trim().max(2000).optional(),
         valor: z.number().min(0),
         custo: z.number().min(0).optional(),
+        showInOrcamento: z.boolean().optional(),
       })
       .parse(input ?? {}),
   )
@@ -219,8 +233,10 @@ export const createMonthlyServiceFn = createServerFn({ method: "POST" })
     try {
       const service = await createMonthlyService({
         nome: data.nome,
+        descricao: data.descricao ?? "",
         valor: data.valor,
         custo: data.custo ?? 0,
+        showInOrcamento: data.showInOrcamento !== false,
       });
       return { ok: true as const, service };
     } catch (error) {
@@ -237,9 +253,11 @@ export const updateMonthlyServiceFn = createServerFn({ method: "POST" })
       .object({
         id: z.number().int().positive(),
         nome: z.string().trim().min(1).max(200),
+        descricao: z.string().trim().max(2000).optional(),
         valor: z.number().min(0),
         custo: z.number().min(0).optional(),
         active: z.boolean().optional(),
+        showInOrcamento: z.boolean().optional(),
       })
       .parse(input ?? {}),
   )
@@ -258,8 +276,10 @@ export const updateMonthlyServiceFn = createServerFn({ method: "POST" })
         id: data.id,
         nome: data.nome,
         valor: data.valor,
+        ...(data.descricao !== undefined ? { descricao: data.descricao } : {}),
         ...(data.custo !== undefined ? { custo: data.custo } : {}),
         ...(data.active !== undefined ? { active: data.active } : {}),
+        ...(data.showInOrcamento !== undefined ? { showInOrcamento: data.showInOrcamento } : {}),
       });
       return { ok: true as const, service };
     } catch (error) {
@@ -289,6 +309,29 @@ export const deactivateMonthlyServiceFn = createServerFn({ method: "POST" })
       return {
         ok: false as const,
         error: error instanceof Error ? error.message : "Falha ao remover serviço mensal.",
+      };
+    }
+  });
+
+export const deleteMonthlyServiceFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ id: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { requireModule, canManageMonthlyServices } = await import("@/lib/require-auth");
+    const { user } = await requireModule("orcamentos");
+    if (!canManageMonthlyServices(user)) {
+      return {
+        ok: false as const,
+        error: "Seu usuário não tem permissão para apagar serviços.",
+      };
+    }
+    const { deleteMonthlyService } = await import("@/db/monthly-services");
+    try {
+      await deleteMonthlyService(data.id);
+      return { ok: true as const };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao apagar serviço.",
       };
     }
   });

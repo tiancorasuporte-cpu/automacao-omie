@@ -21,6 +21,7 @@ import { Route as ProdutosRouteImport } from './routes/produtos'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
+import { Route as TabelaPrecosRouteImport } from './routes/tabela-precos'
 import { Route as UniformesRouteImport } from './routes/uniformes'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as VencimentosRouteImport } from './routes/vencimentos'
@@ -88,6 +89,11 @@ const SetupRoute = SetupRouteImport.update({
   path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TabelaPrecosRoute = TabelaPrecosRouteImport.update({
+  id: '/tabela-precos',
+  path: '/tabela-precos',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UniformesRoute = UniformesRouteImport.update({
   id: '/uniformes',
   path: '/uniformes',
@@ -132,6 +138,7 @@ export interface FileRoutesByFullPath {
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
+  '/tabela-precos': typeof TabelaPrecosRoute
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
@@ -152,6 +159,7 @@ export interface FileRoutesByTo {
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
+  '/tabela-precos': typeof TabelaPrecosRoute
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
@@ -173,6 +181,7 @@ export interface FileRoutesById {
   '/profile': typeof ProfileRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
+  '/tabela-precos': typeof TabelaPrecosRoute
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
@@ -195,6 +204,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/settings'
     | '/setup'
+    | '/tabela-precos'
     | '/uniformes'
     | '/users'
     | '/vencimentos'
@@ -215,6 +225,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/settings'
     | '/setup'
+    | '/tabela-precos'
     | '/uniformes'
     | '/users'
     | '/vencimentos'
@@ -235,6 +246,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/settings'
     | '/setup'
+    | '/tabela-precos'
     | '/uniformes'
     | '/users'
     | '/vencimentos'
@@ -256,6 +268,7 @@ export interface RootRouteChildren {
   ProfileRoute: typeof ProfileRoute
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
+  TabelaPrecosRoute: typeof TabelaPrecosRoute
   UniformesRoute: typeof UniformesRoute
   UsersRoute: typeof UsersRoute
   VencimentosRoute: typeof VencimentosRoute
@@ -350,6 +363,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/tabela-precos': {
+      id: '/tabela-precos'
+      path: '/tabela-precos'
+      fullPath: '/tabela-precos'
+      preLoaderRoute: typeof TabelaPrecosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/uniformes': {
       id: '/uniformes'
       path: '/uniformes'
@@ -408,6 +428,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProfileRoute: ProfileRoute,
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
+  TabelaPrecosRoute: TabelaPrecosRoute,
   UniformesRoute: UniformesRoute,
   UsersRoute: UsersRoute,
   VencimentosRoute: VencimentosRoute,

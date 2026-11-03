@@ -18,8 +18,8 @@ export const APP_PERMISSIONS = [
   },
   {
     id: "orcamentos_servicos_mensais",
-    label: "Cadastrar serviços mensais",
-    hint: "Permite criar e remover serviços mensais no catálogo de orçamentos.",
+    label: "Cadastrar serviços / tabela de preços",
+    hint: "Permite cadastrar, editar e desativar serviços na Tabela de preços e nos orçamentos.",
   },
 ] as const;
 

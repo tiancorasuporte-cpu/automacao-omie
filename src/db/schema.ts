@@ -403,6 +403,16 @@ export async function ensureSchema() {
       "alter table monthly_services add column custo numeric(15, 4) not null default 0",
     );
   }
+  if (!(await columnExists("monthly_services", "descricao"))) {
+    await sql.unsafe(
+      "alter table monthly_services add column descricao text not null default ''",
+    );
+  }
+  if (!(await columnExists("monthly_services", "show_in_orcamento"))) {
+    await sql.unsafe(
+      "alter table monthly_services add column show_in_orcamento boolean not null default true",
+    );
+  }
 
   if (!(await columnExists("quotes", "servico_mensal_id"))) {
     await sql.unsafe("alter table quotes add column servico_mensal_id integer");

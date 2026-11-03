@@ -35,6 +35,7 @@ type NavPath =
   | "/vencimentos"
   | "/orcamentos"
   | "/orcamentos-postos"
+  | "/tabela-precos"
   | "/produtos"
   | "/facilities"
   | "/uniformes"
@@ -84,6 +85,12 @@ const NAV: NavEntry[] = [
         to: "/orcamentos-postos",
         label: "Orçamento Postos",
         icon: "apartment",
+        module: "orcamentos",
+      },
+      {
+        to: "/tabela-precos",
+        label: "Tabela de preços",
+        icon: "table",
         module: "orcamentos",
       },
       { to: "/produtos", label: "Produtos", icon: "inventory_2", module: "produtos" },
