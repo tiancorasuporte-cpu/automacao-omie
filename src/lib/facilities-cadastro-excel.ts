@@ -377,6 +377,12 @@ function resolveEmpresa(raw: string): FacilitiesEmpresaId | null {
   const byLabel = FACILITIES_EMPRESAS.find((e) => normalizeKey(e.label) === key);
   if (byLabel) return byLabel.id;
   if (key === "ancora" || key === "ancoras") return "ancora";
+  // Aceita variações tipo "Angela Segurança", "Grupo Âncora", etc.
+  for (const empresa of FACILITIES_EMPRESAS) {
+    const labelKey = normalizeKey(empresa.label);
+    if (key.includes(labelKey)) return empresa.id;
+    if (key.length >= 4 && labelKey.startsWith(key)) return empresa.id;
+  }
   return null;
 }
 

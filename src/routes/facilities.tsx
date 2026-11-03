@@ -481,6 +481,12 @@ function FacilitiesPage() {
 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [importReport, setImportReport] = useState<{
+    title: string;
+    created: number;
+    skipped: number;
+    errors: string[];
+  } | null>(null);
   const [pending, setPending] = useState(false);
 
   const [subForm, setSubForm] = useState({
@@ -781,6 +787,7 @@ function FacilitiesPage() {
   const flash = (ok: string | null, err: string | null = null) => {
     setMessage(ok);
     setError(err);
+    if (ok || err) setImportReport(null);
   };
 
   const onSelectSubstituto = (id: string) => {
@@ -911,29 +918,56 @@ function FacilitiesPage() {
     return parts.join(" · ");
   };
 
+  const applyImportOutcome = (input: {
+    title: string;
+    created: number;
+    skipped: number;
+    errors: string[];
+  }) => {
+    const summary = formatImportResult(input.created, input.skipped, input.errors);
+    setImportReport({
+      title: input.title,
+      created: input.created,
+      skipped: input.skipped,
+      errors: input.errors,
+    });
+    if (input.created > 0 || input.skipped > 0) {
+      setMessage(`${input.title}: ${summary}`);
+      setError(null);
+    } else if (input.errors.length > 0) {
+      setMessage(null);
+      setError(`${input.title}: nenhum cadastrado · ${input.errors.length} com erro.`);
+    } else {
+      setMessage(null);
+      setError(`${input.title}: nenhuma linha válida para importar.`);
+    }
+  };
+
   const importPostsFromFile = async (file: File | null) => {
     if (!file) return;
     setPending(true);
-    flash(null);
+    setMessage(null);
+    setError(null);
+    setImportReport(null);
     try {
       const matrix = await readFacilitiesSpreadsheetMatrix(file);
       const parsed = parseFacilitiesPostsFromMatrix(matrix);
-      if (parsed.rows.length === 0 && parsed.errors.length === 0) {
-        flash(null, "Nenhuma linha válida para importar.");
-        return;
-      }
       if (parsed.rows.length === 0) {
-        flash(null, parsed.errors.slice(0, 3).join(" "));
+        applyImportOutcome({
+          title: "Postos",
+          created: 0,
+          skipped: 0,
+          errors: parsed.errors.length > 0 ? parsed.errors : ["Nenhuma linha válida para importar."],
+        });
         return;
       }
       const result = await importFacilitiesPostsFn({ data: { rows: parsed.rows } });
-      const allErrors = [...parsed.errors, ...result.errors];
-      const summary = formatImportResult(result.created, result.skipped, allErrors);
-      if (result.created === 0 && allErrors.length > 0) {
-        flash(null, `${summary}. ${allErrors.slice(0, 2).join(" ")}`);
-      } else {
-        flash(`Postos: ${summary}${allErrors[0] ? `. ${allErrors[0]}` : ""}`);
-      }
+      applyImportOutcome({
+        title: "Postos",
+        created: result.created,
+        skipped: result.skipped,
+        errors: [...parsed.errors, ...result.errors],
+      });
       await router.invalidate();
     } catch (err) {
       flash(null, err instanceof Error ? err.message : "Falha ao importar postos.");
@@ -946,26 +980,29 @@ function FacilitiesPage() {
   const importCollaboratorsFromFile = async (file: File | null) => {
     if (!file) return;
     setPending(true);
-    flash(null);
+    setMessage(null);
+    setError(null);
+    setImportReport(null);
     try {
       const matrix = await readFacilitiesSpreadsheetMatrix(file);
       const parsed = parseFacilitiesCollaboratorsFromMatrix(matrix);
-      if (parsed.rows.length === 0 && parsed.errors.length === 0) {
-        flash(null, "Nenhuma linha válida para importar.");
-        return;
-      }
       if (parsed.rows.length === 0) {
-        flash(null, parsed.errors.slice(0, 3).join(" "));
+        applyImportOutcome({
+          title: "Colaboradores",
+          created: 0,
+          skipped: 0,
+          errors:
+            parsed.errors.length > 0 ? parsed.errors : ["Nenhuma linha válida para importar."],
+        });
         return;
       }
       const result = await importFacilitiesCollaboratorsFn({ data: { rows: parsed.rows } });
-      const allErrors = [...parsed.errors, ...result.errors];
-      const summary = formatImportResult(result.created, result.skipped, allErrors);
-      if (result.created === 0 && allErrors.length > 0) {
-        flash(null, `${summary}. ${allErrors.slice(0, 2).join(" ")}`);
-      } else {
-        flash(`Colaboradores: ${summary}${allErrors[0] ? `. ${allErrors[0]}` : ""}`);
-      }
+      applyImportOutcome({
+        title: "Colaboradores",
+        created: result.created,
+        skipped: result.skipped,
+        errors: [...parsed.errors, ...result.errors],
+      });
       await router.invalidate();
     } catch (err) {
       flash(null, err instanceof Error ? err.message : "Falha ao importar colaboradores.");
@@ -1055,6 +1092,39 @@ function FacilitiesPage() {
               {error ?? message}
             </div>
           )}
+
+          {importReport && importReport.errors.length > 0 ? (
+            <div className="rounded-xl border border-error/40 bg-error/10 px-md py-sm text-body-md text-error">
+              <div className="flex flex-wrap items-start justify-between gap-sm">
+                <div className="min-w-0">
+                  <p className="font-semibold">
+                    {importReport.title}: linhas para correção ({importReport.errors.length})
+                  </p>
+                  <p className="mt-1 text-sm opacity-90">
+                    {importReport.created > 0 || importReport.skipped > 0
+                      ? "As linhas válidas já foram salvas. Corrija só as abaixo e importe de novo."
+                      : "Nenhuma linha foi salva. Corrija e importe novamente."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setImportReport(null)}
+                  className="shrink-0 rounded-lg border border-error/30 px-sm py-xs text-label-md"
+                >
+                  Fechar
+                </button>
+              </div>
+              <ul className="mt-sm max-h-56 list-disc space-y-1 overflow-y-auto pl-5 text-sm">
+                {importReport.errors.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+              <p className="mt-sm text-xs opacity-80">
+                Empresa válida: Angela, Âncora ou Belfer · Função: Vigilante, Porteiro ou
+                Recepcionista · Escala: 12x36 Diurno, 12x36 Noturno ou Horário comercial.
+              </p>
+            </div>
+          ) : null}
 
           {search.tab === "painel" && (
             <section className="space-y-lg">
