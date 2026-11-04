@@ -23,17 +23,20 @@ export type FacilitiesFechamentoExcelInput = {
   horasPagar: number;
   trocas: number;
   permutas: number;
+  almoco?: number;
   bySubstituto: Array<{
     nome: string;
     empresa: string;
     escala: string;
     trocas: number;
     horas: number;
+    almoco?: number;
   }>;
   byPosto: Array<{
     nome: string;
     trocas: number;
     horas: number;
+    almoco?: number;
   }>;
   lancamentos: Array<{
     data: string;
@@ -45,6 +48,8 @@ export type FacilitiesFechamentoExcelInput = {
     motivoLabel: string;
     horas: number;
     pagaHoras: boolean;
+    pagaAlmoco?: boolean;
+    valorAlmoco?: number;
     observacao: string | null;
     registradoPor: string | null;
   }>;
@@ -92,7 +97,9 @@ export function buildFacilitiesFechamentoExcelXml(input: FacilitiesFechamentoExc
         cellString("Lançamentos") +
         cellNumber(input.trocas) +
         cellString("Permutas (sem pgto)") +
-        cellNumber(input.permutas),
+        cellNumber(input.permutas) +
+        cellString("Almoço") +
+        cellNumber(input.almoco ?? 0, "Money"),
     ),
     row(""),
     row(
@@ -174,6 +181,7 @@ export function buildFacilitiesFechamentoExcelXml(input: FacilitiesFechamentoExc
         cellString("Motivo", "Header") +
         cellString("Horas", "Header") +
         cellString("Horas a pagar", "Header") +
+        cellString("Almoço", "Header") +
         cellString("Observação", "Header") +
         cellString("Registrado por", "Header"),
     ),
@@ -189,6 +197,7 @@ export function buildFacilitiesFechamentoExcelXml(input: FacilitiesFechamentoExc
             cellString(item.motivoLabel) +
             cellNumber(item.horas, "Money") +
             cellString(item.pagaHoras ? "Sim" : "Não") +
+            cellNumber(item.pagaAlmoco ? Number(item.valorAlmoco ?? 0) : 0, "Money") +
             cellString(item.observacao ?? "") +
             cellString(item.registradoPor ?? ""),
         ),

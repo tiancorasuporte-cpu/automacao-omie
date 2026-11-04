@@ -3,6 +3,7 @@ import "@tanstack/react-start/server-only";
 import { getDb } from "@/db/schema";
 import {
   defaultHoursForEscala,
+  FACILITIES_MOTIVOS_SEM_HORAS,
   facilitiesEmpresaLabel,
   facilitiesEscalaLabel,
   facilitiesFuncaoLabel,
@@ -60,6 +61,8 @@ export type FacilitiesSubstitution = {
   substitutoEscala: string;
   horas: number;
   observacao: string | null;
+  pagaAlmoco: boolean;
+  valorAlmoco: number;
   foraDoPostoBase: boolean;
   pagaHoras: boolean;
   createdBy: number | null;
@@ -154,6 +157,8 @@ function mapSubstitution(row: Record<string, unknown>): FacilitiesSubstitution {
     substitutoEscala: facilitiesEscalaLabel(String(row["substituto_escala"] ?? "")),
     horas: toNumber(row["horas"]),
     observacao: row["observacao"] == null ? null : String(row["observacao"]),
+    pagaAlmoco: Boolean(row["paga_almoco"]),
+    valorAlmoco: toNumber(row["valor_almoco"]),
     foraDoPostoBase: postoBaseSubstituto != null && postoBaseSubstituto !== postoId,
     pagaHoras: facilitiesMotivoPagaHoras(motivo),
     createdBy: row["created_by"] == null ? null : toNumber(row["created_by"]),
@@ -392,6 +397,8 @@ export async function createFacilitiesSubstitution(input: {
   substitutoId: number;
   horas: number;
   observacao?: string | null;
+  pagaAlmoco?: boolean;
+  valorAlmoco?: number;
   createdBy?: number | null;
 }) {
   if (input.ausenteId === input.substitutoId) {
@@ -403,13 +410,20 @@ export async function createFacilitiesSubstitution(input: {
   if (!Number.isFinite(input.horas) || input.horas <= 0) {
     throw new Error("Informe duração maior que zero.");
   }
+  const pagaAlmoco = Boolean(input.pagaAlmoco);
+  const valorAlmoco = pagaAlmoco ? Math.max(0, Number(input.valorAlmoco ?? 0)) : 0;
+  if (pagaAlmoco && !(valorAlmoco > 0)) {
+    throw new Error("Informe o valor do almoço.");
+  }
   const db = await getDb();
   const rows = (await db`
     insert into facilities_substitutions (
-      data, motivo, posto_id, ausente_id, substituto_id, horas, observacao, created_by, created_at, updated_at
+      data, motivo, posto_id, ausente_id, substituto_id, horas, observacao,
+      paga_almoco, valor_almoco, created_by, created_at, updated_at
     ) values (
       ${input.data}::date, ${input.motivo}, ${input.postoId}, ${input.ausenteId}, ${input.substitutoId},
-      ${input.horas}, ${input.observacao?.trim() || null}, ${input.createdBy ?? null}, now(), now()
+      ${input.horas}, ${input.observacao?.trim() || null},
+      ${pagaAlmoco}, ${valorAlmoco}, ${input.createdBy ?? null}, now(), now()
     )
     returning id
   `) as Array<{ id: number }>;
@@ -445,28 +459,31 @@ export async function deleteFacilitiesSubstitution(id: number) {
 export async function getFacilitiesMonthSummary(monthKey: string) {
   const db = await getDb();
   const { start, end } = monthRange(monthKey);
+  const semHoras = [...FACILITIES_MOTIVOS_SEM_HORAS];
 
   const totals = (await db`
     select
       count(*)::int as trocas,
       count(*) filter (where motivo = 'troca')::int as permutas,
-      coalesce(sum(case when motivo <> 'troca' then horas else 0 end), 0)::float as horas
+      coalesce(sum(case when motivo <> all(${semHoras}) then horas else 0 end), 0)::float as horas,
+      coalesce(sum(case when paga_almoco then valor_almoco else 0 end), 0)::float as almoco
     from facilities_substitutions
     where data >= ${start}::date and data <= ${end}::date
-  `) as Array<{ trocas: number; permutas: number; horas: number }>;
+  `) as Array<{ trocas: number; permutas: number; horas: number; almoco: number }>;
 
   const byPosto = (await db`
     select
       p.id,
       p.nome,
       count(*)::int as trocas,
-      coalesce(sum(case when s.motivo <> 'troca' then s.horas else 0 end), 0)::float as horas
+      coalesce(sum(case when s.motivo <> all(${semHoras}) then s.horas else 0 end), 0)::float as horas,
+      coalesce(sum(case when s.paga_almoco then s.valor_almoco else 0 end), 0)::float as almoco
     from facilities_substitutions s
     join facilities_posts p on p.id = s.posto_id
     where s.data >= ${start}::date and s.data <= ${end}::date
     group by p.id, p.nome
     order by trocas desc, p.nome asc
-  `) as Array<{ id: number; nome: string; trocas: number; horas: number }>;
+  `) as Array<{ id: number; nome: string; trocas: number; horas: number; almoco: number }>;
 
   const bySubstituto = (await db`
     select
@@ -474,16 +491,18 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       c.nome,
       c.empresa,
       c.escala,
-      count(*) filter (where s.motivo <> 'troca')::int as trocas,
+      count(*) filter (where s.motivo <> all(${semHoras}))::int as trocas,
       count(*) filter (where s.motivo = 'troca')::int as permutas,
-      coalesce(sum(case when s.motivo <> 'troca' then s.horas else 0 end), 0)::float as horas
+      coalesce(sum(case when s.motivo <> all(${semHoras}) then s.horas else 0 end), 0)::float as horas,
+      coalesce(sum(case when s.paga_almoco then s.valor_almoco else 0 end), 0)::float as almoco
     from facilities_substitutions s
     join facilities_collaborators c on c.id = s.substituto_id
     where s.data >= ${start}::date and s.data <= ${end}::date
     group by c.id, c.nome, c.empresa, c.escala
     having
-      count(*) filter (where s.motivo <> 'troca') > 0
-      or coalesce(sum(case when s.motivo <> 'troca' then s.horas else 0 end), 0) > 0
+      count(*) filter (where s.motivo <> all(${semHoras})) > 0
+      or coalesce(sum(case when s.motivo <> all(${semHoras}) then s.horas else 0 end), 0) > 0
+      or coalesce(sum(case when s.paga_almoco then s.valor_almoco else 0 end), 0) > 0
     order by horas desc, trocas desc, c.nome asc
   `) as Array<{
     id: number;
@@ -493,13 +512,14 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
     trocas: number;
     permutas: number;
     horas: number;
+    almoco: number;
   }>;
 
   const byMotivo = (await db`
     select
       motivo,
       count(*)::int as trocas,
-      coalesce(sum(case when motivo <> 'troca' then horas else 0 end), 0)::float as horas
+      coalesce(sum(case when motivo <> all(${semHoras}) then horas else 0 end), 0)::float as horas
     from facilities_substitutions
     where data >= ${start}::date and data <= ${end}::date
     group by motivo
@@ -529,6 +549,7 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
     trocas: Number(totals[0]?.trocas ?? 0),
     permutas: Number(totals[0]?.permutas ?? 0),
     horas: Number(totals[0]?.horas ?? 0),
+    almoco: Number(totals[0]?.almoco ?? 0),
     foraDoPostoBase: Number(foraBase[0]?.total ?? 0),
     postosAtivos: Number(counts[0]?.postos ?? 0),
     colaboradoresAtivos: Number(counts[0]?.colaboradores ?? 0),
@@ -537,6 +558,7 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       nome: row.nome,
       trocas: Number(row.trocas),
       horas: Number(row.horas),
+      almoco: Number(row.almoco),
     })),
     bySubstituto: bySubstituto.map((row) => ({
       id: row.id,
@@ -546,6 +568,7 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       trocas: Number(row.trocas),
       permutas: Number(row.permutas),
       horas: Number(row.horas),
+      almoco: Number(row.almoco),
       defaultHours: defaultHoursForEscala(row.escala),
     })),
     byMotivo: byMotivo.map((row) => ({

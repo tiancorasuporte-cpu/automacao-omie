@@ -36,6 +36,13 @@ export const FACILITIES_MOTIVOS = [
   { id: "atestado", label: "Atestado", pagaHoras: true },
   { id: "folga", label: "Folga trabalhada", pagaHoras: true },
   {
+    id: "falta_nao_remunerada",
+    label: "Falta não remunerada",
+    pagaHoras: false,
+    hint:
+      "Deslocamento de quem já está em dia de trabalho para outro posto — sem horas a pagar nesse dia",
+  },
+  {
     id: "troca",
     label: "Solicitação de troca",
     pagaHoras: false,
@@ -43,6 +50,11 @@ export const FACILITIES_MOTIVOS = [
   },
   { id: "outro", label: "Outro", pagaHoras: true },
 ] as const;
+
+/** Motivos que não entram no fechamento de horas a pagar. */
+export const FACILITIES_MOTIVOS_SEM_HORAS = FACILITIES_MOTIVOS.filter((m) => !m.pagaHoras).map(
+  (m) => m.id,
+);
 
 export type FacilitiesEmpresaId = (typeof FACILITIES_EMPRESAS)[number]["id"];
 export type FacilitiesFuncaoId = (typeof FACILITIES_FUNCOES)[number]["id"];
@@ -67,6 +79,14 @@ export function facilitiesMotivoLabel(id: string) {
 
 export function facilitiesMotivoPagaHoras(id: string) {
   return FACILITIES_MOTIVOS.find((e) => e.id === id)?.pagaHoras ?? true;
+}
+
+export function facilitiesMotivoHint(id: string) {
+  return FACILITIES_MOTIVOS.find((e) => e.id === id)?.hint ?? null;
+}
+
+export function isFacilitiesPermutaMotivo(id: string) {
+  return id === "troca";
 }
 
 export function defaultHoursForEscala(escalaId: string) {

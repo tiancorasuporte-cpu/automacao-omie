@@ -264,6 +264,8 @@ export const createFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
         substitutoId: z.number().int().positive(),
         horas: z.number().positive("Informe horas e minutos maiores que zero."),
         observacao: z.string().trim().nullable().optional(),
+        pagaAlmoco: z.boolean().optional(),
+        valorAlmoco: z.number().nonnegative().optional(),
       })
       .parse(input ?? {}),
   )
@@ -280,6 +282,8 @@ export const createFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
         substitutoId: data.substitutoId,
         horas: data.horas,
         observacao: data.observacao ?? null,
+        pagaAlmoco: data.pagaAlmoco ?? false,
+        valorAlmoco: data.valorAlmoco ?? 0,
         createdBy: user.id,
       });
       return { ok: true as const, substitution };

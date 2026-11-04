@@ -517,6 +517,22 @@ export async function ensureSchema() {
       "alter table facilities_substitutions alter column horas type numeric(10, 4)",
     );
   }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "paga_almoco"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column paga_almoco boolean not null default false",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "valor_almoco"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column valor_almoco numeric(12, 2) not null default 0",
+    );
+  }
 
   if (!(await tableExists("uniform_collaborators"))) {
     await sql`

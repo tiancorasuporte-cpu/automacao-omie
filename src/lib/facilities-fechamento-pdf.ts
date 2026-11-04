@@ -62,7 +62,10 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
   doc.setTextColor(...MUT);
   doc.text(`Competência ${input.monthKey}`, W - M, 14, { align: "right" });
   doc.text(
-    `Horas a pagar: ${formatDurationHours(input.horasPagar)} · ${input.trocas} lançamento(s) · ${input.permutas} permuta(s)`,
+    `Horas a pagar: ${formatDurationHours(input.horasPagar)} · ${input.trocas} lançamento(s) · ${input.permutas} permuta(s)` +
+      ((input.almoco ?? 0) > 0
+        ? ` · almoço R$ ${Number(input.almoco ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : ""),
     W - M,
     21,
     { align: "right" },
@@ -164,6 +167,7 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
         "Motivo",
         "Horas",
         "Pagar",
+        "Almoço",
         "Observação",
         "Registrado por",
       ],
@@ -178,10 +182,13 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
             clean(row.motivoLabel),
             formatDurationHours(row.horas),
             row.pagaHoras ? "Sim" : "Não",
+            row.pagaAlmoco && Number(row.valorAlmoco ?? 0) > 0
+              ? `R$ ${Number(row.valorAlmoco).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              : "—",
             clean(row.observacao?.trim() || "—"),
             clean(row.registradoPor || "—"),
           ])
-        : [["—", "Nenhum lançamento neste mês.", "", "", "", "", "", "", ""]],
+        : [["—", "Nenhum lançamento neste mês.", "", "", "", "", "", "", "", ""]],
   });
 
   const pageCount = doc.getNumberOfPages();

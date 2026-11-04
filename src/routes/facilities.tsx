@@ -31,8 +31,10 @@ import {
   combineHoursAndMinutes,
   currentMonthKey,
   defaultHoursForEscala,
+  facilitiesMotivoHint,
   facilitiesMotivoPagaHoras,
   formatDurationHours,
+  isFacilitiesPermutaMotivo,
   splitDecimalHours,
   type FacilitiesEmpresaId,
   type FacilitiesEscalaId,
@@ -289,6 +291,18 @@ function hasObservacao(value: string | null | undefined) {
   return Boolean(value && value.trim());
 }
 
+function formatMoneyBr(value: number) {
+  return value.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
+}
+
+function almocoLabel(row: { pagaAlmoco?: boolean; valorAlmoco?: number }) {
+  if (!row.pagaAlmoco || !(Number(row.valorAlmoco) > 0)) return null;
+  return `Almoço ${formatMoneyBr(Number(row.valorAlmoco))}`;
+}
+
 function monthLabel(monthKey: string) {
   const [y, m] = monthKey.split("-").map(Number);
   if (!y || !m || m < 1 || m > 12) return monthKey;
@@ -511,6 +525,8 @@ function FacilitiesPage() {
     horasHoras: "12",
     horasMinutos: "0",
     observacao: "",
+    pagaAlmoco: false,
+    valorAlmoco: "",
   });
 
   const [postDialog, setPostDialog] = useState(false);
@@ -811,6 +827,7 @@ function FacilitiesPage() {
     horasPagar: data.summary.horas,
     trocas: data.summary.trocas,
     permutas: data.summary.permutas,
+    almoco: data.summary.almoco ?? 0,
     bySubstituto: data.summary.bySubstituto,
     byPosto: data.summary.byPosto,
     lancamentos: data.substitutions.map((row) => ({
@@ -823,6 +840,8 @@ function FacilitiesPage() {
       motivoLabel: row.motivoLabel,
       horas: row.horas,
       pagaHoras: row.pagaHoras,
+      pagaAlmoco: row.pagaAlmoco,
+      valorAlmoco: row.valorAlmoco,
       observacao: row.observacao,
       registradoPor: row.createdByName,
     })),
@@ -883,6 +902,13 @@ function FacilitiesPage() {
       flash(null, "A duração deve ser maior que zero.");
       return;
     }
+    const valorAlmoco = subForm.pagaAlmoco
+      ? Number(String(subForm.valorAlmoco).replace(",", "."))
+      : 0;
+    if (subForm.pagaAlmoco && (!(valorAlmoco > 0) || !Number.isFinite(valorAlmoco))) {
+      flash(null, "Informe o valor do almoço.");
+      return;
+    }
     setPending(true);
     flash(null);
     try {
@@ -895,16 +921,24 @@ function FacilitiesPage() {
           substitutoId: Number(subForm.substitutoId),
           horas,
           observacao: subForm.observacao.trim() || null,
+          pagaAlmoco: subForm.pagaAlmoco,
+          valorAlmoco,
         },
       });
       if (!result.ok) {
         flash(null, result.error);
         return;
       }
+      const almocoTxt =
+        result.substitution.pagaAlmoco && result.substitution.valorAlmoco > 0
+          ? ` · almoço R$ ${result.substitution.valorAlmoco.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : "";
       flash(
         result.substitution.pagaHoras
-          ? `Troca lançada: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${formatHours(result.substitution.horas)} a pagar).`
-          : `Solicitação de troca registrada: ${result.substitution.substitutoNome} ↔ ${result.substitution.ausenteNome} (sem horas a pagar).`,
+          ? `Troca lançada: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${formatHours(result.substitution.horas)} a pagar${almocoTxt}).`
+          : isFacilitiesPermutaMotivo(result.substitution.motivo)
+            ? `Solicitação de troca registrada: ${result.substitution.substitutoNome} ↔ ${result.substitution.ausenteNome} (sem horas a pagar${almocoTxt}).`
+            : `Lançamento registrado: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${result.substitution.motivoLabel}, sem horas a pagar${almocoTxt}).`,
       );
       setSubForm((prev) => ({
         ...prev,
@@ -913,6 +947,8 @@ function FacilitiesPage() {
         observacao: "",
         horasHoras: "12",
         horasMinutos: "0",
+        pagaAlmoco: false,
+        valorAlmoco: "",
       }));
       await router.invalidate();
       navigate({ search: (prev) => ({ ...prev, tab: "painel" }) });
@@ -943,7 +979,9 @@ function FacilitiesPage() {
     return lines.join("\n");
   }, [data.monthKey, data.summary]);
 
-  const isPermuta = !facilitiesMotivoPagaHoras(subForm.motivo);
+  const isPermuta = isFacilitiesPermutaMotivo(subForm.motivo);
+  const pagaHorasMotivo = facilitiesMotivoPagaHoras(subForm.motivo);
+  const motivoHint = facilitiesMotivoHint(subForm.motivo);
 
   const copyPayment = async () => {
     try {
@@ -1413,6 +1451,9 @@ function FacilitiesPage() {
                                 Sem pgto
                               </p>
                             )}
+                            {almocoLabel(row) ? (
+                              <p className="text-label-md text-secondary">{almocoLabel(row)}</p>
+                            ) : null}
                           </div>
                         </div>
                         <div className="mt-sm grid gap-xs text-body-md">
@@ -1513,6 +1554,11 @@ function FacilitiesPage() {
                                   Sem pagamento
                                 </span>
                               )}
+                              {almocoLabel(row) ? (
+                                <div className="text-label-md font-normal text-secondary">
+                                  {almocoLabel(row)}
+                                </div>
+                              ) : null}
                             </td>
                             <td className="px-md py-sm text-on-surface-variant">
                               {row.createdByName ?? "—"}
@@ -1639,6 +1685,12 @@ function FacilitiesPage() {
                       fica registrado, mas <strong>não conta como horas a pagar</strong>.
                     </div>
                   ) : null}
+                  {!pagaHorasMotivo && !isPermuta ? (
+                    <div className="rounded-lg border border-secondary/30 bg-secondary-container/30 px-md py-sm text-body-md text-primary">
+                      {motivoHint ??
+                        "Este motivo não gera horas a pagar no fechamento."}
+                    </div>
+                  ) : null}
 
                   <SearchablePick
                     label="Quem faltou (ausente)"
@@ -1675,7 +1727,7 @@ function FacilitiesPage() {
                   <div className="grid gap-md sm:grid-cols-2">
                     <div className="space-y-xs">
                       <span className="text-label-md text-primary">
-                        {isPermuta ? "Duração do plantão (registro)" : "Horas a pagar"}
+                        {!pagaHorasMotivo ? "Duração do plantão (registro)" : "Horas a pagar"}
                       </span>
                       <div className="grid grid-cols-2 gap-sm">
                         <label className="block space-y-xs">
@@ -1708,9 +1760,9 @@ function FacilitiesPage() {
                           />
                         </label>
                       </div>
-                      {isPermuta ? (
+                      {!pagaHorasMotivo ? (
                         <span className="text-label-md text-on-surface-variant">
-                          Só para histórico — não entra no fechamento.
+                          Só para histórico — não entra no fechamento de horas.
                         </span>
                       ) : (
                         <span className="text-label-md text-on-surface-variant">
@@ -1727,6 +1779,42 @@ function FacilitiesPage() {
                         className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
                       />
                     </label>
+                  </div>
+
+                  <div className="grid gap-md sm:grid-cols-2">
+                    <label className="flex items-center gap-sm rounded-lg border border-outline-variant bg-surface px-md py-sm text-body-md">
+                      <input
+                        type="checkbox"
+                        checked={subForm.pagaAlmoco}
+                        onChange={(e) =>
+                          setSubForm((p) => ({
+                            ...p,
+                            pagaAlmoco: e.target.checked,
+                            valorAlmoco: e.target.checked ? p.valorAlmoco : "",
+                          }))
+                        }
+                      />
+                      <span className="text-primary">Pagará almoço?</span>
+                    </label>
+                    {subForm.pagaAlmoco ? (
+                      <label className="block space-y-xs">
+                        <span className="text-label-md text-primary">Valor do almoço (R$)</span>
+                        <input
+                          type="number"
+                          min={0.01}
+                          step="0.01"
+                          required
+                          value={subForm.valorAlmoco}
+                          onChange={(e) =>
+                            setSubForm((p) => ({ ...p, valorAlmoco: e.target.value }))
+                          }
+                          placeholder="Ex.: 25,00"
+                          className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                        />
+                      </label>
+                    ) : (
+                      <div />
+                    )}
                   </div>
 
                   <button
@@ -2358,6 +2446,11 @@ function FacilitiesPage() {
                           · {data.summary.permutas} permuta(s)
                         </span>
                       ) : null}
+                      {(data.summary.almoco ?? 0) > 0 ? (
+                        <span className="ml-sm text-title-md font-normal text-secondary">
+                          · almoço {formatMoneyBr(data.summary.almoco)}
+                        </span>
+                      ) : null}
                     </p>
                   </div>
                   <div className="flex w-full flex-col gap-sm sm:w-auto sm:flex-row sm:flex-wrap">
@@ -2582,15 +2675,20 @@ function FacilitiesPage() {
                             </p>
                             <p className="mt-xs text-title-md text-primary">{row.postoNome}</p>
                           </div>
-                          {row.pagaHoras ? (
-                            <p className="text-title-md font-semibold text-primary">
-                              {formatHours(row.horas)}
-                            </p>
-                          ) : (
-                            <p className="text-label-md font-semibold text-on-surface-variant">
-                              Sem pgto
-                            </p>
-                          )}
+                          <div className="text-right">
+                            {row.pagaHoras ? (
+                              <p className="text-title-md font-semibold text-primary">
+                                {formatHours(row.horas)}
+                              </p>
+                            ) : (
+                              <p className="text-label-md font-semibold text-on-surface-variant">
+                                Sem pgto
+                              </p>
+                            )}
+                            {almocoLabel(row) ? (
+                              <p className="text-label-md text-secondary">{almocoLabel(row)}</p>
+                            ) : null}
+                          </div>
                         </div>
                         <div className="mt-sm grid gap-xs text-body-md">
                           <p>
@@ -2638,6 +2736,7 @@ function FacilitiesPage() {
                         <th className="px-md py-sm">Substituto</th>
                         <th className="px-md py-sm">Motivo</th>
                         <th className="px-md py-sm">Horas</th>
+                        <th className="px-md py-sm">Almoço</th>
                         <th className="px-md py-sm">Observação</th>
                         <th className="px-md py-sm">Registrado por</th>
                       </tr>
@@ -2645,7 +2744,7 @@ function FacilitiesPage() {
                     <tbody>
                       {pagedFechLancamentos.totalItems === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-md py-xl text-center text-on-surface-variant">
+                          <td colSpan={9} className="px-md py-xl text-center text-on-surface-variant">
                             Nenhum lançamento neste mês.
                           </td>
                         </tr>
@@ -2675,6 +2774,9 @@ function FacilitiesPage() {
                                   Sem pagamento
                                 </span>
                               )}
+                            </td>
+                            <td className="px-md py-sm text-secondary">
+                              {almocoLabel(row) ?? "—"}
                             </td>
                             <td className="px-md py-sm">
                               {hasObservacao(row.observacao) ? (
@@ -3022,6 +3124,7 @@ function FacilitiesPage() {
                 <p>
                   <span className="text-on-surface-variant">Horas: </span>
                   {obsDialog.pagaHoras ? formatHours(obsDialog.horas) : "Sem pagamento"}
+                  {almocoLabel(obsDialog) ? ` · ${almocoLabel(obsDialog)}` : ""}
                 </p>
               </div>
               <div className="rounded-lg border border-outline-variant bg-surface-container-low px-md py-sm">
