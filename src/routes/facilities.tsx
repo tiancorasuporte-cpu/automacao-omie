@@ -1,5 +1,5 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { z } from "zod";
 
 import { AppShell } from "@/components/AppShell";
@@ -26,6 +26,7 @@ import {
   importFacilitiesPostsFn,
   updateFacilitiesCollaboratorFn,
   updateFacilitiesPostFn,
+  updateFacilitiesSubstitutionAlmocoFn,
 } from "@/lib/facilities";
 import {
   combineHoursAndMinutes,
@@ -572,6 +573,11 @@ function FacilitiesPage() {
   const [fechLancPage, setFechLancPage] = useState(1);
   const [copied, setCopied] = useState(false);
   const [obsDialog, setObsDialog] = useState<(typeof data.substitutions)[number] | null>(null);
+  const [almocoDialog, setAlmocoDialog] = useState<(typeof data.substitutions)[number] | null>(
+    null,
+  );
+  const [almocoForm, setAlmocoForm] = useState({ pagaAlmoco: false, valorAlmoco: "" });
+  const canEditAlmocoMonth = data.monthKey === currentMonthKey();
 
   const activePosts = useMemo(() => data.posts.filter((p) => p.active), [data.posts]);
   const activeCollaborators = useMemo(
@@ -1004,6 +1010,51 @@ function FacilitiesPage() {
         return;
       }
       flash("Lançamento excluído.");
+      await router.invalidate();
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const openAlmocoDialog = (row: (typeof data.substitutions)[number]) => {
+    setAlmocoDialog(row);
+    setAlmocoForm({
+      pagaAlmoco: Boolean(row.pagaAlmoco),
+      valorAlmoco:
+        row.pagaAlmoco && Number(row.valorAlmoco) > 0 ? String(Number(row.valorAlmoco)) : "",
+    });
+  };
+
+  const saveAlmocoEdit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!almocoDialog) return;
+    const valorAlmoco = almocoForm.pagaAlmoco
+      ? Number(String(almocoForm.valorAlmoco).replace(",", "."))
+      : 0;
+    if (almocoForm.pagaAlmoco && (!(valorAlmoco > 0) || !Number.isFinite(valorAlmoco))) {
+      flash(null, "Informe o valor do almoço.");
+      return;
+    }
+    setPending(true);
+    flash(null);
+    try {
+      const result = await updateFacilitiesSubstitutionAlmocoFn({
+        data: {
+          id: almocoDialog.id,
+          pagaAlmoco: almocoForm.pagaAlmoco,
+          valorAlmoco,
+        },
+      });
+      if (!result.ok) {
+        flash(null, result.error);
+        return;
+      }
+      setAlmocoDialog(null);
+      flash(
+        result.substitution.pagaAlmoco
+          ? `Almoço atualizado: ${formatMoneyBr(result.substitution.valorAlmoco)}.`
+          : "Almoço removido do lançamento.",
+      );
       await router.invalidate();
     } finally {
       setPending(false);
@@ -1486,6 +1537,16 @@ function FacilitiesPage() {
                               Ver observação
                             </button>
                           ) : null}
+                          {canEditAlmocoMonth ? (
+                            <button
+                              type="button"
+                              className="text-label-md font-semibold text-primary"
+                              disabled={pending}
+                              onClick={() => openAlmocoDialog(row)}
+                            >
+                              Editar almoço
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="text-label-md font-semibold text-error"
@@ -1574,6 +1635,16 @@ function FacilitiesPage() {
                                   >
                                     <Icon name="notes" className="text-[16px]" />
                                     Obs.
+                                  </button>
+                                ) : null}
+                                {canEditAlmocoMonth ? (
+                                  <button
+                                    type="button"
+                                    className="text-label-md font-semibold text-primary hover:underline"
+                                    disabled={pending}
+                                    onClick={() => openAlmocoDialog(row)}
+                                  >
+                                    Almoço
                                   </button>
                                 ) : null}
                                 <button
@@ -3144,6 +3215,80 @@ function FacilitiesPage() {
               Fechar
             </button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(almocoDialog)}
+        onOpenChange={(open) => {
+          if (!open) setAlmocoDialog(null);
+        }}
+      >
+        <DialogContent className="max-w-[28rem]">
+          <form onSubmit={(e) => void saveAlmocoEdit(e)}>
+            <DialogHeader>
+              <DialogTitle>Editar almoço</DialogTitle>
+              <DialogDescription>
+                {almocoDialog
+                  ? `${formatDateBr(almocoDialog.data)} · ${almocoDialog.postoNome} · ${almocoDialog.motivoLabel}`
+                  : "Somente lançamentos do mês atual."}
+              </DialogDescription>
+            </DialogHeader>
+            {almocoDialog ? (
+              <div className="mt-md space-y-md">
+                <p className="text-body-md text-on-surface">
+                  {almocoDialog.substitutoNome} cobriu {almocoDialog.ausenteNome}
+                </p>
+                <label className="flex items-center gap-sm rounded-lg border border-outline-variant bg-surface px-md py-sm text-body-md">
+                  <input
+                    type="checkbox"
+                    checked={almocoForm.pagaAlmoco}
+                    onChange={(e) =>
+                      setAlmocoForm((p) => ({
+                        ...p,
+                        pagaAlmoco: e.target.checked,
+                        valorAlmoco: e.target.checked ? p.valorAlmoco : "",
+                      }))
+                    }
+                  />
+                  <span className="text-primary">Pagará almoço?</span>
+                </label>
+                {almocoForm.pagaAlmoco ? (
+                  <label className="block space-y-xs">
+                    <span className="text-label-md text-primary">Valor do almoço (R$)</span>
+                    <input
+                      type="number"
+                      min={0.01}
+                      step="0.01"
+                      required
+                      value={almocoForm.valorAlmoco}
+                      onChange={(e) =>
+                        setAlmocoForm((p) => ({ ...p, valorAlmoco: e.target.value }))
+                      }
+                      placeholder="Ex.: 25.00"
+                      className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+            <DialogFooter className="mt-md">
+              <button
+                type="button"
+                className="rounded-lg px-md py-sm text-label-md"
+                onClick={() => setAlmocoDialog(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={pending}
+                className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary disabled:opacity-60"
+              >
+                {pending ? "Salvando..." : "Salvar"}
+              </button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </AppShell>

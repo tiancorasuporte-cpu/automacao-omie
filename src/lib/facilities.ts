@@ -312,6 +312,35 @@ export const deleteFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
     }
   });
 
+export const updateFacilitiesSubstitutionAlmocoFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive(),
+        pagaAlmoco: z.boolean(),
+        valorAlmoco: z.number().nonnegative().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("facilities");
+    const { updateFacilitiesSubstitutionAlmoco } = await import("@/db/facilities");
+    try {
+      const substitution = await updateFacilitiesSubstitutionAlmoco({
+        id: data.id,
+        pagaAlmoco: data.pagaAlmoco,
+        valorAlmoco: data.valorAlmoco ?? 0,
+      });
+      return { ok: true as const, substitution };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao atualizar almoço.",
+      };
+    }
+  });
+
 function normalizeImportName(value: string) {
   return value
     .normalize("NFD")

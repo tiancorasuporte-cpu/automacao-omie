@@ -2,6 +2,7 @@ import "@tanstack/react-start/server-only";
 
 import { getDb } from "@/db/schema";
 import {
+  currentMonthKey,
   defaultHoursForEscala,
   FACILITIES_MOTIVOS_SEM_HORAS,
   facilitiesEmpresaLabel,
@@ -454,6 +455,66 @@ export async function createFacilitiesSubstitution(input: {
 export async function deleteFacilitiesSubstitution(id: number) {
   const db = await getDb();
   await db`delete from facilities_substitutions where id = ${id}`;
+}
+
+export async function updateFacilitiesSubstitutionAlmoco(input: {
+  id: number;
+  pagaAlmoco: boolean;
+  valorAlmoco?: number;
+}) {
+  const pagaAlmoco = Boolean(input.pagaAlmoco);
+  const valorAlmoco = pagaAlmoco ? Math.max(0, Number(input.valorAlmoco ?? 0)) : 0;
+  if (pagaAlmoco && !(valorAlmoco > 0)) {
+    throw new Error("Informe o valor do almoço.");
+  }
+
+  const db = await getDb();
+  const monthKey = currentMonthKey();
+  const { start, end } = monthRange(monthKey);
+
+  const existing = (await db`
+    select id, data::text as data
+    from facilities_substitutions
+    where id = ${input.id}
+    limit 1
+  `) as Array<{ id: number; data: string }>;
+  const row = existing[0];
+  if (!row) throw new Error("Lançamento não encontrado.");
+
+  const dataIso = toDateOnly(row.data);
+  if (dataIso < start || dataIso > end) {
+    throw new Error("Só é possível editar o almoço de lançamentos do mês atual.");
+  }
+
+  await db`
+    update facilities_substitutions
+    set
+      paga_almoco = ${pagaAlmoco},
+      valor_almoco = ${valorAlmoco},
+      updated_at = now()
+    where id = ${input.id}
+  `;
+
+  const loaded = (await db`
+    select
+      s.*,
+      p.nome as posto_nome,
+      a.nome as ausente_nome,
+      a.empresa as ausente_empresa,
+      sub.nome as substituto_nome,
+      sub.empresa as substituto_empresa,
+      sub.escala as substituto_escala,
+      sub.posto_base_id as substituto_posto_base_id,
+      coalesce(nullif(trim(u.name), ''), u.username) as created_by_name
+    from facilities_substitutions s
+    join facilities_posts p on p.id = s.posto_id
+    join facilities_collaborators a on a.id = s.ausente_id
+    join facilities_collaborators sub on sub.id = s.substituto_id
+    left join users u on u.id = s.created_by
+    where s.id = ${input.id}
+    limit 1
+  `) as Array<Record<string, unknown>>;
+  return mapSubstitution(loaded[0]!);
 }
 
 export async function getFacilitiesMonthSummary(monthKey: string) {
