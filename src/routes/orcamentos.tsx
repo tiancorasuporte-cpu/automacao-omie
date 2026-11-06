@@ -1379,7 +1379,7 @@ function OrcamentosPage() {
           </div>
         </div>
 
-        <div className="sticky top-0 z-20 -mx-margin-mobile border-b border-outline-variant bg-background/95 px-margin-mobile py-sm backdrop-blur-md xl:hidden">
+        <div className="sticky top-0 z-20 -mx-margin-mobile border-b border-outline-variant bg-background/95 px-margin-mobile py-sm backdrop-blur-md lg:hidden">
           <div className="grid grid-cols-2 gap-xs rounded-xl bg-surface-container-low p-xs">
             {(
               [
@@ -1459,9 +1459,9 @@ function OrcamentosPage() {
           </div>
         ) : null}
 
-        <div className={cn(mobileTab === "salvos" && "hidden xl:block")}>
+        <div className={cn(mobileTab === "salvos" && "hidden lg:block")}>
           <section className="space-y-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-sm md:p-md">
-            <div className="grid gap-md xl:grid-cols-[minmax(18rem,0.72fr)_minmax(0,1.28fr)] xl:items-start">
+            <div className="grid gap-md lg:grid-cols-[minmax(18rem,0.72fr)_minmax(0,1.28fr)] lg:items-start">
               <div className="space-y-sm">
             <div className="grid gap-sm sm:grid-cols-2">
               <label className="block text-label-md text-on-surface-variant">
@@ -1845,7 +1845,7 @@ function OrcamentosPage() {
             </Dialog>
               </div>
 
-              <div className="min-w-0 space-y-sm xl:sticky xl:top-sm">
+              <div className="min-w-0 space-y-sm lg:sticky lg:top-sm">
             <div>
               <div className="mb-xs flex flex-wrap items-center justify-between gap-sm">
                 <div>
@@ -1906,7 +1906,7 @@ function OrcamentosPage() {
                 </div>
               ) : (
                 <>
-                  <div className="space-y-sm xl:hidden">
+                  <div className="space-y-sm lg:hidden">
                     {cart.map((item) => {
                       const cmcEfetivo = effectiveCmc(item.cmc, item.cmcInterno);
                       const sugerido = suggestedPriceFromCmc(cmcEfetivo, item.markup ?? undefined);
@@ -2012,7 +2012,7 @@ function OrcamentosPage() {
                       );
                     })}
                   </div>
-                  <div className="hidden max-h-[min(70vh,42rem)] overflow-auto rounded-lg border border-outline-variant xl:block">
+                  <div className="hidden max-h-[min(70vh,42rem)] overflow-auto rounded-lg border border-outline-variant lg:block">
                   <table className="min-w-full text-left text-label-md">
                     <thead className="sticky top-0 z-10 bg-surface-container-low text-label-md text-on-surface-variant">
                       <tr>
@@ -2207,7 +2207,7 @@ function OrcamentosPage() {
         <section
           className={cn(
             "rounded-xl border border-outline-variant bg-surface-container-lowest p-md",
-            mobileTab !== "salvos" && "hidden xl:block",
+            mobileTab !== "salvos" && "hidden lg:block",
           )}
         >
           <div className="mb-sm flex flex-wrap items-end justify-between gap-md">
@@ -2269,7 +2269,7 @@ function OrcamentosPage() {
             </p>
           ) : (
             <>
-              <div className="space-y-sm xl:hidden">
+              <div className="space-y-sm lg:hidden">
                 {pagedQuotes.items.map((quote) => (
                   <article
                     key={quote.id}
@@ -2358,7 +2358,7 @@ function OrcamentosPage() {
                   </article>
                 ))}
               </div>
-              <div className="hidden overflow-x-auto xl:block">
+              <div className="hidden overflow-x-auto lg:block">
               <table className="min-w-full text-left text-body-md">
                 <thead className="text-label-md text-on-surface-variant">
                   <tr>
@@ -2473,7 +2473,7 @@ function OrcamentosPage() {
 
         {mobileTab === "montar" ? (
           <div
-            className="fixed inset-x-0 z-30 border-t border-outline-variant bg-surface/95 px-margin-mobile py-sm backdrop-blur-md xl:hidden"
+            className="fixed inset-x-0 z-30 border-t border-outline-variant bg-surface/95 px-margin-mobile py-sm backdrop-blur-md lg:hidden"
             style={{
               bottom: "calc(4.75rem + env(safe-area-inset-bottom, 0px))",
             }}
