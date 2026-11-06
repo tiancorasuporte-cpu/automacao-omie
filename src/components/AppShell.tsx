@@ -625,11 +625,13 @@ export function AppShell({
             <ProfileMenu user={user} />
           </header>
           {fullHeight ? (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:pb-0">
+            <div className="@container flex min-h-0 flex-1 flex-col overflow-hidden pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:pb-0">
               {children}
             </div>
           ) : (
-            <div className="pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:pb-0">{children}</div>
+            <div className="@container pb-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:pb-0">
+              {children}
+            </div>
           )}
         </div>
         <MobileBottomNav pathname={pathname} user={user} />
