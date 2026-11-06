@@ -7,6 +7,12 @@ import {
   suggestedPriceFromCmc,
 } from "@/lib/product-pricing";
 
+export type OmieProductSupplierLink = {
+  supplierId: number;
+  supplierName: string;
+  codigoFornecedor: string;
+};
+
 export type OmieProduct = {
   id: number;
   omieAppId: string;
@@ -27,6 +33,8 @@ export type OmieProduct = {
   ncm: string | null;
   inactive: boolean;
   syncedAt: string;
+  /** Vínculos com códigos de fornecedor (quando carregados). */
+  supplierCodes?: OmieProductSupplierLink[];
 };
 
 type ProductRow = {
@@ -170,12 +178,18 @@ export async function getOmieProductsByCodes(omieAppId: string, codes: number[])
   return rows.map(toProduct);
 }
 
+const productSearchFilter = (q: string) => {
+  const like = `%${q}%`;
+  return { like };
+};
+
 export async function listOmieProducts(input?: {
   omieAppId?: string;
   query?: string;
   activeOnly?: boolean;
   limit?: number;
   offset?: number;
+  includeSupplierCodes?: boolean;
 }) {
   const db = await getDb();
   const limit = Math.min(Math.max(input?.limit ?? 80, 1), 500);
@@ -183,39 +197,82 @@ export async function listOmieProducts(input?: {
   const q = input?.query?.trim() ?? "";
   const appId = input?.omieAppId?.trim() || null;
   const activeOnly = input?.activeOnly !== false;
+  const includeSupplierCodes = input?.includeSupplierCodes !== false;
+  const { like } = productSearchFilter(q);
 
   const rows = await db<ProductRow[]>`
-    select *
-    from omie_products
-    where (${appId}::text is null or omie_app_id = ${appId})
-      and (${activeOnly} = false or inactive = false)
+    select p.*
+    from omie_products p
+    where (${appId}::text is null or p.omie_app_id = ${appId})
+      and (${activeOnly} = false or p.inactive = false)
       and (
         ${q} = ''
-        or descricao ilike ${"%" + q + "%"}
-        or coalesce(codigo_interno, '') ilike ${"%" + q + "%"}
-        or cast(codigo_produto as text) ilike ${"%" + q + "%"}
+        or p.descricao ilike ${like}
+        or coalesce(p.codigo_interno, '') ilike ${like}
+        or cast(p.codigo_produto as text) ilike ${like}
+        or exists (
+          select 1
+          from product_supplier_codes psc
+          join omie_suppliers s on s.id = psc.supplier_id
+          where psc.product_id = p.id
+            and (
+              psc.codigo_fornecedor ilike ${like}
+              or s.razao_social ilike ${like}
+              or coalesce(s.nome_fantasia, '') ilike ${like}
+            )
+        )
       )
-    order by descricao asc
+    order by p.descricao asc
     limit ${limit}
     offset ${offset}
   `;
-  return rows.map(toProduct);
+  const products = rows.map(toProduct);
+  if (!includeSupplierCodes || !products.length) return products;
+
+  const { listProductSupplierCodesForProducts } = await import("@/db/suppliers");
+  const links = await listProductSupplierCodesForProducts(products.map((p) => p.id));
+  const byProduct = new Map<number, OmieProductSupplierLink[]>();
+  for (const link of links) {
+    const list = byProduct.get(link.productId) ?? [];
+    list.push({
+      supplierId: link.supplierId,
+      supplierName: link.supplierName,
+      codigoFornecedor: link.codigoFornecedor,
+    });
+    byProduct.set(link.productId, list);
+  }
+  return products.map((product) => ({
+    ...product,
+    supplierCodes: byProduct.get(product.id) ?? [],
+  }));
 }
 
 export async function countOmieProducts(omieAppId?: string, query?: string) {
   const db = await getDb();
   const appId = omieAppId?.trim() || null;
   const q = query?.trim() ?? "";
+  const { like } = productSearchFilter(q);
   const rows = await db<{ count: number }[]>`
     select count(*)::int as count
-    from omie_products
-    where (${appId}::text is null or omie_app_id = ${appId})
-      and inactive = false
+    from omie_products p
+    where (${appId}::text is null or p.omie_app_id = ${appId})
+      and p.inactive = false
       and (
         ${q} = ''
-        or descricao ilike ${"%" + q + "%"}
-        or coalesce(codigo_interno, '') ilike ${"%" + q + "%"}
-        or cast(codigo_produto as text) ilike ${"%" + q + "%"}
+        or p.descricao ilike ${like}
+        or coalesce(p.codigo_interno, '') ilike ${like}
+        or cast(p.codigo_produto as text) ilike ${like}
+        or exists (
+          select 1
+          from product_supplier_codes psc
+          join omie_suppliers s on s.id = psc.supplier_id
+          where psc.product_id = p.id
+            and (
+              psc.codigo_fornecedor ilike ${like}
+              or s.razao_social ilike ${like}
+              or coalesce(s.nome_fantasia, '') ilike ${like}
+            )
+        )
       )
   `;
   return rows[0]?.count ?? 0;

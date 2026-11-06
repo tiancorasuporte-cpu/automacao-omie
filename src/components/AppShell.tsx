@@ -380,7 +380,7 @@ function SidebarInner({
           <div className="min-w-0 flex-1">
             <p className="truncate text-title-lg leading-tight text-primary">{APP_NAME}</p>
             <p className="text-label-md uppercase tracking-wider text-on-surface-variant">
-              Integração Omie + WAHA
+              Sistema de gestão operacional
             </p>
           </div>
         ) : null}

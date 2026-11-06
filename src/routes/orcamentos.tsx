@@ -46,7 +46,7 @@ import { effectiveCmc, isUnitBelowCmc, isUnitBelowSuggested, suggestedPriceFromC
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 
-type MobileOrcamentoTab = "montar" | "produtos" | "salvos";
+type MobileOrcamentoTab = "montar" | "salvos";
 type QuotesPageSize = 10 | 20 | 50 | 100 | "all";
 
 export const Route = createFileRoute("/orcamentos")({
@@ -292,6 +292,10 @@ function OrcamentosPage() {
   const [qtyDialogProduct, setQtyDialogProduct] = useState<(typeof products)[number] | null>(null);
   const [qtyDialogValue, setQtyDialogValue] = useState("1");
   const qtyDialogInputRef = useRef<HTMLInputElement>(null);
+  const [productsDialogOpen, setProductsDialogOpen] = useState(false);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+  const productSearchInputRef = useRef<HTMLInputElement>(null);
+  const clientSearchInputRef = useRef<HTMLInputElement>(null);
 
   const total = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantidade * item.valorUnitario, 0),
@@ -633,6 +637,73 @@ function OrcamentosPage() {
     }, 50);
     return () => window.clearTimeout(timer);
   }, [qtyDialogProduct]);
+
+  useEffect(() => {
+    if (!productsDialogOpen || qtyDialogProduct) return;
+    const timer = window.setTimeout(() => {
+      const input = productSearchInputRef.current;
+      if (!input) return;
+      input.focus();
+      input.select();
+    }, 50);
+    return () => window.clearTimeout(timer);
+  }, [productsDialogOpen, qtyDialogProduct]);
+
+  function openProductsDialog() {
+    if (locked) return;
+    setMobileTab("montar");
+    setProductsDialogOpen(true);
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const key = event.key;
+      if (!["F1", "F2", "F3", "F4", "F8"].includes(key)) return;
+
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase() ?? "";
+      const isTypingField =
+        tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable;
+
+      // F1/F2 sempre; demais só fora de campos de digitação
+      if (isTypingField && key !== "F1" && key !== "F2") return;
+
+      event.preventDefault();
+
+      if (key === "F1") {
+        setShortcutsHelpOpen((open) => !open);
+        return;
+      }
+      if (key === "F2") {
+        openProductsDialog();
+        return;
+      }
+      if (key === "F3") {
+        setMobileTab("montar");
+        if (selectedClient) {
+          setSelectedClient(null);
+          setClientQuery("");
+          setClientAddress("");
+        }
+        window.setTimeout(() => clientSearchInputRef.current?.focus(), 40);
+        return;
+      }
+      if (key === "F4") {
+        if (saving || locked || !selectedClient || cart.length === 0) return;
+        void handleSave();
+        return;
+      }
+      if (key === "F8") {
+        if (sending || locked || !selectedClient || cart.length === 0) return;
+        void handleSend();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // handleSave/handleSend are stable enough via closure; deps cover guards
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locked, saving, sending, selectedClient, cart.length]);
 
   function reorderCart(fromKey: string, toKey: string) {
     if (locked || fromKey === toKey) return;
@@ -1262,14 +1333,14 @@ function OrcamentosPage() {
 
   return (
     <AppShell mobileTitle="Orçamentos" searchPlaceholder="Buscar produtos...">
-      <div className="space-y-lg p-margin-mobile pb-32 md:p-margin-desktop md:pb-margin-desktop">
-        <div className="flex flex-wrap items-end justify-between gap-md">
+      <div className="space-y-md p-margin-mobile pb-32 md:px-md md:py-md md:pb-md xl:px-lg">
+        <div className="flex flex-wrap items-center justify-between gap-sm">
           <div>
-            <h1 className="text-headline-sm text-primary">Orçamentos</h1>
-            <p className="hidden text-body-md text-on-surface-variant sm:block">
-              Salve com número interno, imprima PDF, edite e envie à Omie (etapa 00).
+            <h1 className="text-title-lg text-primary">Orçamentos</h1>
+            <p className="hidden text-label-md text-on-surface-variant lg:block">
+              Salve, imprima PDF e envie à Omie · F1 atalhos
             </p>
-            <p className="text-body-md text-on-surface-variant sm:hidden">
+            <p className="text-label-md text-on-surface-variant lg:hidden">
               Monte, adicione produtos e envie à Omie.
             </p>
           </div>
@@ -1281,7 +1352,7 @@ function OrcamentosPage() {
                   resetForm();
                   setMobileTab("montar");
                 }}
-                className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary sm:flex-none"
+                className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary sm:flex-none"
               >
                 <Icon name="add" className="text-[18px]" />
                 Novo orçamento
@@ -1291,29 +1362,28 @@ function OrcamentosPage() {
               type="button"
               disabled={syncingClients || apps.length === 0}
               onClick={handleSyncClients}
-              className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md text-primary disabled:opacity-50 sm:flex-none"
+              className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg border border-outline-variant bg-surface px-sm py-xs text-label-md text-primary disabled:opacity-50 sm:flex-none"
             >
-              <Icon name={syncingClients ? "hourglass_empty" : "sync"} className="text-[18px]" />
+              <Icon name={syncingClients ? "hourglass_empty" : "sync"} className="text-[16px]" />
               {syncingClients ? "Sincronizando..." : `Sync clientes (${clientCount})`}
             </button>
             <button
               type="button"
               disabled={syncing || apps.length === 0}
               onClick={handleSyncProducts}
-              className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50 sm:flex-none"
+              className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg bg-primary px-sm py-xs text-label-md text-on-primary disabled:opacity-50 sm:flex-none"
             >
-              <Icon name={syncing ? "hourglass_empty" : "sync"} className="text-[18px]" />
+              <Icon name={syncing ? "hourglass_empty" : "sync"} className="text-[16px]" />
               {syncing ? "Sincronizando..." : `Sync produtos (${productCount})`}
             </button>
           </div>
         </div>
 
         <div className="sticky top-0 z-20 -mx-margin-mobile border-b border-outline-variant bg-background/95 px-margin-mobile py-sm backdrop-blur-md xl:hidden">
-          <div className="grid grid-cols-3 gap-xs rounded-xl bg-surface-container-low p-xs">
+          <div className="grid grid-cols-2 gap-xs rounded-xl bg-surface-container-low p-xs">
             {(
               [
                 { id: "montar" as const, label: "Montar", icon: "edit_note", badge: cart.length },
-                { id: "produtos" as const, label: "Produtos", icon: "inventory_2", badge: 0 },
                 {
                   id: "salvos" as const,
                   label: "Salvos",
@@ -1337,7 +1407,7 @@ function OrcamentosPage() {
                 >
                   <Icon name={tab.icon} filled={active} className="text-[20px]" />
                   <span>{tab.label}</span>
-                  {tab.badge > 0 && tab.id !== "produtos" ? (
+                  {tab.badge > 0 ? (
                     <span className="absolute right-1 top-1 min-w-5 rounded-full bg-secondary-container px-1 text-center text-[0.65rem] font-bold text-on-secondary-container">
                       {tab.badge > 99 ? "99+" : tab.badge}
                     </span>
@@ -1346,11 +1416,6 @@ function OrcamentosPage() {
               );
             })}
           </div>
-          {lastAddedLabel && mobileTab === "produtos" ? (
-            <p className="mt-sm truncate rounded-lg bg-emerald-50 px-sm py-xs text-label-md text-emerald-900">
-              + {lastAddedLabel}
-            </p>
-          ) : null}
         </div>
 
         {numeroInterno ? (
@@ -1394,27 +1459,21 @@ function OrcamentosPage() {
           </div>
         ) : null}
 
-        <div
-          className={cn(
-            "grid gap-lg xl:grid-cols-[1.1fr_0.9fr]",
-            mobileTab === "salvos" && "hidden xl:grid",
-          )}
-        >
-          <section
-            className={cn(
-              "space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-md",
-              mobileTab === "produtos" && "hidden xl:block",
-            )}
-          >
-            <div className="grid gap-md sm:grid-cols-2">
+        <div className={cn(mobileTab === "salvos" && "hidden xl:block")}>
+          <section className="space-y-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-sm md:p-md">
+            <div className="grid gap-md xl:grid-cols-[minmax(18rem,0.72fr)_minmax(0,1.28fr)] xl:items-start">
+              <div className="space-y-sm">
+            <div className="grid gap-sm sm:grid-cols-2">
               <label className="block text-label-md text-on-surface-variant">
                 Empresa Omie
-                <div className="mt-xs w-full rounded-lg border border-outline-variant bg-surface-container-low px-sm py-sm text-body-md text-on-surface">
-                  {bootstrap.empresaRazaoSocial ||
-                    apps.find((app) => app.id === omieAppId)?.name ||
-                    "Belfer"}
+                <div className="mt-xs w-full rounded-lg border border-outline-variant bg-surface-container-low px-sm py-xs text-label-md text-on-surface">
+                  <span className="line-clamp-2">
+                    {bootstrap.empresaRazaoSocial ||
+                      apps.find((app) => app.id === omieAppId)?.name ||
+                      "Belfer"}
+                  </span>
                   {bootstrap.empresaCnpj ? (
-                    <span className="mt-xs block text-label-md text-on-surface-variant">
+                    <span className="mt-0.5 block text-on-surface-variant">
                       CNPJ {bootstrap.empresaCnpj}
                     </span>
                   ) : null}
@@ -1427,7 +1486,7 @@ function OrcamentosPage() {
                   value={dataPrevisao}
                   disabled={locked}
                   onChange={(event) => setDataPrevisao(event.target.value)}
-                  className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md disabled:opacity-60"
+                  className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-xs text-body-md disabled:opacity-60"
                 />
               </label>
             </div>
@@ -1435,9 +1494,9 @@ function OrcamentosPage() {
             <div>
               <label className="block text-label-md text-on-surface-variant">Cliente</label>
               {selectedClient ? (
-                <div className="mt-xs flex items-center justify-between gap-sm rounded-lg border border-outline-variant bg-surface px-sm py-sm">
-                  <div>
-                    <p className="text-body-md text-on-surface">{selectedClient.nome}</p>
+                <div className="mt-xs flex items-center justify-between gap-sm rounded-lg border border-outline-variant bg-surface px-sm py-xs">
+                  <div className="min-w-0">
+                    <p className="truncate text-body-md text-on-surface">{selectedClient.nome}</p>
                     <p className="text-label-md text-on-surface-variant">Código {selectedClient.codigo}</p>
                   </div>
                   {!locked ? (
@@ -1457,25 +1516,26 @@ function OrcamentosPage() {
               ) : (
                 <div className="relative mt-xs">
                   <input
+                    ref={clientSearchInputRef}
                     value={clientQuery}
                     onChange={(event) => setClientQuery(event.target.value)}
                     placeholder={
                       clientCount > 0
-                        ? "Buscar cliente sincronizado (mín. 2 letras)"
-                        : "Buscar razão social (mín. 2 letras) ou sync clientes"
+                        ? "Buscar cliente sincronizado (mín. 2 letras) · F3"
+                        : "Buscar razão social (mín. 2 letras) ou sync clientes · F3"
                     }
-                    className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+                    className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-xs text-body-md"
                   />
                   {searchingClients ? (
                     <p className="mt-xs text-label-md text-on-surface-variant">Buscando...</p>
                   ) : null}
                   {clientResults.length > 0 ? (
-                    <ul className="absolute z-10 mt-xs max-h-56 w-full overflow-auto rounded-lg border border-outline-variant bg-surface shadow-lg">
+                    <ul className="absolute z-10 mt-xs max-h-48 w-full overflow-auto rounded-lg border border-outline-variant bg-surface shadow-lg">
                       {clientResults.map((client) => (
                         <li key={client.codigo}>
                           <button
                             type="button"
-                            className="block w-full px-sm py-sm text-left text-body-md hover:bg-surface-container-high"
+                            className="block w-full px-sm py-xs text-left text-body-md hover:bg-surface-container-high"
                             onClick={() => void selectClient(client)}
                           >
                             {client.nome}
@@ -1501,7 +1561,7 @@ function OrcamentosPage() {
                   onChange={(event) => setContato(event.target.value)}
                   maxLength={160}
                   placeholder="Ex.: João Silva — Compras"
-                  className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md disabled:opacity-60"
+                  className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-xs text-body-md disabled:opacity-60"
                 />
               </label>
               <label className="block text-label-md text-on-surface-variant">
@@ -1518,7 +1578,7 @@ function OrcamentosPage() {
                         ? "Rua, número - bairro - cidade/UF - CEP"
                         : "Selecione o cliente"
                   }
-                  className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md disabled:opacity-60"
+                  className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-xs text-body-md disabled:opacity-60"
                 />
               </label>
             </div>
@@ -1530,17 +1590,17 @@ function OrcamentosPage() {
                 disabled={locked}
                 onChange={(event) => setObservacao(event.target.value)}
                 rows={2}
-                className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md disabled:opacity-60"
+                className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-xs text-body-md disabled:opacity-60"
                 placeholder="Opcional"
               />
             </label>
 
-            <div className="rounded-lg border border-outline-variant bg-surface-container-low p-md space-y-sm">
+            <div className="space-y-sm rounded-lg border border-outline-variant bg-surface-container-low p-sm">
               <div className="flex flex-col gap-sm sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <p className="text-title-md text-on-surface">Serviços mensais</p>
+                  <p className="text-body-md font-semibold text-on-surface">Serviços mensais</p>
                   <p className="text-label-md text-on-surface-variant">
-                    Opcional · no PDF/Excel e nas observações da Omie
+                    Opcional · PDF/Excel e Omie
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-sm">
@@ -1783,18 +1843,33 @@ function OrcamentosPage() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+              </div>
 
+              <div className="min-w-0 space-y-sm xl:sticky xl:top-sm">
             <div>
-              <div className="mb-xs flex items-center justify-between gap-sm">
+              <div className="mb-xs flex flex-wrap items-center justify-between gap-sm">
                 <div>
-                  <p className="text-title-md text-on-surface">Itens do orçamento</p>
+                  <p className="text-body-md font-semibold text-on-surface">Itens do orçamento</p>
                   {!locked && cart.length > 1 ? (
                     <p className="text-label-md text-on-surface-variant">
-                      Arraste pelo ícone para reordenar
+                      Arraste para reordenar
                     </p>
                   ) : null}
                 </div>
-                <p className="text-label-md text-on-surface-variant">Total {formatMoney(total)}</p>
+                <div className="flex flex-wrap items-center gap-sm">
+                  <p className="text-body-md font-semibold text-primary">{formatMoney(total)}</p>
+                  {!locked ? (
+                    <button
+                      type="button"
+                      onClick={openProductsDialog}
+                      className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-primary"
+                    >
+                      <Icon name="add" className="text-[16px]" />
+                      Adicionar
+                      <span className="hidden text-on-surface-variant sm:inline">· F2</span>
+                    </button>
+                  ) : null}
+                </div>
               </div>
               {cart.length > 0 && (belowCmcCount > 0 || belowSuggestedCount > 0) ? (
                 <div
@@ -1818,17 +1893,16 @@ function OrcamentosPage() {
                   <p className="text-body-md text-on-surface-variant">
                     Nenhum produto no orçamento ainda.
                   </p>
-                  <button
-                    type="button"
-                    onClick={() => setMobileTab("produtos")}
-                    className="mt-sm inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary xl:hidden"
-                  >
-                    <Icon name="add" className="text-[18px]" />
-                    Escolher produtos
-                  </button>
-                  <p className="mt-sm hidden text-label-md text-on-surface-variant xl:block">
-                    Adicione produtos na lista ao lado.
-                  </p>
+                  {!locked ? (
+                    <button
+                      type="button"
+                      onClick={openProductsDialog}
+                      className="mt-sm inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
+                    >
+                      <Icon name="add" className="text-[18px]" />
+                      Adicionar produtos · F2
+                    </button>
+                  ) : null}
                 </div>
               ) : (
                 <>
@@ -1938,17 +2012,17 @@ function OrcamentosPage() {
                       );
                     })}
                   </div>
-                  <div className="hidden overflow-x-auto rounded-lg border border-outline-variant xl:block">
-                  <table className="min-w-full text-left text-body-md">
-                    <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                  <div className="hidden max-h-[min(70vh,42rem)] overflow-auto rounded-lg border border-outline-variant xl:block">
+                  <table className="min-w-full text-left text-label-md">
+                    <thead className="sticky top-0 z-10 bg-surface-container-low text-label-md text-on-surface-variant">
                       <tr>
-                        {!locked ? <th className="w-8 px-sm py-xs" aria-label="Reordenar" /> : null}
-                        <th className="px-sm py-xs">Produto</th>
-                        <th className="px-sm py-xs">Qtd</th>
-                        <th className="px-sm py-xs">Unitário</th>
-                        <th className="px-sm py-xs">CMC</th>
-                        <th className="px-sm py-xs">Subtotal</th>
-                        <th className="px-sm py-xs" />
+                        {!locked ? <th className="w-8 px-xs py-xs" aria-label="Reordenar" /> : null}
+                        <th className="px-xs py-xs">Produto</th>
+                        <th className="px-xs py-xs">Qtd</th>
+                        <th className="px-xs py-xs">Unitário</th>
+                        <th className="px-xs py-xs">CMC</th>
+                        <th className="px-xs py-xs">Subtotal</th>
+                        <th className="px-xs py-xs" />
                       </tr>
                     </thead>
                     <tbody>
@@ -1969,23 +2043,23 @@ function OrcamentosPage() {
                           )}
                         >
                           {!locked ? (
-                            <td className="px-sm py-xs align-middle">
+                            <td className="px-xs py-1 align-middle">
                               <span
                                 className="inline-flex cursor-grab touch-none text-on-surface-variant active:cursor-grabbing"
                                 title="Arrastar para reordenar"
                                 aria-label="Arrastar para reordenar"
                               >
-                                <Icon name="drag_indicator" className="text-[18px]" />
+                                <Icon name="drag_indicator" className="text-[16px]" />
                               </span>
                             </td>
                           ) : null}
-                          <td className="px-sm py-xs">
-                            <p>{item.descricao}</p>
+                          <td className="max-w-[14rem] px-xs py-1">
+                            <p className="line-clamp-2 text-body-md leading-snug">{item.descricao}</p>
                             {item.unidade ? (
                               <p className="text-label-md text-on-surface-variant">{item.unidade}</p>
                             ) : null}
                           </td>
-                          <td className="px-sm py-xs">
+                          <td className="px-xs py-1">
                             <QuantityInput
                               disabled={locked}
                               value={item.quantidade}
@@ -1996,10 +2070,10 @@ function OrcamentosPage() {
                                   ),
                                 );
                               }}
-                              className="w-20 rounded border border-outline-variant bg-surface px-xs py-xs disabled:opacity-60"
+                              className="w-14 rounded border border-outline-variant bg-surface px-xs py-0.5 disabled:opacity-60"
                             />
                           </td>
-                          <td className="px-sm py-xs">
+                          <td className="px-xs py-1">
                             <UnitPriceInput
                               disabled={locked}
                               value={item.valorUnitario}
@@ -2010,7 +2084,7 @@ function OrcamentosPage() {
                                   ),
                                 );
                               }}
-                              className={`w-28 rounded border bg-surface px-xs py-xs disabled:opacity-50 ${
+                              className={`w-24 rounded border bg-surface px-xs py-0.5 disabled:opacity-50 ${
                                 belowCmc
                                   ? "border-red-400 text-red-700 font-semibold"
                                   : belowSuggested
@@ -2019,19 +2093,21 @@ function OrcamentosPage() {
                               }`}
                             />
                             {belowCmc ? (
-                              <p className="mt-xs text-label-md text-red-700">Abaixo do CMC</p>
+                              <p className="text-[0.65rem] leading-tight text-red-700">Abaixo CMC</p>
                             ) : belowSuggested ? (
-                              <p className="mt-xs text-label-md text-amber-800">Abaixo do sugerido</p>
+                              <p className="text-[0.65rem] leading-tight text-amber-800">Abaixo sug.</p>
                             ) : null}
                           </td>
-                          <td className="px-sm py-xs text-label-md text-on-surface-variant">
+                          <td className="whitespace-nowrap px-xs py-1 text-on-surface-variant">
                             <div>{cmcEfetivo != null ? formatMoney(cmcEfetivo) : "—"}</div>
                             {sugerido != null ? (
                               <div className="text-on-surface-variant/80">Sug. {formatMoney(sugerido)}</div>
                             ) : null}
                           </td>
-                          <td className="px-sm py-xs">{formatMoney(item.quantidade * item.valorUnitario)}</td>
-                          <td className="px-sm py-xs">
+                          <td className="whitespace-nowrap px-xs py-1 font-semibold">
+                            {formatMoney(item.quantidade * item.valorUnitario)}
+                          </td>
+                          <td className="px-xs py-1">
                             {!locked ? (
                               <button
                                 type="button"
@@ -2051,10 +2127,12 @@ function OrcamentosPage() {
                 </>
               )}
             </div>
+              </div>
+            </div>
 
-            <div className="space-y-sm rounded-lg border border-outline-variant bg-surface px-md py-sm">
-              <p className="text-label-md text-on-surface-variant">Opções do PDF</p>
-              <label className="flex items-center gap-sm text-body-md text-on-surface">
+            <div className="flex flex-wrap items-center gap-md rounded-lg border border-outline-variant bg-surface px-sm py-xs">
+              <p className="text-label-md text-on-surface-variant">PDF</p>
+              <label className="inline-flex items-center gap-xs text-label-md text-on-surface">
                 <input
                   type="checkbox"
                   checked={showLineValues}
@@ -2064,139 +2142,65 @@ function OrcamentosPage() {
                     if (checked && !showTotal) setShowTotal(true);
                   }}
                 />
-                Mostrar valores unitários e subtotais
+                Valores por linha
               </label>
-              <label className="flex items-center gap-sm text-body-md text-on-surface">
+              <label className="inline-flex items-center gap-xs text-label-md text-on-surface">
                 <input
                   type="checkbox"
                   checked={showTotal}
                   onChange={(event) => setShowTotal(event.target.checked)}
                 />
-                Mostrar valor total
+                Total
               </label>
             </div>
 
-            <div className="flex flex-wrap gap-sm">
+            <div className="flex flex-wrap gap-xs">
               <button
                 type="button"
                 disabled={saving || locked || !selectedClient || cart.length === 0}
                 onClick={handleSave}
-                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
+                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
               >
-                <Icon name={saving ? "hourglass_empty" : "save"} className="text-[18px]" />
-                {saving ? "Salvando..." : editingQuoteId ? "Atualizar" : "Salvar"}
+                <Icon name={saving ? "hourglass_empty" : "save"} className="text-[16px]" />
+                {saving ? "Salvando..." : editingQuoteId ? "Atualizar · F4" : "Salvar · F4"}
               </button>
               <button
                 type="button"
                 disabled={cart.length === 0 || saving || !selectedClient}
                 onClick={handleGeneratePdf}
-                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
+                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
               >
-                <Icon name="picture_as_pdf" className="text-[18px]" />
-                Gerar PDF
+                <Icon name="picture_as_pdf" className="text-[16px]" />
+                PDF
               </button>
               <button
                 type="button"
                 disabled={cart.length === 0 || saving || !selectedClient}
                 onClick={handleExportExcel}
-                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
+                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
               >
-                <Icon name="table_view" className="text-[18px]" />
-                Exportar Excel
+                <Icon name="table_view" className="text-[16px]" />
+                Excel
               </button>
               <button
                 type="button"
                 disabled={sending || locked || !selectedClient || cart.length === 0}
                 onClick={handleSend}
-                className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md text-on-secondary-container disabled:opacity-50"
+                className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md text-on-secondary-container disabled:opacity-50"
               >
-                <Icon name={sending ? "hourglass_empty" : "send"} className="text-[18px]" />
-                {sending ? "Enviando..." : "Enviar para Omie"}
+                <Icon name={sending ? "hourglass_empty" : "send"} className="text-[16px]" />
+                {sending ? "Enviando..." : "Omie · F8"}
               </button>
-            </div>
-          </section>
-
-          <section
-            className={cn(
-              "space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-md",
-              mobileTab === "montar" && "hidden xl:block",
-            )}
-          >
-            <div>
-              <p className="text-title-md text-on-surface">Produtos</p>
-              <p className="text-label-md text-on-surface-variant xl:hidden">
-                Toque em adicionar — o item entra no orçamento na hora.
-              </p>
-              <input
-                value={productQuery}
-                onChange={(event) => setProductQuery(event.target.value)}
-                placeholder="Filtrar por descrição ou código"
-                className="mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
-              />
-            </div>
-            {productCount === 0 ? (
-              <p className="text-body-md text-on-surface-variant">
-                Nenhum produto sincronizado ainda. Clique em <strong>Sync produtos</strong>.
-              </p>
-            ) : products.length === 0 ? (
-              <p className="text-body-md text-on-surface-variant">Nenhum produto encontrado com esse filtro.</p>
-            ) : (
-              <ul className="max-h-[min(34rem,calc(100dvh-16rem))] space-y-xs overflow-auto xl:max-h-[34rem]">
-                {products.map((product) => (
-                  <li
-                    key={`${product.codigoProduto}`}
-                    className="flex items-start justify-between gap-sm rounded-lg border border-outline-variant px-sm py-sm"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-body-md text-on-surface">{product.descricao}</p>
-                      <p className="text-label-md text-on-surface-variant">
-                        #{product.codigoProduto}
-                        {product.codigoInterno ? ` · ${product.codigoInterno}` : ""}
-                        {product.unidade ? ` · ${product.unidade}` : ""}
-                        {" · "}
-                        {product.valorUnitario != null ? formatMoney(product.valorUnitario) : "sem preço"}
-                        {product.cmcEfetivo != null ? ` · CMC ${formatMoney(product.cmcEfetivo)}` : ""}
-                      </p>
-                      {product.valorUnitario != null &&
-                      isUnitBelowCmc(product.valorUnitario, product.cmcEfetivo) ? (
-                        <p className="text-label-md font-semibold text-red-700">
-                          Unitário abaixo do CMC
-                          {product.precoSugerido != null
-                            ? ` · sug. ${formatMoney(product.precoSugerido)}`
-                            : ""}
-                        </p>
-                      ) : product.valorUnitario != null &&
-                        isUnitBelowSuggested(product.valorUnitario, product.precoSugerido) ? (
-                        <p className="text-label-md font-semibold text-amber-800">
-                          Abaixo do sugerido ({formatMoney(product.precoSugerido!)})
-                        </p>
-                      ) : product.precoSugerido != null ? (
-                        <p className="text-label-md text-on-surface-variant">
-                          sug. {formatMoney(product.precoSugerido)}
-                        </p>
-                      ) : null}
-                    </div>
-                    <button
-                      type="button"
-                      disabled={locked}
-                      onClick={() => requestAddProduct(product)}
-                      className="shrink-0 rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-primary hover:brightness-95 disabled:opacity-50 xl:border xl:border-outline-variant xl:bg-transparent xl:font-medium"
-                    >
-                      + Add
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {cart.length > 0 ? (
               <button
                 type="button"
-                onClick={() => setMobileTab("montar")}
-                className="flex w-full items-center justify-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary xl:hidden"
+                onClick={() => setShortcutsHelpOpen(true)}
+                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-on-surface-variant hover:bg-surface-container-high"
+                title="Atalhos de teclado"
               >
-                Ver orçamento ({cart.length}) · {formatMoney(total)}
+                <Icon name="keyboard" className="text-[16px]" />
+                F1
               </button>
-            ) : null}
+            </div>
           </section>
         </div>
 
@@ -2486,8 +2490,9 @@ function OrcamentosPage() {
               </div>
               <button
                 type="button"
-                onClick={() => setMobileTab("produtos")}
-                className="rounded-lg border border-outline-variant px-sm py-sm text-label-md text-primary"
+                disabled={locked}
+                onClick={openProductsDialog}
+                className="rounded-lg border border-outline-variant px-sm py-sm text-label-md text-primary disabled:opacity-50"
               >
                 + Produtos
               </button>
@@ -2503,6 +2508,143 @@ function OrcamentosPage() {
           </div>
         ) : null}
       </div>
+
+      <Dialog open={productsDialogOpen} onOpenChange={setProductsDialogOpen}>
+        <DialogContent className="!w-[min(56rem,calc(100vw-1.5rem))] !max-w-none">
+          <DialogHeader>
+            <DialogTitle>Adicionar produtos</DialogTitle>
+            <DialogDescription>
+              Busque e adicione itens ao orçamento. O modal permanece aberto para incluir vários · F2
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-md">
+            <input
+              ref={productSearchInputRef}
+              value={productQuery}
+              onChange={(event) => setProductQuery(event.target.value)}
+              placeholder="Filtrar por descrição ou código"
+              className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+            />
+            {lastAddedLabel ? (
+              <p className="truncate rounded-lg bg-emerald-50 px-sm py-xs text-label-md text-emerald-900">
+                + {lastAddedLabel}
+                {cart.length > 0 ? ` · ${cart.length} no orçamento · ${formatMoney(total)}` : ""}
+              </p>
+            ) : cart.length > 0 ? (
+              <p className="text-label-md text-on-surface-variant">
+                {cart.length} item(ns) no orçamento · {formatMoney(total)}
+              </p>
+            ) : null}
+            {productCount === 0 ? (
+              <p className="text-body-md text-on-surface-variant">
+                Nenhum produto sincronizado ainda. Clique em <strong>Sync produtos</strong>.
+              </p>
+            ) : products.length === 0 ? (
+              <p className="text-body-md text-on-surface-variant">
+                Nenhum produto encontrado com esse filtro.
+              </p>
+            ) : (
+              <ul className="max-h-[min(28rem,55vh)] space-y-xs overflow-auto">
+                {products.map((product) => (
+                  <li
+                    key={`${product.codigoProduto}`}
+                    className="flex items-start justify-between gap-sm rounded-lg border border-outline-variant px-sm py-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-body-md text-on-surface">{product.descricao}</p>
+                      <p className="text-label-md text-on-surface-variant">
+                        #{product.codigoProduto}
+                        {product.codigoInterno ? ` · ${product.codigoInterno}` : ""}
+                        {product.unidade ? ` · ${product.unidade}` : ""}
+                        {" · "}
+                        {product.valorUnitario != null
+                          ? formatMoney(product.valorUnitario)
+                          : "sem preço"}
+                        {product.cmcEfetivo != null
+                          ? ` · CMC ${formatMoney(product.cmcEfetivo)}`
+                          : ""}
+                      </p>
+                      {product.valorUnitario != null &&
+                      isUnitBelowCmc(product.valorUnitario, product.cmcEfetivo) ? (
+                        <p className="text-label-md font-semibold text-red-700">
+                          Unitário abaixo do CMC
+                          {product.precoSugerido != null
+                            ? ` · sug. ${formatMoney(product.precoSugerido)}`
+                            : ""}
+                        </p>
+                      ) : product.valorUnitario != null &&
+                        isUnitBelowSuggested(product.valorUnitario, product.precoSugerido) ? (
+                        <p className="text-label-md font-semibold text-amber-800">
+                          Abaixo do sugerido ({formatMoney(product.precoSugerido!)})
+                        </p>
+                      ) : product.precoSugerido != null ? (
+                        <p className="text-label-md text-on-surface-variant">
+                          sug. {formatMoney(product.precoSugerido)}
+                        </p>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={locked}
+                      onClick={() => requestAddProduct(product)}
+                      className="shrink-0 rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-primary hover:brightness-95 disabled:opacity-50"
+                    >
+                      + Add
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <DialogFooter>
+            <button
+              type="button"
+              className="rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary"
+              onClick={() => setProductsDialogOpen(false)}
+            >
+              Concluir
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={shortcutsHelpOpen} onOpenChange={setShortcutsHelpOpen}>
+        <DialogContent className="max-w-[28rem]">
+          <DialogHeader>
+            <DialogTitle>Atalhos de teclado</DialogTitle>
+            <DialogDescription>Atalhos da tela de orçamentos.</DialogDescription>
+          </DialogHeader>
+          <ul className="space-y-sm text-body-md text-on-surface">
+            <li>
+              <strong>F1</strong> — abrir/fechar esta ajuda
+            </li>
+            <li>
+              <strong>F2</strong> — adicionar produtos
+            </li>
+            <li>
+              <strong>F3</strong> — focar busca de cliente
+            </li>
+            <li>
+              <strong>F4</strong> — salvar / atualizar
+            </li>
+            <li>
+              <strong>F8</strong> — enviar para Omie
+            </li>
+            <li>
+              <strong>Esc</strong> — fechar modal aberto
+            </li>
+          </ul>
+          <DialogFooter>
+            <button
+              type="button"
+              className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
+              onClick={() => setShortcutsHelpOpen(false)}
+            >
+              Fechar
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={qtyDialogProduct != null}

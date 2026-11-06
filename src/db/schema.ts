@@ -288,6 +288,48 @@ export async function ensureSchema() {
     );
   }
 
+  if (!(await tableExists("omie_suppliers"))) {
+    await sql`
+      create table omie_suppliers (
+        id serial primary key,
+        omie_app_id varchar(64) not null,
+        omie_app_name varchar(160) not null,
+        codigo_omie bigint not null,
+        razao_social varchar(255) not null,
+        nome_fantasia varchar(255),
+        cnpj_cpf varchar(32),
+        inactive boolean not null default false,
+        synced_at timestamptz not null default now(),
+        unique (omie_app_id, codigo_omie)
+      )
+    `;
+  }
+  if (!(await indexExists("omie_suppliers_nome_idx"))) {
+    await sql.unsafe(
+      "create index omie_suppliers_nome_idx on omie_suppliers (omie_app_id, razao_social)",
+    );
+  }
+
+  if (!(await tableExists("product_supplier_codes"))) {
+    await sql`
+      create table product_supplier_codes (
+        id serial primary key,
+        product_id integer not null references omie_products(id) on delete cascade,
+        supplier_id integer not null references omie_suppliers(id) on delete cascade,
+        codigo_fornecedor varchar(120) not null,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (product_id, supplier_id),
+        unique (product_id, codigo_fornecedor)
+      )
+    `;
+  }
+  if (!(await indexExists("product_supplier_codes_codigo_idx"))) {
+    await sql.unsafe(
+      "create index product_supplier_codes_codigo_idx on product_supplier_codes (codigo_fornecedor)",
+    );
+  }
+
   if (!(await tableExists("omie_clients"))) {
     await sql`
       create table omie_clients (
