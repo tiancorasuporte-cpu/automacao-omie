@@ -1,5 +1,5 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
@@ -94,6 +94,114 @@ function statusLabel(status: string, error?: string | null) {
   return status;
 }
 
+function parseNumberInput(raw: string, fallback: number, opts?: { min?: number; allowZero?: boolean }) {
+  const value = Number(String(raw).trim().replace(",", "."));
+  if (!Number.isFinite(value)) return fallback;
+  if (opts?.allowZero ? value < 0 : value <= 0) return fallback;
+  if (opts?.min != null && value < opts.min) return fallback;
+  return value;
+}
+
+/** Permite apagar/redigitar; seleciona o valor ao focar. */
+function EditableNumberInput({
+  value,
+  onCommit,
+  disabled,
+  className,
+  min = 0,
+  allowZero = false,
+  fallback = 0,
+}: {
+  value: number;
+  onCommit: (value: number) => void;
+  disabled?: boolean;
+  className?: string;
+  min?: number;
+  allowZero?: boolean;
+  fallback?: number;
+}) {
+  const [text, setText] = useState(() => String(value));
+
+  useEffect(() => {
+    setText(String(value));
+  }, [value]);
+
+  return (
+    <input
+      type="number"
+      min={min}
+      step="any"
+      disabled={disabled}
+      value={text}
+      onFocus={(event) => event.currentTarget.select()}
+      onChange={(event) => {
+        const next = event.target.value;
+        setText(next);
+        if (next.trim() === "") return;
+        const parsed = Number(String(next).replace(",", "."));
+        if (!Number.isFinite(parsed)) return;
+        if (allowZero ? parsed < 0 : parsed <= 0) return;
+        if (parsed < min) return;
+        onCommit(parsed);
+      }}
+      onBlur={() => {
+        const next = parseNumberInput(text, fallback, { min, allowZero });
+        setText(String(next));
+        if (next !== value) onCommit(next);
+      }}
+      className={className}
+    />
+  );
+}
+
+function QuantityInput({
+  value,
+  onCommit,
+  disabled,
+  className,
+}: {
+  value: number;
+  onCommit: (value: number) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <EditableNumberInput
+      value={value}
+      onCommit={onCommit}
+      disabled={disabled}
+      className={className}
+      min={0.001}
+      allowZero={false}
+      fallback={1}
+    />
+  );
+}
+
+function UnitPriceInput({
+  value,
+  onCommit,
+  disabled,
+  className,
+}: {
+  value: number;
+  onCommit: (value: number) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <EditableNumberInput
+      value={value}
+      onCommit={onCommit}
+      disabled={disabled}
+      className={className}
+      min={0}
+      allowZero
+      fallback={0}
+    />
+  );
+}
+
 function OrcamentosPage() {
   const bootstrap = Route.useLoaderData();
   const router = useRouter();
@@ -181,6 +289,9 @@ function OrcamentosPage() {
   const [lastAddedLabel, setLastAddedLabel] = useState<string | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+  const [qtyDialogProduct, setQtyDialogProduct] = useState<(typeof products)[number] | null>(null);
+  const [qtyDialogValue, setQtyDialogValue] = useState("1");
+  const qtyDialogInputRef = useRef<HTMLInputElement>(null);
 
   const total = useMemo(
     () => cart.reduce((sum, item) => sum + item.quantidade * item.valorUnitario, 0),
@@ -466,14 +577,21 @@ function OrcamentosPage() {
     }
   }
 
-  function addProduct(product: (typeof products)[number]) {
+  function requestAddProduct(product: (typeof products)[number]) {
     if (locked) return;
+    setQtyDialogProduct(product);
+    setQtyDialogValue("1");
+  }
+
+  function addProduct(product: (typeof products)[number], quantidade: number) {
+    if (locked) return;
+    const qty = Number.isFinite(quantidade) && quantidade > 0 ? quantidade : 1;
     setCart((prev) => {
       const existing = prev.find((item) => item.codigoProduto === product.codigoProduto);
       if (existing) {
         return prev.map((item) =>
           item.codigoProduto === product.codigoProduto
-            ? { ...item, quantidade: item.quantidade + 1 }
+            ? { ...item, quantidade: item.quantidade + qty }
             : item,
         );
       }
@@ -484,7 +602,7 @@ function OrcamentosPage() {
           codigoProduto: product.codigoProduto,
           descricao: product.descricao,
           unidade: product.unidade,
-          quantidade: 1,
+          quantidade: qty,
           valorUnitario: product.valorUnitario ?? 0,
           cmc: product.cmc ?? null,
           cmcInterno: product.cmcInterno ?? null,
@@ -496,6 +614,25 @@ function OrcamentosPage() {
     setLastAddedLabel(product.descricao);
     window.setTimeout(() => setLastAddedLabel(null), 1800);
   }
+
+  function confirmQtyDialog(event?: FormEvent) {
+    event?.preventDefault();
+    if (!qtyDialogProduct) return;
+    const qty = parseNumberInput(qtyDialogValue, 1, { min: 0.001 });
+    addProduct(qtyDialogProduct, qty);
+    setQtyDialogProduct(null);
+  }
+
+  useEffect(() => {
+    if (!qtyDialogProduct) return;
+    const timer = window.setTimeout(() => {
+      const input = qtyDialogInputRef.current;
+      if (!input) return;
+      input.focus();
+      input.select();
+    }, 50);
+    return () => window.clearTimeout(timer);
+  }, [qtyDialogProduct]);
 
   function reorderCart(fromKey: string, toKey: string) {
     if (locked || fromKey === toKey) return;
@@ -1464,23 +1601,13 @@ function OrcamentosPage() {
                                   <p className="text-label-md text-on-surface-variant">R$/mês</p>
                                 </td>
                                 <td className="px-sm py-xs">
-                                  <input
-                                    type="number"
-                                    min={0.001}
-                                    step="any"
+                                  <QuantityInput
                                     disabled={locked}
                                     value={service.quantidade}
-                                    onChange={(event) => {
-                                      const value = Number(event.target.value);
+                                    onCommit={(quantidade) => {
                                       setQuoteServicosMensais((prev) =>
                                         prev.map((row) =>
-                                          row.key === service.key
-                                            ? {
-                                                ...row,
-                                                quantidade:
-                                                  Number.isFinite(value) && value > 0 ? value : 1,
-                                              }
-                                            : row,
+                                          row.key === service.key ? { ...row, quantidade } : row,
                                         ),
                                       );
                                     }}
@@ -1488,23 +1615,13 @@ function OrcamentosPage() {
                                   />
                                 </td>
                                 <td className="px-sm py-xs">
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    step="any"
+                                  <UnitPriceInput
                                     disabled={locked}
                                     value={service.valor}
-                                    onChange={(event) => {
-                                      const value = Number(event.target.value);
+                                    onCommit={(valor) => {
                                       setQuoteServicosMensais((prev) =>
                                         prev.map((row) =>
-                                          row.key === service.key
-                                            ? {
-                                                ...row,
-                                                valor:
-                                                  Number.isFinite(value) && value >= 0 ? value : 0,
-                                              }
-                                            : row,
+                                          row.key === service.key ? { ...row, valor } : row,
                                         ),
                                       );
                                     }}
@@ -1747,10 +1864,9 @@ function OrcamentosPage() {
                               ) : null}
                               <div className="min-w-0">
                                 <p className="text-title-md text-primary">{item.descricao}</p>
-                                <p className="text-label-md text-on-surface-variant">
-                                  #{item.codigoProduto}
-                                  {item.unidade ? ` · ${item.unidade}` : ""}
-                                </p>
+                                {item.unidade ? (
+                                  <p className="text-label-md text-on-surface-variant">{item.unidade}</p>
+                                ) : null}
                               </div>
                             </div>
                             {!locked ? (
@@ -1768,23 +1884,13 @@ function OrcamentosPage() {
                           <div className="mt-sm grid grid-cols-2 gap-sm">
                             <label className="block text-label-md text-on-surface-variant">
                               Qtd
-                              <input
-                                type="number"
-                                min={0.001}
-                                step="any"
+                              <QuantityInput
                                 disabled={locked}
                                 value={item.quantidade}
-                                onChange={(event) => {
-                                  const value = Number(event.target.value);
+                                onCommit={(quantidade) => {
                                   setCart((prev) =>
                                     prev.map((row) =>
-                                      row.key === item.key
-                                        ? {
-                                            ...row,
-                                            quantidade:
-                                              Number.isFinite(value) && value > 0 ? value : 1,
-                                          }
-                                        : row,
+                                      row.key === item.key ? { ...row, quantidade } : row,
                                     ),
                                   );
                                 }}
@@ -1793,23 +1899,13 @@ function OrcamentosPage() {
                             </label>
                             <label className="block text-label-md text-on-surface-variant">
                               Unitário
-                              <input
-                                type="number"
-                                min={0}
-                                step="any"
+                              <UnitPriceInput
                                 disabled={locked}
                                 value={item.valorUnitario}
-                                onChange={(event) => {
-                                  const value = Number(event.target.value);
+                                onCommit={(valorUnitario) => {
                                   setCart((prev) =>
                                     prev.map((row) =>
-                                      row.key === item.key
-                                        ? {
-                                            ...row,
-                                            valorUnitario:
-                                              Number.isFinite(value) && value >= 0 ? value : 0,
-                                          }
-                                        : row,
+                                      row.key === item.key ? { ...row, valorUnitario } : row,
                                     ),
                                   );
                                 }}
@@ -1885,25 +1981,18 @@ function OrcamentosPage() {
                           ) : null}
                           <td className="px-sm py-xs">
                             <p>{item.descricao}</p>
-                            <p className="text-label-md text-on-surface-variant">
-                              #{item.codigoProduto}
-                              {item.unidade ? ` · ${item.unidade}` : ""}
-                            </p>
+                            {item.unidade ? (
+                              <p className="text-label-md text-on-surface-variant">{item.unidade}</p>
+                            ) : null}
                           </td>
                           <td className="px-sm py-xs">
-                            <input
-                              type="number"
-                              min={0.001}
-                              step="any"
+                            <QuantityInput
                               disabled={locked}
                               value={item.quantidade}
-                              onChange={(event) => {
-                                const value = Number(event.target.value);
+                              onCommit={(quantidade) => {
                                 setCart((prev) =>
                                   prev.map((row) =>
-                                    row.key === item.key
-                                      ? { ...row, quantidade: Number.isFinite(value) && value > 0 ? value : 1 }
-                                      : row,
+                                    row.key === item.key ? { ...row, quantidade } : row,
                                   ),
                                 );
                               }}
@@ -1911,22 +2000,13 @@ function OrcamentosPage() {
                             />
                           </td>
                           <td className="px-sm py-xs">
-                            <input
-                              type="number"
-                              min={0}
-                              step="any"
+                            <UnitPriceInput
                               disabled={locked}
                               value={item.valorUnitario}
-                              onChange={(event) => {
-                                const value = Number(event.target.value);
+                              onCommit={(valorUnitario) => {
                                 setCart((prev) =>
                                   prev.map((row) =>
-                                    row.key === item.key
-                                      ? {
-                                          ...row,
-                                          valorUnitario: Number.isFinite(value) && value >= 0 ? value : 0,
-                                        }
-                                      : row,
+                                    row.key === item.key ? { ...row, valorUnitario } : row,
                                   ),
                                 );
                               }}
@@ -2099,7 +2179,7 @@ function OrcamentosPage() {
                     <button
                       type="button"
                       disabled={locked}
-                      onClick={() => addProduct(product)}
+                      onClick={() => requestAddProduct(product)}
                       className="shrink-0 rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-primary hover:brightness-95 disabled:opacity-50 xl:border xl:border-outline-variant xl:bg-transparent xl:font-medium"
                     >
                       + Add
@@ -2423,6 +2503,57 @@ function OrcamentosPage() {
           </div>
         ) : null}
       </div>
+
+      <Dialog
+        open={qtyDialogProduct != null}
+        onOpenChange={(open) => {
+          if (!open) setQtyDialogProduct(null);
+        }}
+      >
+        <DialogContent className="max-w-[24rem]">
+          <form onSubmit={(event) => confirmQtyDialog(event)}>
+            <DialogHeader>
+              <DialogTitle>Quantidade</DialogTitle>
+              <DialogDescription>
+                {qtyDialogProduct
+                  ? `${qtyDialogProduct.descricao}${
+                      qtyDialogProduct.unidade ? ` · ${qtyDialogProduct.unidade}` : ""
+                    }`
+                  : "Informe a quantidade do item."}
+              </DialogDescription>
+            </DialogHeader>
+            <label className="mt-md block space-y-xs">
+              <span className="text-label-md text-primary">Qtd</span>
+              <input
+                ref={qtyDialogInputRef}
+                type="number"
+                min={0.001}
+                step="any"
+                required
+                value={qtyDialogValue}
+                onFocus={(event) => event.currentTarget.select()}
+                onChange={(event) => setQtyDialogValue(event.target.value)}
+                className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+              />
+            </label>
+            <DialogFooter className="mt-md">
+              <button
+                type="button"
+                className="rounded-lg px-md py-sm text-label-md"
+                onClick={() => setQtyDialogProduct(null)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
+              >
+                Adicionar
+              </button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={deleteTarget != null}
