@@ -660,11 +660,18 @@ export async function resolveNfsePdfWithStatus(
   item: Pick<DueItem, "omieCode" | "integrationCode" | "documentNumber">,
 ): Promise<DocumentPdfResult> {
   const lookup = await resolveNfseLookup(app, item);
-  const nIdNf = lookup.nIdNf;
   const nCodOS = lookup.nCodOS;
+  // Às vezes omie_code e nfse: do integration_code divergem — tenta os dois.
+  const nIdCandidates = [
+    ...new Set(
+      [lookup.nIdNf, item.omieCode ?? null].filter(
+        (value): value is number => value != null && Number.isFinite(value) && value > 0,
+      ),
+    ),
+  ];
 
   const pdfAttempts: Array<{ endpoint: string; call: string; param: Record<string, unknown> }> = [];
-  if (nIdNf) {
+  for (const nIdNf of nIdCandidates) {
     pdfAttempts.push(
       { endpoint: "/servicos/osdocs/", call: "ObterNFSe", param: { nIdNf } },
       { endpoint: "/servicos/osdocs/", call: "ObterViaUnica", param: { nIdNf } },
@@ -687,6 +694,7 @@ export async function resolveNfsePdfWithStatus(
 
   let lastStatus: string | null = null;
   let fallbackLink: string | null = null;
+  const primaryId = nIdCandidates[0] ?? nCodOS;
 
   for (const attempt of pdfAttempts) {
     try {
@@ -697,9 +705,10 @@ export async function resolveNfsePdfWithStatus(
         continue;
       }
 
+      const attemptId = Number(attempt.param["nIdNf"] ?? attempt.param["nIdOs"] ?? primaryId ?? 0) || primaryId;
       const candidate = pickPdfFromOmieResponse(response, {
         documentNumber: item.documentNumber,
-        fallbackName: `nfse-${nIdNf ?? nCodOS}`,
+        fallbackName: `nfse-${attemptId}`,
       });
       // ObterOS usa cPdfOs
       const osPdf =
@@ -710,7 +719,7 @@ export async function resolveNfsePdfWithStatus(
         ? candidate
         : osPdf
           ? {
-              filename: `${safeFilename(item.documentNumber?.trim() || `nfse-${nCodOS}`)}.pdf`,
+              filename: `${safeFilename(item.documentNumber?.trim() || `nfse-${attemptId}`)}.pdf`,
               mimetype: "application/pdf",
               ...(isHttpUrl(osPdf) ? { url: osPdf } : { base64: osPdf }),
             }
@@ -742,7 +751,7 @@ export async function resolveNfsePdfWithStatus(
 
   if (fallbackLink) {
     const document = await materializePdfDocument({
-      filename: `${safeFilename(item.documentNumber?.trim() || `nfse-${nIdNf ?? nCodOS}`)}.pdf`,
+      filename: `${safeFilename(item.documentNumber?.trim() || `nfse-${primaryId}`)}.pdf`,
       mimetype: "application/pdf",
       url: fallbackLink,
     });

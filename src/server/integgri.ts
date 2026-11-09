@@ -207,6 +207,10 @@ export async function sendInteggriTemplate(
       return { channel: "soft10" as const };
     } catch (soft10Error) {
       const soft10Err = soft10Error instanceof Error ? soft10Error.message : String(soft10Error);
+      // Soft10 sem permissão WABA — não mascara o erro real da Integgri.
+      if (/do not have permission|permission to perform|statusCode":403/i.test(soft10Err)) {
+        throw new Error(integgriErr);
+      }
       const missing =
         /template não encontrado|template not found|não.*vinculado|not linked/i.test(soft10Err) ||
         /template não encontrado|template not found|não.*vinculado/i.test(integgriErr);

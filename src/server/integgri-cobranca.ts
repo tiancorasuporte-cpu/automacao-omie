@@ -1,6 +1,6 @@
 import "@tanstack/react-start/server-only";
 
-import { createDocLink, isPublicTemplateUrl } from "@/db/doc-links";
+import { createDocLink, isPublicTemplateUrl, readPublicSiteUrl } from "@/db/doc-links";
 import { getDueItemById } from "@/db/due-items";
 import {
   listPendingDocsForPhone,
@@ -114,7 +114,8 @@ async function resolveItemDocumentLink(dueItemId: number, phone: string) {
     }
   }
 
-  if (!target) {
+  const hasBinaryPdf = Boolean(result.document?.base64);
+  if (!target && !hasBinaryPdf) {
     throw new Error(result.status ?? `Sem link/PDF para o item ${dueItemId}.`);
   }
 
@@ -128,10 +129,12 @@ async function resolveItemDocumentLink(dueItemId: number, phone: string) {
     .filter(Boolean)
     .join(" · ");
 
-  // Sempre usar /d/* (nosso domínio). URLs assinadas do Omie (cdn/click) expiram
-  // em horas/dias; no /d reconsultamos o PDF na Omie no clique.
+  // Sempre /d/* . Se a Omie só devolve PDF em base64 (comum em NFS-e),
+  // grava placeholder e no clique o /d reconsulta e serve o arquivo.
+  const targetUrl = target || `${readPublicSiteUrl()}/vencimentos`;
+
   const short = await createDocLink({
-    targetUrl: target,
+    targetUrl,
     dueItemId,
     phone,
     label,
@@ -142,7 +145,7 @@ async function resolveItemDocumentLink(dueItemId: number, phone: string) {
       `Link público indisponível para o item ${dueItemId}. Defina PUBLIC_SITE_URL (ex.: https://sistema.ancoraseguranca.app).`,
     );
   }
-  return { ...short, targetUrl: target, templateLink: short.url, label, item };
+  return { ...short, targetUrl, templateLink: short.url, label, item };
 }
 
 /**
@@ -196,9 +199,11 @@ export async function notifyCobrancaViaWabaTemplate(
   }
 
   if (!docs.length) {
-    await sendWhatsAppCobrancaTemplate(phone);
-    await queuePendingDueItems(phone, uniqueIds);
-    throw new Error(errors.join(" | ") || "Sem links de documento.");
+    // Não mascara o erro real com aviso_de_cobranca (template legado pode não existir).
+    throw new Error(
+      errors.join(" | ") ||
+        "Sem links de documento. Verifique PDF/boleto na Omie antes de reenviar.",
+    );
   }
 
   const clientName =
@@ -235,8 +240,13 @@ export async function notifyCobrancaViaWabaTemplate(
       resolveErrors: errors,
     };
   } catch (error) {
-    await sendWhatsAppCobrancaTemplate(phone);
-    await queuePendingDueItems(phone, uniqueIds);
+    // Fallback legado só se o template ainda existir; senão propaga o erro do envio_*.
+    try {
+      await sendWhatsAppCobrancaTemplate(phone);
+      await queuePendingDueItems(phone, uniqueIds);
+    } catch (fallbackError) {
+      console.warn("[waba-cobranca] fallback aviso_de_cobranca indisponível", fallbackError);
+    }
     throw error;
   }
 }
