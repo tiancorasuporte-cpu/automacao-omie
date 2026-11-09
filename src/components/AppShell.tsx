@@ -39,6 +39,7 @@ type NavPath =
   | "/produtos"
   | "/facilities"
   | "/uniformes"
+  | "/estoque"
   | "/frota"
   | "/notificacoes"
   | "/settings"
@@ -105,6 +106,7 @@ const NAV: NavEntry[] = [
       { to: "/facilities", label: "Facilities", icon: "apartment", module: "facilities" },
       { to: "/terceiros", label: "Terceiros", icon: "handshake", module: "terceiros" },
       { to: "/uniformes", label: "Uniformes", icon: "checkroom", module: "uniformes" },
+      { to: "/estoque", label: "Estoque", icon: "warehouse", module: "estoque" },
       { to: "/frota", label: "Frota", icon: "directions_car", module: "frota" },
     ],
   },

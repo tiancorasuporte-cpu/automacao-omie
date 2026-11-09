@@ -128,24 +128,14 @@ async function resolveItemDocumentLink(dueItemId: number, phone: string) {
     .filter(Boolean)
     .join(" · ");
 
-  // Preferir URL pública do Omie/prefeitura. Encurtador /d/ só como fallback
-  // e nunca com IP LAN (PUBLIC_APP_URL do WAHA).
-  if (isPublicTemplateUrl(target)) {
-    return {
-      token: "",
-      url: target,
-      targetUrl: target,
-      templateLink: target,
-      label,
-      item,
-    };
-  }
-
+  // Sempre usar /d/* (nosso domínio). URLs assinadas do Omie (cdn/click) expiram
+  // em horas/dias; no /d reconsultamos o PDF na Omie no clique.
   const short = await createDocLink({
     targetUrl: target,
     dueItemId,
     phone,
     label,
+    expiresInDays: 45,
   });
   if (!isPublicTemplateUrl(short.url)) {
     throw new Error(

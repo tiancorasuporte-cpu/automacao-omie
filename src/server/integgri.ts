@@ -207,8 +207,18 @@ export async function sendInteggriTemplate(
       return { channel: "soft10" as const };
     } catch (soft10Error) {
       const soft10Err = soft10Error instanceof Error ? soft10Error.message : String(soft10Error);
+      const missing =
+        /template não encontrado|template not found|não.*vinculado|not linked/i.test(soft10Err) ||
+        /template não encontrado|template not found|não.*vinculado/i.test(integgriErr);
+      if (missing) {
+        throw new Error(
+          `Template WABA "${name}" não encontrado ou não vinculado a esta conexão WhatsApp` +
+            `${config.whatsappId ? ` (${config.whatsappId})` : ""}. ` +
+            `Confira em Integgri → Templates se existe, está aprovado e ligado ao WhatsApp. Soft10: ${soft10Err}`,
+        );
+      }
       throw new Error(
-        `Template com variáveis falhou. Integgri: ${integgriErr} | Soft10: ${soft10Err}`,
+        `Template com variáveis falhou (${name}). Integgri: ${integgriErr} | Soft10: ${soft10Err}`,
       );
     }
   }

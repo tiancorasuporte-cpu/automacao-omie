@@ -6,6 +6,7 @@ export const APP_MODULES = [
   { id: "facilities", label: "Facilities", path: "/facilities" },
   { id: "terceiros", label: "Terceiros", path: "/terceiros" },
   { id: "uniformes", label: "Uniformes", path: "/uniformes" },
+  { id: "estoque", label: "Estoque", path: "/estoque" },
   { id: "frota", label: "Frota", path: "/frota" },
   { id: "notificacoes", label: "Notificações", path: "/notificacoes" },
 ] as const;

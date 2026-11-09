@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ConversasRouteImport } from './routes/conversas'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as EstoqueRouteImport } from './routes/estoque'
 import { Route as FacilitiesRouteImport } from './routes/facilities'
 import { Route as FrotaRouteImport } from './routes/frota'
 import { Route as NotificacoesRouteImport } from './routes/notificacoes'
@@ -44,6 +45,11 @@ const ConversasRoute = ConversasRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EstoqueRoute = EstoqueRouteImport.update({
+  id: '/estoque',
+  path: '/estoque',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FacilitiesRoute = FacilitiesRouteImport.update({
@@ -141,6 +147,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
+  '/estoque': typeof EstoqueRoute
   '/facilities': typeof FacilitiesRoute
   '/frota': typeof FrotaRoute
   '/notificacoes': typeof NotificacoesRoute
@@ -164,6 +171,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
+  '/estoque': typeof EstoqueRoute
   '/facilities': typeof FacilitiesRoute
   '/frota': typeof FrotaRoute
   '/notificacoes': typeof NotificacoesRoute
@@ -188,6 +196,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
+  '/estoque': typeof EstoqueRoute
   '/facilities': typeof FacilitiesRoute
   '/frota': typeof FrotaRoute
   '/notificacoes': typeof NotificacoesRoute
@@ -213,6 +222,7 @@ export interface FileRouteTypes {
     | '/'
     | '/conversas'
     | '/dashboard'
+    | '/estoque'
     | '/facilities'
     | '/frota'
     | '/notificacoes'
@@ -236,6 +246,7 @@ export interface FileRouteTypes {
     | '/'
     | '/conversas'
     | '/dashboard'
+    | '/estoque'
     | '/facilities'
     | '/frota'
     | '/notificacoes'
@@ -259,6 +270,7 @@ export interface FileRouteTypes {
     | '/'
     | '/conversas'
     | '/dashboard'
+    | '/estoque'
     | '/facilities'
     | '/frota'
     | '/notificacoes'
@@ -283,6 +295,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ConversasRoute: typeof ConversasRoute
   DashboardRoute: typeof DashboardRoute
+  EstoqueRoute: typeof EstoqueRoute
   FacilitiesRoute: typeof FacilitiesRoute
   FrotaRoute: typeof FrotaRoute
   NotificacoesRoute: typeof NotificacoesRoute
@@ -324,6 +337,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/estoque': {
+      id: '/estoque'
+      path: '/estoque'
+      fullPath: '/estoque'
+      preLoaderRoute: typeof EstoqueRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/facilities': {
@@ -459,6 +479,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ConversasRoute: ConversasRoute,
   DashboardRoute: DashboardRoute,
+  EstoqueRoute: EstoqueRoute,
   FacilitiesRoute: FacilitiesRoute,
   FrotaRoute: FrotaRoute,
   NotificacoesRoute: NotificacoesRoute,

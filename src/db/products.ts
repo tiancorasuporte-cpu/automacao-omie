@@ -135,6 +135,60 @@ export async function updateOmieProductCmc(
   `;
 }
 
+export async function updateOmieProductFiscalStock(
+  omieAppId: string,
+  codigoProduto: number,
+  estoqueFiscal: number,
+  cmc: number | null,
+) {
+  const saldo = Number.isFinite(estoqueFiscal) ? Math.max(0, estoqueFiscal) : 0;
+  const db = await getDb();
+  if (cmc != null && Number.isFinite(cmc) && cmc >= 0) {
+    await db`
+      update omie_products
+      set
+        estoque_fiscal = ${saldo},
+        estoque_fiscal_synced_at = now(),
+        cmc = ${cmc},
+        synced_at = now()
+      where omie_app_id = ${omieAppId} and codigo_produto = ${codigoProduto}
+    `;
+    return;
+  }
+  await db`
+    update omie_products
+    set
+      estoque_fiscal = ${saldo},
+      estoque_fiscal_synced_at = now()
+    where omie_app_id = ${omieAppId} and codigo_produto = ${codigoProduto}
+  `;
+}
+
+export async function resetOmieProductFiscalStockAbsent(
+  omieAppId: string,
+  presentCodigoProdutos: number[],
+) {
+  const db = await getDb();
+  const unique = [
+    ...new Set(presentCodigoProdutos.filter((code) => Number.isFinite(code) && code > 0)),
+  ];
+  if (!unique.length) {
+    await db`
+      update omie_products
+      set estoque_fiscal = 0, estoque_fiscal_synced_at = now()
+      where omie_app_id = ${omieAppId} and estoque_fiscal <> 0
+    `;
+    return;
+  }
+  await db`
+    update omie_products
+    set estoque_fiscal = 0, estoque_fiscal_synced_at = now()
+    where omie_app_id = ${omieAppId}
+      and estoque_fiscal <> 0
+      and codigo_produto not in ${db(unique)}
+  `;
+}
+
 export async function updateLocalProduct(input: {
   id: number;
   cmcInterno: number | null;

@@ -287,6 +287,51 @@ export async function ensureSchema() {
       "create index omie_products_descricao_idx on omie_products (omie_app_id, descricao)",
     );
   }
+  if (!(await columnExists("omie_products", "estoque_fiscal"))) {
+    await sql.unsafe(
+      "alter table omie_products add column estoque_fiscal numeric(14, 4) not null default 0",
+    );
+  }
+  if (!(await columnExists("omie_products", "estoque_fiscal_synced_at"))) {
+    await sql.unsafe("alter table omie_products add column estoque_fiscal_synced_at timestamptz");
+  }
+  if (!(await indexExists("omie_products_estoque_fiscal_idx"))) {
+    await sql.unsafe(
+      "create index omie_products_estoque_fiscal_idx on omie_products (omie_app_id, estoque_fiscal)",
+    );
+  }
+
+  if (!(await tableExists("product_stock"))) {
+    await sql`
+      create table product_stock (
+        product_id integer primary key references omie_products(id) on delete cascade,
+        quantidade_fisica numeric(14, 4) not null default 0 check (quantidade_fisica >= 0),
+        estoque_minimo numeric(14, 4) not null default 0 check (estoque_minimo >= 0),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("product_stock_moves"))) {
+    await sql`
+      create table product_stock_moves (
+        id serial primary key,
+        product_id integer not null references omie_products(id) on delete cascade,
+        tipo varchar(16) not null,
+        quantidade numeric(14, 4) not null check (quantidade > 0),
+        saldo_apos numeric(14, 4) not null check (saldo_apos >= 0),
+        motivo text,
+        observacao text,
+        user_id integer references users(id) on delete set null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("product_stock_moves_product_idx"))) {
+    await sql.unsafe(
+      "create index product_stock_moves_product_idx on product_stock_moves (product_id, created_at desc)",
+    );
+  }
 
   if (!(await tableExists("omie_suppliers"))) {
     await sql`
