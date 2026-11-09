@@ -29,9 +29,10 @@ import { notifyCobrancaViaWabaTemplate } from "@/server/integgri-cobranca";
 const DEFAULT_SEND_DELAY_MS = 3_000;
 /** Pausa entre contatos no envio manual em lote (UI). */
 const DEFAULT_MANUAL_BATCH_DELAY_MS = 1_500;
-const DEFAULT_HOURLY_LIMIT = 12;
-const DEFAULT_MAX_CONTACTS_PER_RUN = 8;
-const HARD_MAX_HOURLY_LIMIT = 40;
+/** 0 = sem limite horário prático. */
+const DEFAULT_HOURLY_LIMIT = 0;
+const DEFAULT_MAX_CONTACTS_PER_RUN = 50;
+const HARD_MAX_HOURLY_LIMIT = 500;
 
 let notifyInProgress = false;
 let notifyStartedAt = 0;
@@ -93,13 +94,18 @@ async function hourlyLimit() {
   const fromEnv = process.env["NOTIFICATION_HOURLY_LIMIT"]?.trim();
   const raw = fromSetting || fromEnv || String(DEFAULT_HOURLY_LIMIT);
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_HOURLY_LIMIT;
+  // 0 = sem limite horário
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_HOURLY_LIMIT;
+  if (parsed === 0) return 0;
   return Math.min(Math.floor(parsed), HARD_MAX_HOURLY_LIMIT);
 }
 
 async function remainingHourlyQuota() {
   const limit = await hourlyLimit();
   const used = await countSuccessfulNotifyPhonesLastHour();
+  if (limit === 0) {
+    return { limit: 0, used, remaining: Number.MAX_SAFE_INTEGER };
+  }
   return { limit, used, remaining: Math.max(0, limit - used) };
 }
 

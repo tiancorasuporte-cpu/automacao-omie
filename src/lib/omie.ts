@@ -194,7 +194,8 @@ const settingsSchema = z.object({
   defaultNotifyPhone: z.string(),
   testModeEnabled: z.boolean(),
   testNotifyPhone: z.string(),
-  hourlyLimit: z.number().int().min(1).max(40),
+  /** 0 = sem limite horário. */
+  hourlyLimit: z.number().int().min(0).max(500),
 });
 
 export const getNotificationSettingsFn = createServerFn({ method: "GET" }).handler(async () => {
@@ -208,14 +209,15 @@ export const getNotificationSettingsFn = createServerFn({ method: "GET" }).handl
     "test_notify_phone",
     "notification_hourly_limit",
   ]);
-  const hourlyParsed = Number(settings.notification_hourly_limit ?? "12");
+  const hourlyParsed = Number(settings.notification_hourly_limit ?? "0");
   return {
     notificationsEnabled: settings.notifications_enabled !== "false",
     notificationTime: settings.notification_time ?? "09:00",
     defaultNotifyPhone: settings.default_notify_phone ?? "",
     testModeEnabled: settings.test_mode_enabled === "true",
     testNotifyPhone: settings.test_notify_phone ?? "",
-    hourlyLimit: Number.isFinite(hourlyParsed) && hourlyParsed > 0 ? Math.min(hourlyParsed, 40) : 12,
+    hourlyLimit:
+      Number.isFinite(hourlyParsed) && hourlyParsed >= 0 ? Math.min(hourlyParsed, 500) : 0,
   };
 });
 

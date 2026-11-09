@@ -184,19 +184,18 @@ function NotificationSettings({
           />
         </label>
         <label className="block text-label-md text-on-surface-variant">
-          Limite de contatos por hora
+          Limite de contatos por hora (0 = sem limite)
           <input
             type="number"
-            min={1}
-            max={40}
+            min={0}
+            max={500}
             value={hourlyLimit}
-            onChange={(e) => setHourlyLimit(Math.max(1, Math.min(40, Number(e.target.value) || 1)))}
+            onChange={(e) => setHourlyLimit(Math.max(0, Math.min(500, Number(e.target.value) || 0)))}
             className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
           />
           <span className="mt-xs block text-label-md text-on-surface-variant">
-            Contatos distintos com envio OK na última hora. Padrão: 12 (máx. 40). Também há limite de
-            8 contatos por lote e intervalo de ~10s entre envios, para respeitar as políticas da Meta
-            na API oficial (Integgri). Só envia para celular (DDD + 9…).
+            Contatos distintos com envio OK na última hora. 0 = sem limite (padrão). Máx. 500 se
+            quiser teto. Lote manual até 50 contatos por execução. Só envia para celular (DDD + 9…).
           </span>
         </label>
         <label className="block text-label-md text-on-surface-variant">
