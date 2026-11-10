@@ -54,7 +54,8 @@ export type FacilitiesSubstitution = {
   motivoLabel: string;
   postoId: number;
   postoNome: string;
-  ausenteId: number;
+  /** Null em lançamento extra (sem ausente). */
+  ausenteId: number | null;
   ausenteNome: string;
   ausenteEmpresa: string;
   substitutoId: number;
@@ -165,6 +166,7 @@ function mapSubstitution(row: Record<string, unknown>): FacilitiesSubstitution {
   const postoBaseSubstituto =
     row["substituto_posto_base_id"] == null ? null : toNumber(row["substituto_posto_base_id"]);
   const postoId = toNumber(row["posto_id"]);
+  const ausenteId = row["ausente_id"] == null ? null : toNumber(row["ausente_id"]);
   return {
     id: toNumber(row["id"]),
     data: toDateOnly(row["data"]),
@@ -172,9 +174,12 @@ function mapSubstitution(row: Record<string, unknown>): FacilitiesSubstitution {
     motivoLabel: facilitiesMotivoLabel(motivo),
     postoId,
     postoNome: String(row["posto_nome"] ?? ""),
-    ausenteId: toNumber(row["ausente_id"]),
-    ausenteNome: String(row["ausente_nome"] ?? ""),
-    ausenteEmpresa: facilitiesEmpresaLabel(String(row["ausente_empresa"] ?? "")),
+    ausenteId,
+    ausenteNome: ausenteId == null ? "—" : String(row["ausente_nome"] ?? ""),
+    ausenteEmpresa:
+      ausenteId == null
+        ? "—"
+        : facilitiesEmpresaLabel(String(row["ausente_empresa"] ?? "")),
     substitutoId: toNumber(row["substituto_id"]),
     substitutoNome: String(row["substituto_nome"] ?? ""),
     substitutoEmpresa: facilitiesEmpresaLabel(String(row["substituto_empresa"] ?? "")),
@@ -397,7 +402,7 @@ export async function listFacilitiesSubstitutions(input: {
       coalesce(nullif(trim(u.name), ''), u.username) as created_by_name
     from facilities_substitutions s
     join facilities_posts p on p.id = s.posto_id
-    join facilities_collaborators a on a.id = s.ausente_id
+    left join facilities_collaborators a on a.id = s.ausente_id
     join facilities_collaborators sub on sub.id = s.substituto_id
     left join users u on u.id = s.created_by
     where s.data >= ${start}::date
@@ -417,7 +422,7 @@ export async function createFacilitiesSubstitution(input: {
   data: string;
   motivo: FacilitiesMotivoId;
   postoId: number;
-  ausenteId: number;
+  ausenteId?: number | null;
   substitutoId: number;
   horas: number;
   observacao?: string | null;
@@ -425,8 +430,22 @@ export async function createFacilitiesSubstitution(input: {
   valorAlmoco?: number;
   createdBy?: number | null;
 }) {
-  if (input.ausenteId === input.substitutoId) {
-    throw new Error("Ausente e substituto precisam ser pessoas diferentes.");
+  const isExtra = input.motivo === "extra";
+  const ausenteId =
+    input.ausenteId != null && Number.isFinite(input.ausenteId) && input.ausenteId > 0
+      ? Number(input.ausenteId)
+      : null;
+  if (isExtra) {
+    if (ausenteId != null) {
+      throw new Error("Lançamento extra não usa ausente — só o colaborador setado no posto.");
+    }
+  } else {
+    if (ausenteId == null) {
+      throw new Error("Informe quem faltou (ausente).");
+    }
+    if (ausenteId === input.substitutoId) {
+      throw new Error("Ausente e substituto precisam ser pessoas diferentes.");
+    }
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.data)) {
     throw new Error("Data inválida.");
@@ -445,7 +464,7 @@ export async function createFacilitiesSubstitution(input: {
       data, motivo, posto_id, ausente_id, substituto_id, horas, observacao,
       paga_almoco, valor_almoco, created_by, created_at, updated_at
     ) values (
-      ${input.data}::date, ${input.motivo}, ${input.postoId}, ${input.ausenteId}, ${input.substitutoId},
+      ${input.data}::date, ${input.motivo}, ${input.postoId}, ${ausenteId}, ${input.substitutoId},
       ${input.horas}, ${input.observacao?.trim() || null},
       ${pagaAlmoco}, ${valorAlmoco}, ${input.createdBy ?? null}, now(), now()
     )
@@ -466,7 +485,7 @@ export async function createFacilitiesSubstitution(input: {
       coalesce(nullif(trim(u.name), ''), u.username) as created_by_name
     from facilities_substitutions s
     join facilities_posts p on p.id = s.posto_id
-    join facilities_collaborators a on a.id = s.ausente_id
+    left join facilities_collaborators a on a.id = s.ausente_id
     join facilities_collaborators sub on sub.id = s.substituto_id
     left join users u on u.id = s.created_by
     where s.id = ${id}
@@ -652,7 +671,7 @@ export async function updateFacilitiesSubstitutionAlmoco(input: {
       coalesce(nullif(trim(u.name), ''), u.username) as created_by_name
     from facilities_substitutions s
     join facilities_posts p on p.id = s.posto_id
-    join facilities_collaborators a on a.id = s.ausente_id
+    left join facilities_collaborators a on a.id = s.ausente_id
     join facilities_collaborators sub on sub.id = s.substituto_id
     left join users u on u.id = s.created_by
     where s.id = ${input.id}

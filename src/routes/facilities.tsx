@@ -36,9 +36,11 @@ import {
   countInclusiveDays,
   currentMonthKey,
   defaultHoursForEscala,
+  FACILITIES_MOTIVOS_SUBSTITUICAO,
   facilitiesMotivoHint,
   facilitiesMotivoPagaHoras,
   formatDurationHours,
+  isFacilitiesExtraMotivo,
   isFacilitiesPermutaMotivo,
   splitDecimalHours,
   type FacilitiesEmpresaId,
@@ -522,6 +524,7 @@ function FacilitiesPage() {
   } | null>(null);
   const [pending, setPending] = useState(false);
 
+  const [lancarMode, setLancarMode] = useState<"substituicao" | "extra">("substituicao");
   const [subForm, setSubForm] = useState({
     data: todayIso(),
     motivo: "falta" as FacilitiesMotivoId,
@@ -676,6 +679,9 @@ function FacilitiesPage() {
       })),
     [activeCollaborators],
   );
+
+  /** Todos os ativos — lançamento extra não precisa filtrar por ausente. */
+  const extraCollaboratorOptions = ausenteOptions;
 
   const substitutoOptions = useMemo<SearchPickOption[]>(
     () =>
@@ -961,12 +967,22 @@ function FacilitiesPage() {
   };
 
   const submitSubstitution = async () => {
+    const isExtra = lancarMode === "extra" || isFacilitiesExtraMotivo(subForm.motivo);
     if (!subForm.data || !/^\d{4}-\d{2}-\d{2}$/.test(subForm.data)) {
       flash(null, "Informe a data no formato dd/mm/aaaa.");
       return;
     }
-    if (!subForm.ausenteId || !subForm.substitutoId || !subForm.postoId) {
-      flash(null, "Selecione ausente, posto e substituto.");
+    if (!subForm.substitutoId || !subForm.postoId) {
+      flash(
+        null,
+        isExtra
+          ? "Selecione o posto e o colaborador que vai ganhar as horas."
+          : "Selecione ausente, posto e substituto.",
+      );
+      return;
+    }
+    if (!isExtra && !subForm.ausenteId) {
+      flash(null, "Selecione quem faltou (ausente).");
       return;
     }
     const horasNum = Number.parseInt(subForm.horasHoras || "0", 10);
@@ -996,12 +1012,13 @@ function FacilitiesPage() {
     setPending(true);
     flash(null);
     try {
+      const motivo: FacilitiesMotivoId = isExtra ? "extra" : subForm.motivo;
       const result = await createFacilitiesSubstitutionFn({
         data: {
           data: subForm.data,
-          motivo: subForm.motivo,
+          motivo,
           postoId: Number(subForm.postoId),
-          ausenteId: Number(subForm.ausenteId),
+          ausenteId: isExtra ? null : Number(subForm.ausenteId),
           substitutoId: Number(subForm.substitutoId),
           horas,
           observacao: subForm.observacao.trim() || null,
@@ -1018,11 +1035,13 @@ function FacilitiesPage() {
           ? ` · almoço R$ ${result.substitution.valorAlmoco.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
           : "";
       flash(
-        result.substitution.pagaHoras
-          ? `Troca lançada: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${formatHours(result.substitution.horas)} a pagar${almocoTxt}).`
-          : isFacilitiesPermutaMotivo(result.substitution.motivo)
-            ? `Solicitação de troca registrada: ${result.substitution.substitutoNome} ↔ ${result.substitution.ausenteNome} (sem horas a pagar${almocoTxt}).`
-            : `Lançamento registrado: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${result.substitution.motivoLabel}, sem horas a pagar${almocoTxt}).`,
+        isFacilitiesExtraMotivo(result.substitution.motivo)
+          ? `Extra lançado: ${result.substitution.substitutoNome} no posto ${result.substitution.postoNome} (${formatHours(result.substitution.horas)} a pagar${almocoTxt}).`
+          : result.substitution.pagaHoras
+            ? `Troca lançada: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${formatHours(result.substitution.horas)} a pagar${almocoTxt}).`
+            : isFacilitiesPermutaMotivo(result.substitution.motivo)
+              ? `Solicitação de troca registrada: ${result.substitution.substitutoNome} ↔ ${result.substitution.ausenteNome} (sem horas a pagar${almocoTxt}).`
+              : `Lançamento registrado: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${result.substitution.motivoLabel}, sem horas a pagar${almocoTxt}).`,
       );
       setSubForm((prev) => ({
         ...prev,
@@ -1138,9 +1157,14 @@ function FacilitiesPage() {
     return lines.join("\n");
   }, [data.monthKey, data.summary]);
 
-  const isPermuta = isFacilitiesPermutaMotivo(subForm.motivo);
-  const pagaHorasMotivo = facilitiesMotivoPagaHoras(subForm.motivo);
-  const motivoHint = facilitiesMotivoHint(subForm.motivo);
+  const isExtraMode = lancarMode === "extra";
+  const isPermuta = !isExtraMode && isFacilitiesPermutaMotivo(subForm.motivo);
+  const pagaHorasMotivo = isExtraMode
+    ? true
+    : facilitiesMotivoPagaHoras(subForm.motivo);
+  const motivoHint = isExtraMode
+    ? facilitiesMotivoHint("extra")
+    : facilitiesMotivoHint(subForm.motivo);
 
   const copyPayment = async () => {
     try {
@@ -1651,14 +1675,23 @@ function FacilitiesPage() {
                           </div>
                         </div>
                         <div className="mt-sm grid gap-xs text-body-md">
-                          <p>
-                            <span className="text-on-surface-variant">Ausente: </span>
-                            {row.ausenteNome}
-                          </p>
-                          <p>
-                            <span className="text-on-surface-variant">Cobriu: </span>
-                            {row.substitutoNome}
-                          </p>
+                          {isFacilitiesExtraMotivo(row.motivo) ? (
+                            <p>
+                              <span className="text-on-surface-variant">Extra no posto: </span>
+                              {row.substitutoNome}
+                            </p>
+                          ) : (
+                            <>
+                              <p>
+                                <span className="text-on-surface-variant">Ausente: </span>
+                                {row.ausenteNome}
+                              </p>
+                              <p>
+                                <span className="text-on-surface-variant">Cobriu: </span>
+                                {row.substitutoNome}
+                              </p>
+                            </>
+                          )}
                           {row.createdByName ? (
                             <p>
                               <span className="text-on-surface-variant">Registrado por: </span>
@@ -1837,16 +1870,49 @@ function FacilitiesPage() {
           {search.tab === "lancar" && (
             <section className="mx-auto w-full max-w-[42rem] space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-md md:p-lg">
               <div>
-                <h3 className="text-title-lg text-primary">Lançar substituição</h3>
+                <h3 className="text-title-lg text-primary">Lançamentos</h3>
                 <p className="mt-xs text-body-md text-on-surface-variant">
-                  Informe quem faltou, quem cobriu e o posto. Em solicitação de troca (permuta), as
-                  horas não entram no pagamento.
+                  Substituição cobre um ausente. Extra é colaborador a mais solicitado pelo posto —
+                  quem for setado ganha as horas.
                 </p>
               </div>
 
-              {activePosts.length === 0 || activeCollaborators.length < 2 ? (
+              <div className="flex flex-wrap gap-xs">
+                {(
+                  [
+                    ["substituicao", "Substituição"],
+                    ["extra", "Lançamento extra"],
+                  ] as const
+                ).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => {
+                      setLancarMode(mode);
+                      setSubForm((prev) => ({
+                        ...prev,
+                        motivo: mode === "extra" ? "extra" : prev.motivo === "extra" ? "falta" : prev.motivo,
+                        ausenteId: mode === "extra" ? "" : prev.ausenteId,
+                      }));
+                    }}
+                    className={cn(
+                      "rounded-full px-md py-xs text-label-md transition-colors",
+                      lancarMode === mode
+                        ? "bg-secondary-container font-semibold text-on-secondary-container"
+                        : "bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {activePosts.length === 0 ||
+              activeCollaborators.length < (isExtraMode ? 1 : 2) ? (
                 <div className="rounded-lg border border-dashed border-outline-variant p-md text-body-md text-on-surface-variant">
-                  Cadastre ao menos um posto e dois colaboradores ativos antes de lançar trocas.{" "}
+                  Cadastre ao menos um posto e{" "}
+                  {isExtraMode ? "um colaborador ativo" : "dois colaboradores ativos"} antes de
+                  lançar.{" "}
                   <button
                     type="button"
                     className="font-semibold text-primary underline"
@@ -1871,26 +1937,33 @@ function FacilitiesPage() {
                       fullWidth
                       onChangeIso={(iso) => setSubForm((p) => ({ ...p, data: iso }))}
                     />
-                    <label className="block space-y-xs">
-                      <span className="text-label-md text-primary">Motivo</span>
-                      <select
-                        value={subForm.motivo}
-                        onChange={(e) =>
-                          setSubForm((p) => ({
-                            ...p,
-                            motivo: e.target.value as FacilitiesMotivoId,
-                          }))
-                        }
-                        className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
-                      >
-                        {data.catalogs.motivos.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.label}
-                            {m.pagaHoras === false ? " (sem pagamento)" : ""}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    {isExtraMode ? (
+                      <div className="rounded-lg border border-secondary/30 bg-secondary-container/30 px-md py-sm text-body-md text-primary sm:self-end">
+                        <strong>Extra:</strong> posto pediu reforço. Não há ausente — o colaborador
+                        setado recebe as horas no fechamento.
+                      </div>
+                    ) : (
+                      <label className="block space-y-xs">
+                        <span className="text-label-md text-primary">Motivo</span>
+                        <select
+                          value={subForm.motivo}
+                          onChange={(e) =>
+                            setSubForm((p) => ({
+                              ...p,
+                              motivo: e.target.value as FacilitiesMotivoId,
+                            }))
+                          }
+                          className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                        >
+                          {FACILITIES_MOTIVOS_SUBSTITUICAO.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.label}
+                              {m.pagaHoras === false ? " (sem pagamento)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                   </div>
 
                   {isPermuta ? (
@@ -1899,23 +1972,25 @@ function FacilitiesPage() {
                       fica registrado, mas <strong>não conta como horas a pagar</strong>.
                     </div>
                   ) : null}
-                  {!pagaHorasMotivo && !isPermuta ? (
+                  {!pagaHorasMotivo && !isPermuta && !isExtraMode ? (
                     <div className="rounded-lg border border-secondary/30 bg-secondary-container/30 px-md py-sm text-body-md text-primary">
                       {motivoHint ??
                         "Este motivo não gera horas a pagar no fechamento."}
                     </div>
                   ) : null}
 
-                  <SearchablePick
-                    label="Quem faltou (ausente)"
-                    value={subForm.ausenteId}
-                    options={ausenteOptions}
-                    placeholder="Digite o nome do colaborador..."
-                    onChange={onSelectAusente}
-                  />
+                  {!isExtraMode ? (
+                    <SearchablePick
+                      label="Quem faltou (ausente)"
+                      value={subForm.ausenteId}
+                      options={ausenteOptions}
+                      placeholder="Digite o nome do colaborador..."
+                      onChange={onSelectAusente}
+                    />
+                  ) : null}
 
                   <SearchablePick
-                    label="Posto da cobertura"
+                    label={isExtraMode ? "Posto do reforço" : "Posto da cobertura"}
                     value={subForm.postoId}
                     options={postoOptions}
                     placeholder="Digite o nome do posto..."
@@ -1924,15 +1999,24 @@ function FacilitiesPage() {
 
                   <div className="space-y-xs">
                     <SearchablePick
-                      label="Quem cobriu (substituto)"
+                      label={
+                        isExtraMode
+                          ? "Colaborador (ganha as horas)"
+                          : "Quem cobriu (substituto)"
+                      }
                       value={subForm.substitutoId}
-                      options={substitutoOptions}
-                      placeholder="Digite o nome de quem cobriu..."
+                      options={isExtraMode ? extraCollaboratorOptions : substitutoOptions}
+                      placeholder={
+                        isExtraMode
+                          ? "Digite o nome de quem vai no posto..."
+                          : "Digite o nome de quem cobriu..."
+                      }
                       onChange={onSelectSubstituto}
                     />
                     {substitutoForaBase && (
                       <p className="text-label-md text-secondary">
-                        Atenção: {selectedSubstituto?.nome} está cobrindo fora do posto base (
+                        Atenção: {selectedSubstituto?.nome} está{" "}
+                        {isExtraMode ? "indo" : "cobrindo"} fora do posto base (
                         {selectedSubstituto?.postoBaseNome}).
                       </p>
                     )}
@@ -2037,7 +2121,13 @@ function FacilitiesPage() {
                     className="inline-flex w-full items-center justify-center gap-xs rounded-lg bg-secondary-container px-md py-md text-label-md font-semibold text-primary disabled:opacity-60 sm:w-auto sm:py-sm"
                   >
                     <Icon name="check" className="text-[18px]" />
-                    {pending ? "Salvando..." : isPermuta ? "Registrar permuta" : "Registrar troca"}
+                    {pending
+                      ? "Salvando..."
+                      : isExtraMode
+                        ? "Registrar extra"
+                        : isPermuta
+                          ? "Registrar permuta"
+                          : "Registrar troca"}
                   </button>
                 </form>
               )}

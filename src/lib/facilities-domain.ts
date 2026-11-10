@@ -48,6 +48,13 @@ export const FACILITIES_MOTIVOS = [
     pagaHoras: false,
     hint: "Permuta entre colegas — um faz o dia do outro, sem horas a pagar",
   },
+  {
+    id: "extra",
+    label: "Lançamento extra",
+    pagaHoras: true,
+    hint:
+      "Posto solicitou colaborador a mais no local — não é troca nem férias; quem for setado ganha as horas",
+  },
   { id: "outro", label: "Outro", pagaHoras: true },
 ] as const;
 
@@ -88,6 +95,13 @@ export function facilitiesMotivoHint(id: string) {
 export function isFacilitiesPermutaMotivo(id: string) {
   return id === "troca";
 }
+
+export function isFacilitiesExtraMotivo(id: string) {
+  return id === "extra";
+}
+
+/** Motivos do formulário de substituição (cobre ausente). Extra tem fluxo próprio. */
+export const FACILITIES_MOTIVOS_SUBSTITUICAO = FACILITIES_MOTIVOS.filter((m) => m.id !== "extra");
 
 export function defaultHoursForEscala(escalaId: string) {
   return FACILITIES_ESCALAS.find((e) => e.id === escalaId)?.defaultHours ?? 12;

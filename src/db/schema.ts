@@ -639,6 +639,12 @@ export async function ensureSchema() {
       "alter table facilities_substitutions add column valor_almoco numeric(12, 2) not null default 0",
     );
   }
+  if (await tableExists("facilities_substitutions")) {
+    // Lançamento extra: colaborador a mais no posto, sem ausente.
+    await sql.unsafe(
+      "alter table facilities_substitutions alter column ausente_id drop not null",
+    );
+  }
 
   if (!(await tableExists("facilities_vacations"))) {
     await sql`

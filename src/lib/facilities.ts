@@ -265,12 +265,31 @@ export const createFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
         data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
         motivo: motivoSchema,
         postoId: z.number().int().positive(),
-        ausenteId: z.number().int().positive(),
+        ausenteId: z.number().int().positive().nullable().optional(),
         substitutoId: z.number().int().positive(),
         horas: z.number().positive("Informe horas e minutos maiores que zero."),
         observacao: z.string().trim().nullable().optional(),
         pagaAlmoco: z.boolean().optional(),
         valorAlmoco: z.number().nonnegative().optional(),
+      })
+      .superRefine((value, ctx) => {
+        if (value.motivo === "extra") {
+          if (value.ausenteId != null) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Lançamento extra não deve informar ausente.",
+              path: ["ausenteId"],
+            });
+          }
+          return;
+        }
+        if (value.ausenteId == null) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Informe quem faltou (ausente).",
+            path: ["ausenteId"],
+          });
+        }
       })
       .parse(input ?? {}),
   )
@@ -283,7 +302,7 @@ export const createFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
         data: data.data,
         motivo: data.motivo,
         postoId: data.postoId,
-        ausenteId: data.ausenteId,
+        ausenteId: data.motivo === "extra" ? null : data.ausenteId ?? null,
         substitutoId: data.substitutoId,
         horas: data.horas,
         observacao: data.observacao ?? null,
