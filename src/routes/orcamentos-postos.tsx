@@ -1,7 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+﻿import { createFileRoute } from "@tanstack/react-router";
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { AppShell } from "@/components/AppShell";
+import { PageTitle } from "@/components/PageChrome";
 import { Icon } from "@/components/Icon";
 import {
   Dialog,
@@ -368,27 +369,21 @@ function OrcamentosPostosPage() {
   return (
     <AppShell mobileTitle="Orçamento Postos" searchPlaceholder="Buscar...">
       <main className="flex-1 p-margin-mobile md:p-margin-desktop">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-10">
-        <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-4 sm:p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-                Grupo Âncora · Postos de Serviço
-              </p>
-              <h2 className="mt-1 text-headline-lg tracking-tight text-primary">Orçamento rápido de posto</h2>
-              <p className="mt-1 text-sm text-on-surface-variant">
-                Base: planilhas HBA II (Lucro Real) e Jaboti 2026 (Simples)
-              </p>
-            </div>
-            {toast ? (
-              <span className="rounded-md bg-surface-container-high px-3 py-1.5 text-sm text-primary">{toast}</span>
-            ) : null}
-          </div>
-        </div>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-md pb-xl">
+        <PageTitle
+          title="Orçamento de posto"
+          subtitle="Base: planilhas HBA II (Lucro Real) e Jaboti 2026 (Simples)"
+        >
+          {toast ? (
+            <span className="rounded-lg bg-secondary-container px-sm py-xs text-label-md text-on-secondary-container">
+              {toast}
+            </span>
+          ) : null}
+        </PageTitle>
 
-        <div className="grid gap-6 md:grid-cols-[1.1fr_0.9fr]">
-          <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-4 sm:p-5">
-            <div className="space-y-4">
+        <div className="grid gap-md md:grid-cols-[1.1fr_0.9fr]">
+          <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+            <div className="space-y-md">
               <Field label="Função">
                 <SegButtons
                   value={funcao}
@@ -600,7 +595,7 @@ function OrcamentosPostosPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-4 sm:p-5">
+          <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
             <div
               className="rounded-lg p-4"
               style={{ background: "#1d1813", color: "#fff" }}
@@ -650,7 +645,7 @@ function OrcamentosPostosPage() {
               <div className="relative">
                 <button
                   type="button"
-                  className="inline-flex h-10 items-center gap-1.5 rounded-md bg-primary px-3 text-sm font-medium text-on-primary"
+                  className="inline-flex h-10 items-center gap-1.5 rounded-md bg-secondary-container px-3 text-sm font-medium text-on-secondary-container"
                   onClick={() => {
                     setMenuImp((v) => !v);
                     setMenuExcel(false);
@@ -921,7 +916,7 @@ function OrcamentosPostosPage() {
             </button>
             <button
               type="button"
-              className="inline-flex h-10 items-center rounded-md bg-primary px-3 text-sm font-medium text-on-primary"
+              className="inline-flex h-10 items-center rounded-md bg-secondary-container px-3 text-sm font-medium text-on-secondary-container"
               onClick={() => void downloadCurrentPdf()}
             >
               Baixar PDF

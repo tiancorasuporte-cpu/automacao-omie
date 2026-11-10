@@ -1,8 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
+﻿import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 
 import { AppShell } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
+import { PageTitle } from "@/components/PageChrome";
 import { TablePager } from "@/components/TablePager";
 import { listNotificationLogsFn } from "@/lib/omie";
 import { requireModule } from "@/lib/require-auth";
@@ -59,26 +60,24 @@ function NotificacoesPage() {
     <AppShell mobileTitle="Notificações">
       <main className="flex-1 p-margin-mobile md:p-margin-desktop">
         <div className="mx-auto max-w-6xl space-y-lg">
-          <div>
-            <h2 className="text-headline-lg tracking-tight text-primary">Notificações enviadas</h2>
-            <p className="mt-base text-body-lg text-on-surface-variant">
-              Histórico de alertas WhatsApp enviados (inclui envios em modo teste).
-            </p>
-          </div>
+          <PageTitle
+            title="Notificações"
+            subtitle="Histórico de alertas WhatsApp enviados (inclui envios em modo teste)."
+          />
 
           <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto p-md">
               <table className="min-w-full text-left text-body-md">
-                <thead className="border-b border-outline-variant bg-surface-container-low">
+                <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                   <tr>
-                    <th className="px-md py-sm text-label-md text-on-surface-variant">Enviado em</th>
-                    <th className="px-md py-sm text-label-md text-on-surface-variant">Cliente</th>
-                    <th className="px-md py-sm text-label-md text-on-surface-variant">Empresa</th>
-                    <th className="px-md py-sm text-label-md text-on-surface-variant">Alerta</th>
-                    <th className="px-md py-sm text-label-md text-on-surface-variant">Tipo</th>
-                    <th className="px-md py-sm text-label-md text-on-surface-variant">Vencimento</th>
-                    <th className="px-md py-sm text-label-md text-on-surface-variant">Telefone</th>
-                    <th className="px-md py-sm text-label-md text-on-surface-variant">Status</th>
+                    <th className="px-sm py-xs">Enviado em</th>
+                    <th className="px-sm py-xs">Cliente</th>
+                    <th className="px-sm py-xs">Empresa</th>
+                    <th className="px-sm py-xs">Alerta</th>
+                    <th className="px-sm py-xs">Tipo</th>
+                    <th className="px-sm py-xs">Vencimento</th>
+                    <th className="px-sm py-xs">Telefone</th>
+                    <th className="px-sm py-xs">Status</th>
                   </tr>
                 </thead>
                 <tbody>

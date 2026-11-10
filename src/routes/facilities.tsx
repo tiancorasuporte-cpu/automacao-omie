@@ -1,8 +1,9 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+﻿import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { z } from "zod";
 
 import { AppShell } from "@/components/AppShell";
+import { PageTitle } from "@/components/PageChrome";
 import { Icon } from "@/components/Icon";
 import { TablePager, paginateList } from "@/components/TablePager";
 import {
@@ -1166,45 +1167,35 @@ function FacilitiesPage() {
     <AppShell mobileTitle="Facilities">
       <main className="relative flex-1 p-margin-mobile pb-24 md:p-margin-desktop md:pb-margin-desktop">
         <div className="mx-auto max-w-6xl space-y-lg">
-          <div className="flex flex-col gap-md lg:flex-row lg:items-end lg:justify-between">
-            <div className="min-w-0 flex-1">
-              <p className="text-label-md font-semibold uppercase tracking-wide text-secondary">
-                Operação de postos
-              </p>
-              <h2 className="mt-xs text-headline-md tracking-tight text-primary sm:text-headline-lg">
-                Facilities
-              </h2>
-              <p className="mt-xs text-body-md text-on-surface-variant sm:hidden">
-                Substituições, permutas e horas a pagar por posto.
-              </p>
-              <p className="mt-base hidden max-w-[42rem] text-body-lg text-on-surface-variant sm:block">
-                Lançamento de substituições por falta e atestado, trocas por posto e horas fora da
-                escala para pagamento — vigilantes, porteiros (12x36) e recepcionistas.
-              </p>
-            </div>
-            <div className="flex w-full items-center justify-between gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-sm sm:w-auto sm:justify-center">
+          <PageTitle
+            title="Facilities"
+            subtitle="Substituições, permutas e horas a pagar por posto."
+          >
+            <div className="flex items-center justify-between gap-sm rounded-lg border border-white/25 bg-white/5 p-sm">
               <button
                 type="button"
-                className="rounded-lg p-sm text-on-surface-variant hover:bg-surface-container-high"
+                className="rounded-lg p-sm text-on-primary hover:bg-white/10"
                 onClick={() => setMonth(shiftMonth(search.month, -1))}
                 aria-label="Mês anterior"
               >
                 <Icon name="chevron_left" className="text-[22px]" />
               </button>
               <div className="min-w-[9.5rem] text-center">
-                <p className="text-label-md text-on-surface-variant">Competência</p>
-                <p className="text-title-md font-semibold text-primary">{monthLabel(search.month)}</p>
+                <p className="text-label-md text-white/70">Competência</p>
+                <p className="text-title-md font-semibold text-on-primary">
+                  {monthLabel(search.month)}
+                </p>
               </div>
               <button
                 type="button"
-                className="rounded-lg p-sm text-on-surface-variant hover:bg-surface-container-high"
+                className="rounded-lg p-sm text-on-primary hover:bg-white/10"
                 onClick={() => setMonth(shiftMonth(search.month, 1))}
                 aria-label="Próximo mês"
               >
                 <Icon name="chevron_right" className="text-[22px]" />
               </button>
             </div>
-          </div>
+          </PageTitle>
 
           <div className="sticky top-0 z-20 -mx-margin-mobile border-b border-outline-variant/70 bg-background/95 px-margin-mobile py-sm backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
             <div className="flex gap-sm overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] md:flex-wrap md:overflow-visible [&::-webkit-scrollbar]:hidden">
@@ -1326,7 +1317,7 @@ function FacilitiesPage() {
                   </div>
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-left text-body-md">
-                      <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                      <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                         <tr>
                           <th className="px-md py-sm">Posto</th>
                           <th className="px-md py-sm">Trocas</th>
@@ -1363,7 +1354,7 @@ function FacilitiesPage() {
                   </div>
                   <div className="overflow-x-auto">
                     <table className="min-w-full text-left text-body-md">
-                      <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                      <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                         <tr>
                           <th className="px-md py-sm">Colaborador</th>
                           <th className="px-md py-sm">Empresa</th>
@@ -1563,7 +1554,7 @@ function FacilitiesPage() {
 
                 <div className="hidden overflow-x-auto md:block">
                   <table className="min-w-full text-left text-body-md">
-                    <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                    <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                       <tr>
                         <th className="px-md py-sm">Data</th>
                         <th className="px-md py-sm">Posto</th>
@@ -2238,7 +2229,7 @@ function FacilitiesPage() {
                   </div>
                   <div className="hidden overflow-x-auto md:block">
                   <table className="min-w-full text-left text-body-md">
-                    <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                    <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                       <tr>
                         <th className="px-md py-sm">Posto</th>
                         <th className="px-md py-sm">Cidade</th>
@@ -2402,7 +2393,7 @@ function FacilitiesPage() {
                   </div>
                   <div className="hidden overflow-x-auto md:block">
                   <table className="min-w-full text-left text-body-md">
-                    <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                    <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                       <tr>
                         <th className="px-md py-sm">Nome</th>
                         <th className="px-md py-sm">Empresa</th>
@@ -2570,7 +2561,7 @@ function FacilitiesPage() {
                     <button
                       type="button"
                       onClick={() => void copyPayment()}
-                      className="inline-flex w-full items-center justify-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary sm:w-auto"
+                      className="inline-flex w-full items-center justify-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container sm:w-auto"
                     >
                       <Icon name="content_copy" className="text-[18px]" />
                       {copied ? "Copiado!" : "Copiar resumo"}
@@ -2619,7 +2610,7 @@ function FacilitiesPage() {
                 </div>
                 <div className="hidden overflow-x-auto md:block">
                   <table className="min-w-full text-left text-body-md">
-                    <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                    <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                       <tr>
                         <th className="px-md py-sm">#</th>
                         <th className="px-md py-sm">Colaborador</th>
@@ -2694,7 +2685,7 @@ function FacilitiesPage() {
                 </div>
                 <div className="hidden overflow-x-auto md:block">
                   <table className="min-w-full text-left text-body-md">
-                    <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                    <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                       <tr>
                         <th className="px-md py-sm">Posto</th>
                         <th className="px-md py-sm">Trocas</th>
@@ -2799,7 +2790,7 @@ function FacilitiesPage() {
                 </div>
                 <div className="hidden overflow-x-auto md:block">
                   <table className="min-w-full text-left text-body-md">
-                    <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                    <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                       <tr>
                         <th className="px-md py-sm">Data</th>
                         <th className="px-md py-sm">Posto</th>

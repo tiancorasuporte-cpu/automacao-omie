@@ -1,8 +1,9 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+﻿import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
+import { PageTitle } from "@/components/PageChrome";
 import {
   Dialog,
   DialogContent,
@@ -310,27 +311,20 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
 
   return (
       <div className="space-y-lg p-margin-mobile md:p-margin-desktop">
-        <div className="flex flex-wrap items-end justify-between gap-md">
-          <div className="min-w-0 w-full flex-1 sm:min-w-[16rem]">
-            <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-              Comercial
-            </p>
-            <h1 className="text-headline-sm text-primary">Tabela de preços</h1>
-            <p className="text-body-md text-on-surface-variant">
-              Catálogo de serviços com custo, venda e descrição. Controle o que aparece no
-              Orçamentos.
-            </p>
-          </div>
-          <label className="inline-flex shrink-0 items-center gap-2 pb-1 text-sm text-on-surface">
+        <PageTitle
+          title="Tabela de preços"
+          subtitle="Catálogo de serviços com custo, venda e descrição."
+        >
+          <label className="inline-flex items-center gap-2 text-label-md text-on-primary">
             <input
               type="checkbox"
               checked={showInactive}
               onChange={(e) => setShowInactive(e.target.checked)}
-              className="size-4 accent-primary"
+              className="size-4 accent-[var(--color-secondary)]"
             />
             Mostrar inativos
           </label>
-        </div>
+        </PageTitle>
 
         <div className="w-full max-w-xl">
           <div className="relative">
@@ -433,7 +427,7 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
               <button
                 type="submit"
                 disabled={saving}
-                className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50"
+                className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
               >
                 <Icon name="add" className="text-[18px]" />
                 Cadastrar
@@ -450,15 +444,15 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
         <section className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-body-md">
-              <thead className="bg-surface-container-low text-xs uppercase tracking-wide text-on-surface-variant">
+              <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                 <tr>
-                  <th className="px-md py-sm font-semibold">Serviço</th>
-                  <th className="px-md py-sm text-right font-semibold">Custo</th>
-                  <th className="px-md py-sm text-right font-semibold">Venda</th>
-                  <th className="px-md py-sm text-right font-semibold">Margem</th>
-                  <th className="px-md py-sm font-semibold">Orçamento</th>
+                  <th className="px-sm py-xs">Serviço</th>
+                  <th className="px-sm py-xs text-right">Custo</th>
+                  <th className="px-sm py-xs text-right">Venda</th>
+                  <th className="px-sm py-xs text-right">Margem</th>
+                  <th className="px-sm py-xs">Orçamento</th>
                   {canManage ? (
-                    <th className="px-md py-sm text-right font-semibold">Ações</th>
+                    <th className="px-sm py-xs text-right">Ações</th>
                   ) : null}
                 </tr>
               </thead>
@@ -592,7 +586,7 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
                                     type="button"
                                     disabled={saving}
                                     onClick={() => void handleSaveEdit(row.id)}
-                                    className="inline-flex items-center rounded-lg bg-primary px-sm py-xs text-label-md text-on-primary disabled:opacity-50"
+                                    className="inline-flex items-center rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
                                   >
                                     Salvar
                                   </button>

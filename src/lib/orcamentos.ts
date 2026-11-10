@@ -492,6 +492,67 @@ export const sendOrcamentoToOmieFn = createServerFn({ method: "POST" })
     }
   });
 
+/** Cria OS tipo pedido no Kanban da Assistência a partir do orçamento. */
+export const enviarPedidoAssistenciaFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ quoteId: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    const { user } = await requireModule("orcamentos");
+    const { ensureSchema } = await import("@/db/schema");
+    await ensureSchema();
+    const { getQuoteById, getQuoteItems } = await import("@/db/quotes");
+    const { createOs, getOsByQuoteId } = await import("@/db/assistencia");
+
+    const quote = await getQuoteById(data.quoteId);
+    if (!quote) {
+      return { ok: false as const, error: "Orçamento não encontrado." };
+    }
+    const existing = await getOsByQuoteId(quote.id);
+    if (existing) {
+      return {
+        ok: true as const,
+        alreadyExists: true as const,
+        osId: existing.id,
+        osNum: existing.num,
+        quoteId: quote.id,
+        numeroInterno: quote.numeroInterno,
+      };
+    }
+
+    const items = await getQuoteItems(quote.id);
+    if (!items.length) {
+      return { ok: false as const, error: "Orçamento sem itens para montar o pedido." };
+    }
+
+    const os = await createOs({
+      tipo: "pedido",
+      clientName: quote.clientName?.trim() || `Cliente ${quote.clientCode}`,
+      clientAddress: quote.clientAddress,
+      omieAppId: quote.omieAppId,
+      clientCode: quote.clientCode,
+      servico: quote.observacao?.trim() || `Pedido do orçamento ${quote.numeroInterno}`,
+      quoteId: quote.id,
+      quoteNumero: quote.numeroInterno,
+      items: items.map((it) => ({
+        qtd: it.quantidade,
+        nome: it.descricao.trim() || `Produto ${it.codigoProduto}`,
+      })),
+      createdBy: user.id,
+      createdByName: user.name,
+    });
+    if (!os) {
+      return { ok: false as const, error: "Falha ao criar OS na Assistência." };
+    }
+    return {
+      ok: true as const,
+      alreadyExists: false as const,
+      osId: os.id,
+      osNum: os.num,
+      quoteId: quote.id,
+      numeroInterno: quote.numeroInterno,
+    };
+  });
+
 export const deleteOrcamentoFn = createServerFn({ method: "POST" })
   .validator((input) =>
     z

@@ -1,8 +1,9 @@
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+﻿import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
+import { PageTitle } from "@/components/PageChrome";
 import { APP_NAME } from "@/lib/brand";
 import { requireModule } from "@/lib/require-auth";
 import { matchesQuery } from "@/lib/text-search";
@@ -293,38 +294,31 @@ function TerceirosContent({
 
   return (
     <div className="space-y-lg p-margin-mobile md:p-margin-desktop">
-      <div className="flex flex-wrap items-end justify-between gap-md">
-        <div className="min-w-0 w-full flex-1 sm:min-w-[16rem]">
-          <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
-            Operações
-          </p>
-          <h1 className="text-headline-sm text-primary">Terceiros</h1>
-          <p className="text-body-md text-on-surface-variant">
-            Cadastro de empresas terceiras, contas monitoradas e serviços mensais para o
-            faturamento cobrar com clareza.
-          </p>
-        </div>
+      <PageTitle
+        title="Terceiros"
+        subtitle="Empresas terceiras, contas monitoradas e serviços mensais."
+      >
         <div className="flex flex-wrap items-center gap-sm">
-          <label className="inline-flex items-center gap-2 text-sm text-on-surface">
+          <label className="inline-flex items-center gap-2 text-label-md text-on-primary">
             <input
               type="checkbox"
               checked={showInactive}
               onChange={(e) => setShowInactive(e.target.checked)}
-              className="size-4 accent-primary"
+              className="size-4 accent-[var(--color-secondary)]"
             />
             Mostrar inativos
           </label>
           {canChecar || pendingCount > 0 ? (
-            <label className="inline-flex items-center gap-2 text-sm text-on-surface">
+            <label className="inline-flex items-center gap-2 text-label-md text-on-primary">
               <input
                 type="checkbox"
                 checked={onlyPending}
                 onChange={(e) => setOnlyPending(e.target.checked)}
-                className="size-4 accent-primary"
+                className="size-4 accent-[var(--color-secondary)]"
               />
               Só alterações pendentes
               {pendingCount > 0 ? (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-900">
+                <span className="rounded-full bg-secondary-container px-2 py-0.5 text-[11px] font-medium text-on-secondary-container">
                   {pendingCount}
                 </span>
               ) : null}
@@ -334,30 +328,30 @@ function TerceirosContent({
             type="button"
             disabled={exporting || filtered.length === 0}
             onClick={handleExportExcel}
-            className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md disabled:opacity-50"
+            className="inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10 disabled:opacity-50"
           >
-            <Icon name="table_view" className="text-[18px]" />
+            <Icon name="table_view" className="text-[16px]" />
             Excel
           </button>
           <button
             type="button"
             disabled={exporting || filtered.length === 0}
             onClick={() => void handleExportPdf()}
-            className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md disabled:opacity-50"
+            className="inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10 disabled:opacity-50"
           >
-            <Icon name="picture_as_pdf" className="text-[18px]" />
+            <Icon name="picture_as_pdf" className="text-[16px]" />
             {exporting ? "Gerando..." : "PDF"}
           </button>
           <button
             type="button"
             onClick={() => setFormOpen((v) => !v)}
-            className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary"
+            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container"
           >
-            <Icon name="add" className="text-[18px]" />
+            <Icon name="add" className="text-[16px]" />
             Novo terceiro
           </button>
         </div>
-      </div>
+      </PageTitle>
 
       <div className="w-full max-w-xl">
         <div className="relative">
@@ -562,7 +556,7 @@ function TerceirosContent({
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50"
+              className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
             >
               <Icon name="add" className="text-[18px]" />
               Cadastrar
@@ -584,13 +578,13 @@ function TerceirosContent({
       <section className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-body-md">
-            <thead className="bg-surface-container-low text-xs uppercase tracking-wide text-on-surface-variant">
+            <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
               <tr>
-                <th className="px-md py-sm font-semibold">Empresa</th>
-                <th className="px-md py-sm text-right font-semibold">Contas</th>
-                <th className="px-md py-sm text-right font-semibold">Total mensal</th>
-                <th className="px-md py-sm font-semibold">Status</th>
-                <th className="px-md py-sm text-right font-semibold">Ações</th>
+                <th className="px-sm py-xs">Empresa</th>
+                <th className="px-sm py-xs text-right">Contas</th>
+                <th className="px-sm py-xs text-right">Total mensal</th>
+                <th className="px-sm py-xs">Status</th>
+                <th className="px-sm py-xs text-right">Ações</th>
               </tr>
             </thead>
             <tbody>

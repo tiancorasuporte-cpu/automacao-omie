@@ -16,6 +16,8 @@ export type AppUser = {
   active: boolean;
   /** Módulos liberados. Admin/superadmin sempre têm todos. */
   modules: AppModuleId[];
+  isTecnico: boolean;
+  defaultVehicleId: number | null;
 };
 
 export type AppUserRow = {
@@ -26,6 +28,8 @@ export type AppUserRow = {
   role: string;
   active: boolean;
   modules?: string | null;
+  is_tecnico?: boolean | null;
+  default_vehicle_id?: number | null;
 };
 
 export type DueItemType = "boleto" | "nfe" | "nfse";
@@ -123,6 +127,14 @@ export async function ensureSchema() {
 
   if (!(await columnExists("users", "modules"))) {
     await sql.unsafe("alter table users add column modules text");
+  }
+  if (!(await columnExists("users", "is_tecnico"))) {
+    await sql.unsafe(
+      "alter table users add column is_tecnico boolean not null default false",
+    );
+  }
+  if (!(await columnExists("users", "default_vehicle_id"))) {
+    await sql.unsafe("alter table users add column default_vehicle_id integer");
   }
 
   if (!(await tableExists("due_items"))) {
@@ -775,6 +787,26 @@ export async function ensureSchema() {
     `;
   }
 
+  // FK tardia: users.default_vehicle_id → fleet_vehicles
+  if (
+    (await columnExists("users", "default_vehicle_id")) &&
+    (await tableExists("fleet_vehicles"))
+  ) {
+    const fk = await sql<{ exists: boolean }[]>`
+      select exists (
+        select 1 from pg_constraint
+        where conname = 'users_default_vehicle_id_fkey'
+      ) as exists
+    `;
+    if (!fk[0]?.exists) {
+      await sql.unsafe(`
+        alter table users
+          add constraint users_default_vehicle_id_fkey
+          foreign key (default_vehicle_id) references fleet_vehicles(id) on delete set null
+      `);
+    }
+  }
+
   if (!(await tableExists("fleet_drivers"))) {
     await sql`
       create table fleet_drivers (
@@ -1174,6 +1206,321 @@ export async function ensureSchema() {
   }
   if (!(await columnExists("terceiros", "reviewed_by_name"))) {
     await sql.unsafe("alter table terceiros add column reviewed_by_name varchar(120)");
+  }
+
+  if (!(await tableExists("assist_teams"))) {
+    await sql`
+      create table assist_teams (
+        id serial primary key,
+        name varchar(120) not null,
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("assist_team_members"))) {
+    await sql`
+      create table assist_team_members (
+        id serial primary key,
+        team_id integer not null references assist_teams(id) on delete cascade,
+        user_id integer references users(id) on delete set null,
+        name varchar(120) not null,
+        active boolean not null default true,
+        created_at timestamptz not null default now(),
+        unique (team_id, name)
+      )
+    `;
+  }
+  if (!(await indexExists("assist_team_members_team_idx"))) {
+    await sql.unsafe("create index assist_team_members_team_idx on assist_team_members (team_id)");
+  }
+
+  if (!(await tableExists("assist_os"))) {
+    await sql`
+      create table assist_os (
+        id serial primary key,
+        num varchar(32) not null unique,
+        tipo varchar(16) not null,
+        subtipo varchar(80),
+        stage integer not null default 0,
+        omie_app_id varchar(64),
+        client_code bigint,
+        client_name varchar(200) not null,
+        client_city varchar(120),
+        client_address text,
+        servico text not null default '',
+        quote_id integer references quotes(id) on delete set null,
+        quote_numero varchar(40),
+        ticket_id integer,
+        ticket_com_id integer,
+        team_id integer references assist_teams(id) on delete set null,
+        tecnico_nome varchar(120),
+        ag_date date,
+        periodo varchar(32),
+        hora varchar(8),
+        prevista boolean not null default false,
+        ci_at timestamptz,
+        co_at timestamptz,
+        resolucao text,
+        fin_date date,
+        envio_json text,
+        pending_json text,
+        conf_json text,
+        conf_by_json text,
+        lev_json text,
+        rel_json text,
+        from_compras boolean not null default false,
+        from_tecnico boolean not null default false,
+        created_by integer references users(id) on delete set null,
+        created_by_name varchar(120),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("assist_os_stage_idx"))) {
+    await sql.unsafe("create index assist_os_stage_idx on assist_os (stage)");
+  }
+  if (!(await indexExists("assist_os_ag_date_idx"))) {
+    await sql.unsafe("create index assist_os_ag_date_idx on assist_os (ag_date)");
+  }
+
+  if (!(await tableExists("assist_os_items"))) {
+    await sql`
+      create table assist_os_items (
+        id serial primary key,
+        os_id integer not null references assist_os(id) on delete cascade,
+        qtd numeric(15, 4) not null default 1,
+        nome varchar(240) not null,
+        status varchar(32) not null default 'pendente',
+        previsao date,
+        origem varchar(32),
+        equipe varchar(120),
+        usado numeric(15, 4),
+        devolvido numeric(15, 4),
+        product_id integer references omie_products(id) on delete set null,
+        sobra_destino varchar(16),
+        baixa_status varchar(16),
+        baixa_qtd numeric(15, 4),
+        sort_order integer not null default 0,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+  if ((await tableExists("assist_os_items")) && !(await columnExists("assist_os_items", "product_id"))) {
+    await sql.unsafe(
+      "alter table assist_os_items add column product_id integer references omie_products(id) on delete set null",
+    );
+  }
+  if ((await tableExists("assist_os_items")) && !(await columnExists("assist_os_items", "sobra_destino"))) {
+    await sql.unsafe("alter table assist_os_items add column sobra_destino varchar(16)");
+  }
+  if ((await tableExists("assist_os_items")) && !(await columnExists("assist_os_items", "baixa_status"))) {
+    await sql.unsafe("alter table assist_os_items add column baixa_status varchar(16)");
+  }
+  if ((await tableExists("assist_os_items")) && !(await columnExists("assist_os_items", "baixa_qtd"))) {
+    await sql.unsafe("alter table assist_os_items add column baixa_qtd numeric(15, 4)");
+  }
+  if (!(await indexExists("assist_os_items_os_idx"))) {
+    await sql.unsafe("create index assist_os_items_os_idx on assist_os_items (os_id)");
+  }
+
+  if (!(await tableExists("team_stock"))) {
+    await sql`
+      create table team_stock (
+        team_id integer not null references assist_teams(id) on delete cascade,
+        product_id integer not null references omie_products(id) on delete cascade,
+        nome varchar(240) not null,
+        quantidade numeric(15, 4) not null default 0 check (quantidade >= 0),
+        updated_at timestamptz not null default now(),
+        primary key (team_id, product_id)
+      )
+    `;
+  }
+  if (!(await indexExists("team_stock_product_idx"))) {
+    await sql.unsafe("create index team_stock_product_idx on team_stock (product_id)");
+  }
+
+  if (!(await tableExists("mat_saidas"))) {
+    await sql`
+      create table mat_saidas (
+        id serial primary key,
+        num varchar(32) not null unique,
+        destino varchar(16) not null,
+        team_id integer not null references assist_teams(id) on delete restrict,
+        tecnico_nome varchar(120),
+        os_id integer references assist_os(id) on delete set null,
+        status varchar(16) not null default 'emitida',
+        created_by integer references users(id) on delete set null,
+        created_by_name varchar(120),
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("mat_saidas_team_idx"))) {
+    await sql.unsafe("create index mat_saidas_team_idx on mat_saidas (team_id, created_at desc)");
+  }
+  if (!(await indexExists("mat_saidas_os_idx"))) {
+    await sql.unsafe("create index mat_saidas_os_idx on mat_saidas (os_id)");
+  }
+
+  if (!(await tableExists("mat_saida_itens"))) {
+    await sql`
+      create table mat_saida_itens (
+        id serial primary key,
+        saida_id integer not null references mat_saidas(id) on delete cascade,
+        product_id integer not null references omie_products(id) on delete restrict,
+        nome varchar(240) not null,
+        qtd numeric(15, 4) not null check (qtd > 0),
+        os_item_id integer references assist_os_items(id) on delete set null
+      )
+    `;
+  }
+  if (!(await indexExists("mat_saida_itens_saida_idx"))) {
+    await sql.unsafe("create index mat_saida_itens_saida_idx on mat_saida_itens (saida_id)");
+  }
+
+  if (!(await tableExists("team_stock_moves"))) {
+    await sql`
+      create table team_stock_moves (
+        id serial primary key,
+        team_id integer not null references assist_teams(id) on delete cascade,
+        product_id integer not null references omie_products(id) on delete cascade,
+        tipo varchar(32) not null,
+        quantidade numeric(15, 4) not null check (quantidade > 0),
+        saldo_apos numeric(15, 4) not null check (saldo_apos >= 0),
+        tecnico_nome varchar(120),
+        os_id integer references assist_os(id) on delete set null,
+        saida_id integer references mat_saidas(id) on delete set null,
+        motivo text,
+        user_id integer references users(id) on delete set null,
+        user_name varchar(120),
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("team_stock_moves_team_idx"))) {
+    await sql.unsafe(
+      "create index team_stock_moves_team_idx on team_stock_moves (team_id, created_at desc)",
+    );
+  }
+
+  if (!(await tableExists("assist_os_events"))) {
+    await sql`
+      create table assist_os_events (
+        id serial primary key,
+        os_id integer not null references assist_os(id) on delete cascade,
+        quando timestamptz not null default now(),
+        quem varchar(120) not null,
+        user_id integer references users(id) on delete set null,
+        acao text not null
+      )
+    `;
+  }
+  if (!(await indexExists("assist_os_events_os_idx"))) {
+    await sql.unsafe("create index assist_os_events_os_idx on assist_os_events (os_id, id)");
+  }
+
+  if (!(await tableExists("tickets"))) {
+    await sql`
+      create table tickets (
+        id serial primary key,
+        num varchar(32) not null unique,
+        cat varchar(32) not null,
+        codigo_ref varchar(80),
+        client_name varchar(200) not null,
+        omie_app_id varchar(64),
+        client_code bigint,
+        contato varchar(160),
+        descricao text not null,
+        prioridade varchar(16) not null default 'Normal',
+        status varchar(32) not null default 'aberto',
+        opened_by integer references users(id) on delete set null,
+        opened_by_name varchar(120) not null,
+        resp_user_id integer references users(id) on delete set null,
+        resp_name varchar(120),
+        os_id integer references assist_os(id) on delete set null,
+        os_tipo varchar(80),
+        lev_json text,
+        ag_date date,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("tickets_status_idx"))) {
+    await sql.unsafe("create index tickets_status_idx on tickets (status)");
+  }
+  if (!(await indexExists("tickets_created_idx"))) {
+    await sql.unsafe("create index tickets_created_idx on tickets (created_at desc)");
+  }
+  if (!(await columnExists("tickets", "ag_date"))) {
+    await sql.unsafe("alter table tickets add column ag_date date");
+  }
+  if (!(await indexExists("tickets_ag_date_idx"))) {
+    await sql.unsafe("create index tickets_ag_date_idx on tickets (ag_date)");
+  }
+
+  if (!(await tableExists("ticket_sectors"))) {
+    await sql`
+      create table ticket_sectors (
+        ticket_id integer not null references tickets(id) on delete cascade,
+        setor varchar(32) not null,
+        primary key (ticket_id, setor)
+      )
+    `;
+  }
+
+  if (!(await tableExists("ticket_events"))) {
+    await sql`
+      create table ticket_events (
+        id serial primary key,
+        ticket_id integer not null references tickets(id) on delete cascade,
+        quando timestamptz not null default now(),
+        quem varchar(120) not null,
+        user_id integer references users(id) on delete set null,
+        tipo varchar(32) not null,
+        titulo varchar(200) not null,
+        texto text not null default '',
+        anexos_json text
+      )
+    `;
+  }
+  if ((await tableExists("ticket_events")) && !(await columnExists("ticket_events", "anexos_json"))) {
+    await sql.unsafe("alter table ticket_events add column anexos_json text");
+  }
+  if (!(await indexExists("ticket_events_ticket_idx"))) {
+    await sql.unsafe("create index ticket_events_ticket_idx on ticket_events (ticket_id, id)");
+  }
+
+  // FK tardia: tickets existe depois de assist_os.ticket_id
+  try {
+    await sql.unsafe(`
+      alter table assist_os
+        add constraint assist_os_ticket_id_fkey
+        foreign key (ticket_id) references tickets(id) on delete set null
+    `);
+  } catch {
+    // already exists
+  }
+  try {
+    await sql.unsafe(`
+      alter table assist_os
+        add constraint assist_os_ticket_com_id_fkey
+        foreign key (ticket_com_id) references tickets(id) on delete set null
+    `);
+  } catch {
+    // already exists
+  }
+
+  const teamCount = await sql<{ c: number }[]>`
+    select count(*)::int as c from assist_teams
+  `;
+  if (Number(teamCount[0]?.c ?? 0) === 0) {
+    await sql`insert into assist_teams (name) values ('Equipe 01'), ('Equipe 02'), ('Equipe 03')`;
   }
 
   const superUsername = process.env["APP_SUPERADMIN_USERNAME"] ?? "superadmin";

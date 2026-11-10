@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+﻿import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppShell } from "@/components/AppShell";
@@ -148,7 +148,7 @@ function KanbanColumn({
   return (
     <section
       className={cn(
-        "flex min-h-[26rem] min-w-[17rem] flex-1 flex-col rounded-2xl border bg-surface-container-low/60",
+        "flex min-h-[26rem] min-w-[17rem] flex-1 flex-col rounded-xl border bg-surface-container-low/60",
         accent,
       )}
     >
@@ -796,7 +796,7 @@ function TerceiroDetailContent({
             Voltar à lista
           </Link>
           <div className="mt-2 flex flex-wrap items-center gap-sm">
-            <h1 className="text-headline-sm text-primary">{detail.nome}</h1>
+            <h1 className="text-headline-lg tracking-tight text-primary">{detail.nome}</h1>
             <span
               className={cn(
                 "rounded-full px-2 py-0.5 text-xs font-medium",
@@ -824,7 +824,7 @@ function TerceiroDetailContent({
           <button
             type="button"
             onClick={() => openAdd("servico")}
-            className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary"
+            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
           >
             <Icon name="add" className="text-[18px]" />
             Adicionar
@@ -866,7 +866,7 @@ function TerceiroDetailContent({
         </div>
       </div>
 
-      <section className="grid gap-sm rounded-2xl border border-primary/20 bg-primary/5 p-md sm:grid-cols-2 lg:grid-cols-5">
+      <section className="grid gap-sm rounded-xl border border-primary/20 bg-primary/5 p-md sm:grid-cols-2 lg:grid-cols-5">
         <div className="rounded-xl bg-surface-container-lowest px-md py-sm">
           <p className="text-xs uppercase text-on-surface-variant">Contas totais</p>
           <p className="mt-1 text-lg font-bold tabular-nums">{totais.qtdContasTotal}</p>
@@ -984,7 +984,7 @@ function TerceiroDetailContent({
       {empresaOpen ? (
         <form
           onSubmit={(e) => void handleSaveEmpresa(e)}
-          className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-md"
+          className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md"
         >
           <h2 className="text-title-md font-semibold">Dados da empresa</h2>
           <div className="mt-md flex flex-wrap gap-sm">
@@ -1132,7 +1132,7 @@ function TerceiroDetailContent({
             <button
               type="submit"
               disabled={saving}
-              className="rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50"
+              className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
             >
               Salvar
             </button>
@@ -1196,7 +1196,7 @@ function TerceiroDetailContent({
             <button
               type="submit"
               disabled={saving}
-              className="w-full rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50"
+              className="w-full rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
             >
               Salvar
             </button>
@@ -1248,7 +1248,7 @@ function TerceiroDetailContent({
                           type="button"
                           disabled={saving}
                           onClick={() => void handleSaveConta(conta.id)}
-                          className="rounded-lg bg-primary px-sm py-xs text-xs text-on-primary"
+                          className="rounded-lg bg-secondary-container px-sm py-xs text-xs font-semibold text-on-secondary-container"
                         >
                           Salvar
                         </button>
@@ -1397,7 +1397,7 @@ function TerceiroDetailContent({
                         type="button"
                         disabled={saving}
                         onClick={() => void handleSaveProp(prop.id)}
-                        className="rounded-lg bg-primary px-sm py-xs text-xs text-on-primary"
+                        className="rounded-lg bg-secondary-container px-sm py-xs text-xs font-semibold text-on-secondary-container"
                       >
                         Salvar
                       </button>
@@ -1435,7 +1435,7 @@ function TerceiroDetailContent({
                         type="button"
                         disabled={saving}
                         onClick={() => void handleLancarProp(prop)}
-                        className="rounded-lg bg-primary px-sm py-xs text-xs text-on-primary"
+                        className="rounded-lg bg-secondary-container px-sm py-xs text-xs font-semibold text-on-secondary-container"
                       >
                         Lançar p/ próxima
                       </button>
@@ -1550,7 +1550,7 @@ function TerceiroDetailContent({
                           type="button"
                           disabled={saving}
                           onClick={() => void handleSaveServico(svc.id)}
-                          className="rounded-lg bg-primary px-sm py-xs text-xs text-on-primary"
+                          className="rounded-lg bg-secondary-container px-sm py-xs text-xs font-semibold text-on-secondary-container"
                         >
                           Salvar
                         </button>
@@ -1877,7 +1877,7 @@ function TerceiroDetailContent({
               <button
                 type="submit"
                 disabled={saving}
-                className="rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50"
+                className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
               >
                 {saving ? "Salvando..." : "Cadastrar"}
               </button>

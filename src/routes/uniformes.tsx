@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { z } from "zod";
 
 import { AppShell } from "@/components/AppShell";
+import { PageTitle } from "@/components/PageChrome";
 import { Icon } from "@/components/Icon";
 import { PhotoCapture, type CapturedPhoto } from "@/components/PhotoCapture";
 import { SignaturePad, type SignaturePadHandle } from "@/components/SignaturePad";
@@ -87,11 +88,11 @@ const TABS: Array<{ id: TabId; label: string; icon: string }> = [
 const INPUT =
   "w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md disabled:opacity-60";
 const BTN_PRIMARY =
-  "inline-flex items-center justify-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary disabled:opacity-50";
+  "inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50";
 const BTN_ACCENT =
-  "inline-flex items-center justify-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50";
+  "inline-flex items-center gap-xs rounded-lg bg-primary px-sm py-xs text-label-md font-semibold text-on-primary disabled:opacity-50";
 const BTN_OUTLINE =
-  "inline-flex items-center justify-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold text-primary hover:bg-surface-container-high disabled:opacity-50";
+  "inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50";
 const BTN_SMALL =
   "inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50";
 const CARD = "rounded-xl border border-outline-variant bg-surface-container-lowest";
@@ -417,34 +418,23 @@ function UniformesPage() {
     <AppShell mobileTitle="Uniformes">
       <main className="relative flex-1 p-margin-mobile md:p-margin-desktop">
         <div className="mx-auto max-w-6xl space-y-lg">
-          <div className="flex flex-col gap-md lg:flex-row lg:items-end lg:justify-between">
-            <div className="min-w-0">
-              <p className="text-label-md font-semibold uppercase tracking-wide text-secondary">
-                Almoxarifado
-              </p>
-              <h2 className="mt-xs text-headline-md tracking-tight text-primary sm:text-headline-lg">
-                Gestão de uniformes
-              </h2>
-              <p className="mt-xs hidden max-w-[42rem] text-body-lg text-on-surface-variant sm:block">
-                Estoque com foto das peças, entregas, trocas e devoluções com assinatura, termo de
-                responsabilidade e alerta de troca por vida útil.
-              </p>
-            </div>
-            <div className="flex gap-sm">
-              <button type="button" className={BTN_OUTLINE} onClick={() => setTab("estoque")}>
-                <Icon name="add_a_photo" className="text-[18px]" />
-                Nova peça
-              </button>
-              <button
-                type="button"
-                className={BTN_ACCENT}
-                onClick={() => startMovement({ tipo: "entrega" })}
-              >
-                <Icon name="outbox" className="text-[18px]" />
-                Nova entrega
-              </button>
-            </div>
-          </div>
+          <PageTitle
+            title="Uniformes"
+            subtitle="Estoque, entregas, trocas e devoluções com termo de responsabilidade."
+          >
+            <button
+              type="button"
+              className="inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10"
+              onClick={() => setTab("estoque")}
+            >
+              <Icon name="add_a_photo" className="text-[16px]" />
+              Nova peça
+            </button>
+            <button type="button" className={BTN_PRIMARY} onClick={() => startMovement({ tipo: "entrega" })}>
+              <Icon name="outbox" className="text-[16px]" />
+              Nova entrega
+            </button>
+          </PageTitle>
 
           <div className="sticky top-0 z-20 -mx-margin-mobile border-b border-outline-variant/70 bg-background/95 px-margin-mobile py-sm backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:backdrop-blur-none">
             <div className="flex gap-sm overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] md:flex-wrap md:overflow-visible [&::-webkit-scrollbar]:hidden">

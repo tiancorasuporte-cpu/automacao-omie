@@ -1,8 +1,9 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+﻿import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
+import { PageTitle } from "@/components/PageChrome";
 import { SuggestInput } from "@/components/SuggestInput";
 import {
   Dialog,
@@ -375,34 +376,29 @@ function ProdutosPage() {
   return (
     <AppShell mobileTitle="Produtos" searchPlaceholder="Buscar produtos ou cód. fornecedor...">
       <div className="space-y-lg">
-        <div className="flex flex-wrap items-end justify-between gap-md">
-          <div>
-            <h1 className="text-headline-sm text-primary">Produtos</h1>
-            <p className="text-body-md text-on-surface-variant">
-              CMC Omie/interno, markup e códigos de fornecedor (Route 66 e outros).
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-sm">
-            <button
-              type="button"
-              disabled={syncingSuppliers || !omieAppId}
-              onClick={() => void handleSyncSuppliers()}
-              className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md text-primary disabled:opacity-50"
-            >
-              <Icon name={syncingSuppliers ? "hourglass_empty" : "sync"} className="text-[18px]" />
-              {syncingSuppliers ? "Sincronizando..." : `Sync fornecedores (${supplierTotal})`}
-            </button>
-            <button
-              type="button"
-              disabled={syncing || !omieAppId}
-              onClick={() => void handleSync()}
-              className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50"
-            >
-              <Icon name={syncing ? "hourglass_empty" : "sync"} className="text-[18px]" />
-              {syncing ? "Sincronizando..." : `Sync produtos (${total})`}
-            </button>
-          </div>
-        </div>
+        <PageTitle
+          title="Produtos"
+          subtitle="CMC Omie/interno, markup e códigos de fornecedor (Route 66 e outros)."
+        >
+          <button
+            type="button"
+            disabled={syncingSuppliers || !omieAppId}
+            onClick={() => void handleSyncSuppliers()}
+            className="inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10 disabled:opacity-50"
+          >
+            <Icon name={syncingSuppliers ? "hourglass_empty" : "sync"} className="text-[16px]" />
+            {syncingSuppliers ? "Sincronizando..." : `Sync fornecedores (${supplierTotal})`}
+          </button>
+          <button
+            type="button"
+            disabled={syncing || !omieAppId}
+            onClick={() => void handleSync()}
+            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+          >
+            <Icon name={syncing ? "hourglass_empty" : "sync"} className="text-[16px]" />
+            {syncing ? "Sincronizando..." : `Sync produtos (${total})`}
+          </button>
+        </PageTitle>
 
         {feedback ? (
           <div
@@ -416,7 +412,7 @@ function ProdutosPage() {
           </div>
         ) : null}
 
-        <div className="inline-flex rounded-xl bg-surface-container-low p-xs">
+        <div className="flex flex-wrap gap-xs">
           {(
             [
               { id: "produtos" as const, label: "Produtos" },
@@ -428,10 +424,10 @@ function ProdutosPage() {
               type="button"
               onClick={() => setTab(entry.id)}
               className={cn(
-                "rounded-lg px-md py-sm text-label-md transition-colors",
+                "inline-flex items-center gap-xs rounded-lg px-sm py-xs text-label-md",
                 tab === entry.id
-                  ? "bg-surface font-semibold text-primary shadow-sm"
-                  : "text-on-surface-variant",
+                  ? "bg-primary font-semibold text-on-primary"
+                  : "border border-outline-variant text-primary hover:bg-surface-container-high",
               )}
             >
               {entry.label}
@@ -458,9 +454,9 @@ function ProdutosPage() {
                 Nenhum produto encontrado. Faça o sync da Omie.
               </p>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-outline-variant bg-surface-container-lowest">
+              <div className="overflow-x-auto rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
                 <table className="min-w-full text-left text-body-md">
-                  <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                  <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                     <tr>
                       <th className="px-sm py-xs">Produto</th>
                       <th className="px-sm py-xs">CMC Omie</th>
@@ -616,9 +612,9 @@ function ProdutosPage() {
                 Nenhum fornecedor sincronizado. Clique em <strong>Sync fornecedores</strong>.
               </p>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-outline-variant bg-surface-container-lowest">
+              <div className="overflow-x-auto rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
                 <table className="min-w-full text-left text-body-md">
-                  <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                  <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                     <tr>
                       <th className="px-sm py-xs">Fornecedor</th>
                       <th className="px-sm py-xs">CNPJ/CPF</th>

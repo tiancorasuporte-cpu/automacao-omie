@@ -53,9 +53,15 @@ export const getFrotaBootstrapFn = createServerFn({ method: "GET" }).handler(asy
     listFleetCatalog("payment"),
     listReminders(null),
   ]);
+  const defaultVehicleId =
+    user.defaultVehicleId && vehicles.some((v) => v.id === user.defaultVehicleId && v.active)
+      ? user.defaultVehicleId
+      : null;
+
   return {
-    user: { id: user.id, name: user.name },
+    user: { id: user.id, name: user.name, defaultVehicleId: user.defaultVehicleId },
     currentDriverId: currentDriver.id,
+    defaultVehicleId,
     vehicles,
     drivers,
     catalog: { fuels, expenses, services, payments },

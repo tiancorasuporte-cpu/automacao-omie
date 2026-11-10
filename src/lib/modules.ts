@@ -8,6 +8,9 @@ export const APP_MODULES = [
   { id: "uniformes", label: "Uniformes", path: "/uniformes" },
   { id: "estoque", label: "Estoque", path: "/estoque" },
   { id: "frota", label: "Frota", path: "/frota" },
+  { id: "assistencia", label: "Assistência", path: "/assistencia" },
+  { id: "equipes", label: "Equipes", path: "/equipes" },
+  { id: "tickets", label: "Tickets", path: "/tickets" },
   { id: "notificacoes", label: "Notificações", path: "/notificacoes" },
 ] as const;
 
@@ -28,6 +31,56 @@ export const APP_PERMISSIONS = [
     label: "Checar alterações de terceiros",
     hint:
       "Para faturamento: ver alterações pendentes em contas/serviços/particularidades e marcar como visto.",
+  },
+  {
+    id: "os_assistencia",
+    label: "OS · Assistência",
+    hint: "Criar/mover OS nas etapas da Assistência, agendar e finalizar.",
+  },
+  {
+    id: "os_estoque",
+    label: "OS · Estoque",
+    hint: "Separação de material e conferência de OS.",
+  },
+  {
+    id: "os_compras",
+    label: "OS · Compras",
+    hint: "Etapa de compras da OS (marcar comprado / previsão).",
+  },
+  {
+    id: "ticket_assist",
+    label: "Ticket · Assistência Técnica",
+    hint: "Atender tickets do setor Assistência Técnica.",
+  },
+  {
+    id: "ticket_eng",
+    label: "Ticket · Engenharia",
+    hint: "Atender tickets do setor Engenharia.",
+  },
+  {
+    id: "ticket_ti",
+    label: "Ticket · TI",
+    hint: "Atender tickets do setor TI.",
+  },
+  {
+    id: "ticket_sup",
+    label: "Ticket · Suporte Técnico",
+    hint: "Atender tickets do setor Suporte Técnico.",
+  },
+  {
+    id: "ticket_supmon",
+    label: "Ticket · Suporte Monitoramento",
+    hint: "Atender tickets do setor Suporte Técnico Monitoramento.",
+  },
+  {
+    id: "ticket_procmon",
+    label: "Ticket · Procedimentos Monitoramento",
+    hint: "Atender tickets do setor Procedimentos Monitoramento.",
+  },
+  {
+    id: "ticket_com",
+    label: "Ticket · Comercial",
+    hint: "Atender tickets do setor Comercial.",
   },
 ] as const;
 

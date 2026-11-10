@@ -1,0 +1,837 @@
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+
+import {
+  acceptConference,
+  addOsItem,
+  advanceOs,
+  checkInOs,
+  checkOutOs,
+  createOs,
+  finishVisita,
+  getOsById,
+  linkOsTicketCom,
+  listAssistTeams,
+  listMaterialPendencias,
+  listOs,
+  markExecutedManual,
+  markMaterialDivergence,
+  moveOsOnKanban,
+  receivePurchaseItem,
+  requestMaterialFromField,
+  requestReturnOs,
+  resolveOsMaterialBaixa,
+  resolveReturnOs,
+  saveAssistTeam,
+  saveAssistTeamMember,
+  saveOsLev,
+  saveOsMaterialDisposition,
+  saveOsResolucao,
+  scheduleOs,
+  searchQuotesLocal,
+  startExecOs,
+  submitConference,
+  updateOsItemStatus,
+} from "@/db/assistencia";
+import { createTicket } from "@/db/tickets";
+import { ensureSchema } from "@/db/schema";
+import {
+  OS_ITEM_STATUS,
+  OS_PERIODOS,
+  OS_STAGES,
+  OS_SUBTIPOS_MANUT,
+  OS_SUBTIPOS_MONIT,
+  OS_TIPOS,
+  type OsItemStatus,
+  type OsTipo,
+} from "@/lib/assistencia-domain";
+import { listTecnicos } from "@/db/users";
+import {
+  canAccessModule,
+  canOsWorkflow,
+  firstAccessiblePath,
+  isAdmin,
+  requireAuth,
+  requireModule,
+  type OsWorkflowRole,
+} from "@/lib/require-auth";
+import { redirect } from "@tanstack/react-router";
+
+async function auth() {
+  return requireModule("assistencia");
+}
+
+function canManageEquipes(user: Parameters<typeof canOsWorkflow>[0]) {
+  return (
+    isAdmin(user) ||
+    canAccessModule(user, "equipes") ||
+    canAccessModule(user, "assistencia") ||
+    canOsWorkflow(user, "assistencia")
+  );
+}
+
+async function authEquipes() {
+  const { user } = await requireAuth();
+  if (!canManageEquipes(user)) {
+    throw redirect({ to: firstAccessiblePath(user) });
+  }
+  return { user };
+}
+
+async function boot() {
+  await ensureSchema();
+}
+
+function roleFns(user: Parameters<typeof canOsWorkflow>[0]) {
+  const admin = isAdmin(user);
+  return {
+    isAdmin: admin,
+    canRole: (role: OsWorkflowRole) => canOsWorkflow(user, role),
+  };
+}
+
+export const getAssistenciaBootstrapFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { user } = await auth();
+  await boot();
+  const [osList, teams, materialPendencias] = await Promise.all([
+    listOs(),
+    listAssistTeams(true),
+    listMaterialPendencias(),
+  ]);
+  const roles = roleFns(user);
+  const { listOmieApps, requireOrcamentosOmieApp } = await import("@/server/omie/client");
+  const apps = listOmieApps().map((a) => ({ id: a.id, name: a.name }));
+  let omieAppId = apps[0]?.id ?? "";
+  try {
+    omieAppId = requireOrcamentosOmieApp().id;
+  } catch {
+    // primeiro app
+  }
+  return {
+    user: {
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      isAdmin: roles.isAdmin,
+      canAssistencia: roles.canRole("assistencia"),
+      canEstoque: roles.canRole("estoque"),
+      canCompras: roles.canRole("compras"),
+    },
+    omieAppId,
+    apps,
+    catalogs: {
+      tipos: OS_TIPOS.map((t) => ({ ...t })),
+      stages: OS_STAGES.map((s) => ({ ...s })),
+      subtiposManut: [...OS_SUBTIPOS_MANUT],
+      subtiposMonit: [...OS_SUBTIPOS_MONIT],
+      periodos: [...OS_PERIODOS],
+      itemStatus: [...OS_ITEM_STATUS],
+    },
+    teams,
+    osList,
+    materialPendencias,
+  };
+});
+
+export const searchAssistClientsFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        omieAppId: z.string().trim().optional(),
+        query: z.string().trim().min(2),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    const { listOmieApps, requireOrcamentosOmieApp } = await import("@/server/omie/client");
+    const { searchOmieClients } = await import("@/server/omie/quotes");
+    let app;
+    try {
+      app = data.omieAppId
+        ? listOmieApps().find((a) => a.id === data.omieAppId) ?? requireOrcamentosOmieApp()
+        : requireOrcamentosOmieApp();
+    } catch {
+      app = listOmieApps()[0];
+    }
+    if (!app) return [];
+    try {
+      return await searchOmieClients(app, data.query);
+    } catch {
+      return [];
+    }
+  });
+
+export const listOsFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        query: z.string().optional(),
+        stage: z.number().int().min(0).max(7).nullable().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    return listOs({ query: data.query, stage: data.stage ?? null });
+  });
+
+export const getOsFn = createServerFn({ method: "GET" })
+  .validator((input) => z.object({ id: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    return getOsById(data.id);
+  });
+
+export const createOsFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        tipo: z.enum(["pedido", "manut", "monit", "visita"]),
+        subtipo: z.string().optional().nullable(),
+        clientName: z.string().min(1),
+        clientCity: z.string().optional().nullable(),
+        clientAddress: z.string().optional().nullable(),
+        omieAppId: z.string().optional().nullable(),
+        clientCode: z.number().optional().nullable(),
+        servico: z.string().optional(),
+        quoteId: z.number().int().positive().optional().nullable(),
+        quoteNumero: z.string().optional().nullable(),
+        ticketId: z.number().int().positive().optional().nullable(),
+        items: z
+          .array(z.object({ qtd: z.number().positive(), nome: z.string().min(1) }))
+          .optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (!isAdmin(user) && !canOsWorkflow(user, "assistencia")) {
+      throw new Error("Sem permissão OS · Assistência.");
+    }
+    return createOs({
+      tipo: data.tipo as OsTipo,
+      subtipo: data.subtipo,
+      clientName: data.clientName,
+      clientCity: data.clientCity,
+      clientAddress: data.clientAddress,
+      omieAppId: data.omieAppId,
+      clientCode: data.clientCode,
+      servico: data.servico,
+      quoteId: data.quoteId,
+      quoteNumero: data.quoteNumero,
+      ticketId: data.ticketId,
+      items: data.items,
+      createdBy: user.id,
+      createdByName: user.name,
+    });
+  });
+
+export const advanceOsFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ osId: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return advanceOs({
+      osId: data.osId,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const moveOsKanbanFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        toStage: z.number().int().min(0).max(7),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return moveOsOnKanban({
+      osId: data.osId,
+      toStage: data.toStage,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const scheduleOsFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        agDate: z.string().min(8),
+        periodo: z.string().optional().nullable(),
+        hora: z.string().optional().nullable(),
+        teamId: z.number().int().positive().optional().nullable(),
+        tecnicoNome: z.string().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return scheduleOs({
+      ...data,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const startExecOsFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        materialOk: z.boolean().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return startExecOs({
+      osId: data.osId,
+      materialOk: data.materialOk ?? true,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const materialDivergenceFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        texto: z.string().min(1),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    return markMaterialDivergence({
+      osId: data.osId,
+      texto: data.texto,
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const checkInOsFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ osId: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return checkInOs({
+      osId: data.osId,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+const osAnexoSchema = z.object({
+  name: z.string().min(1),
+  mime: z.string().min(1),
+  data: z.string().min(16),
+});
+
+export const checkOutOsFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        resolucao: z.string().min(1),
+        fotos: z.array(z.string().min(16)).optional(),
+        anexos: z.array(osAnexoSchema).optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return checkOutOs({
+      osId: data.osId,
+      resolucao: data.resolucao,
+      fotos: data.fotos,
+      anexos: data.anexos,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const saveOsResolucaoFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        resolucao: z.string(),
+        fotos: z.array(z.string().min(16)).optional(),
+        anexos: z.array(osAnexoSchema).optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return saveOsResolucao({
+      osId: data.osId,
+      resolucao: data.resolucao,
+      fotos: data.fotos,
+      anexos: data.anexos,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const updateOsItemFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        itemId: z.number().int().positive(),
+        status: z.string().min(1),
+        previsao: z.string().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (!(OS_ITEM_STATUS as readonly string[]).includes(data.status)) {
+      throw new Error("Status de item inválido.");
+    }
+    return updateOsItemStatus({
+      itemId: data.itemId,
+      status: data.status as OsItemStatus,
+      previsao: data.previsao,
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const addOsItemFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        qtd: z.number().positive(),
+        nome: z.string().min(1),
+        status: z.string().optional(),
+        origem: z.string().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (
+      data.status &&
+      !(OS_ITEM_STATUS as readonly string[]).includes(data.status)
+    ) {
+      throw new Error("Status de item inválido.");
+    }
+    return addOsItem({
+      osId: data.osId,
+      qtd: data.qtd,
+      nome: data.nome,
+      status: data.status as OsItemStatus | undefined,
+      origem: data.origem,
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const receivePurchaseFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ itemId: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    return receivePurchaseItem({
+      itemId: data.itemId,
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const submitConferenceFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        rows: z.array(
+          z.object({
+            id: z.number().int().positive(),
+            usou: z.number().min(0),
+          }),
+        ),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return submitConference({
+      osId: data.osId,
+      rows: data.rows,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const acceptConferenceFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        contest: z.string().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return acceptConference({
+      osId: data.osId,
+      contest: data.contest,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const markExecutedFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ osId: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return markExecutedManual({
+      osId: data.osId,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const finishVisitaFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ osId: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    const os = await finishVisita({
+      osId: data.osId,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+    if (!os) throw new Error("OS não encontrada.");
+    if (os.lev && !os.ticketComId) {
+      const ticket = await createTicket({
+        cat: "levorc",
+        clientName: os.clientName,
+        omieAppId: os.omieAppId,
+        clientCode: os.clientCode,
+        descricao: `Levantamento da visita OS ${os.num}`,
+        setores: ["com"],
+        openedBy: user.id,
+        openedByName: user.name,
+        lev: {
+          origem: os.num,
+          obs: os.lev.obs,
+          itens: os.lev.itens.map((it) => ({
+            qtd: it.qtd,
+            nome: it.nome,
+            obs: it.obs,
+          })),
+        },
+        codigoRef: os.num,
+      });
+      if (ticket) {
+        await linkOsTicketCom(os.id, ticket.id);
+        return getOsById(os.id);
+      }
+    }
+    return os;
+  });
+
+export const saveOsLevFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        itens: z.array(
+          z.object({
+            qtd: z.number().positive(),
+            nome: z.string().min(1),
+            obs: z.string().optional(),
+          }),
+        ),
+        obs: z.string().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    return saveOsLev({
+      osId: data.osId,
+      lev: {
+        itens: data.itens.map((it) => ({
+          qtd: it.qtd,
+          nome: it.nome,
+          obs: it.obs ?? null,
+        })),
+        obs: data.obs ?? null,
+      },
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const requestReturnFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        toStage: z.number().int().min(0).max(6),
+        motivo: z.string().min(1),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    return requestReturnOs({
+      osId: data.osId,
+      toStage: data.toStage,
+      motivo: data.motivo,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: isAdmin(user),
+    });
+  });
+
+export const resolveReturnFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        approve: z.boolean(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (!isAdmin(user)) throw new Error("Somente administrador aprova retorno.");
+    return resolveReturnOs({
+      osId: data.osId,
+      approve: data.approve,
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const requestMaterialFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        items: z.array(z.object({ qtd: z.number().positive(), nome: z.string().min(1) })).min(1),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return requestMaterialFromField({
+      osId: data.osId,
+      items: data.items,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const searchQuotesFn = createServerFn({ method: "GET" })
+  .validator((input) => z.object({ query: z.string() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    return searchQuotesLocal(data.query);
+  });
+
+export const getEquipesBootstrapFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { user } = await authEquipes();
+  await boot();
+  if (!canManageEquipes(user)) throw new Error("Sem permissão.");
+  const [teams, tecnicos] = await Promise.all([
+    listAssistTeams(false),
+    listTecnicos(true),
+  ]);
+  return {
+    user: { id: user.id, name: user.name, isAdmin: isAdmin(user) },
+    teams,
+    tecnicos: tecnicos.map((t) => ({ id: t.id, name: t.name, username: t.username })),
+  };
+});
+
+export const saveTeamFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive().optional().nullable(),
+        name: z.string().min(1),
+        active: z.boolean().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await authEquipes();
+    await boot();
+    if (!canManageEquipes(user)) throw new Error("Sem permissão.");
+    await saveAssistTeam(data);
+    return listAssistTeams(false);
+  });
+
+export const saveTeamMemberFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive().optional().nullable(),
+        teamId: z.number().int().positive(),
+        name: z.string().min(1),
+        userId: z.number().int().positive().optional().nullable(),
+        active: z.boolean().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await authEquipes();
+    await boot();
+    if (!canManageEquipes(user)) throw new Error("Sem permissão.");
+    let name = data.name.trim();
+    let userId = data.userId ?? null;
+    if (userId) {
+      const tecnicos = await listTecnicos(false);
+      const tech = tecnicos.find((t) => t.id === userId);
+      if (!tech) throw new Error("Selecione um usuário marcado como técnico.");
+      if (!tech.active) throw new Error("Técnico inativo.");
+      name = tech.name;
+    }
+    await saveAssistTeamMember({
+      id: data.id,
+      teamId: data.teamId,
+      name,
+      userId,
+      active: data.active,
+    });
+    return listAssistTeams(false);
+  });
+
+export const saveOsMaterialDispositionFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        rows: z
+          .array(
+            z.object({
+              id: z.number().int().positive(),
+              usado: z.number().min(0),
+              sobraDestino: z.enum(["devolver", "equipe"]).optional().nullable(),
+            }),
+          )
+          .min(1),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    if (!roles.isAdmin && !roles.canRole("assistencia") && !roles.canRole("estoque")) {
+      throw new Error("Sem permissão para informar materiais.");
+    }
+    return saveOsMaterialDisposition({
+      osId: data.osId,
+      rows: data.rows.map((row) => ({
+        id: row.id,
+        usado: row.usado,
+        sobraDestino: row.sobraDestino ?? null,
+      })),
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const resolveOsMaterialBaixaFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        itemIds: z.array(z.number().int().positive()).min(1),
+        action: z.enum(["baixar", "ignorar"]),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    if (!roles.isAdmin && !roles.canRole("estoque")) {
+      throw new Error("Somente Estoque confirma a baixa.");
+    }
+    return resolveOsMaterialBaixa({
+      osId: data.osId,
+      itemIds: data.itemIds,
+      action: data.action,
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const listMaterialPendenciasFn = createServerFn({ method: "GET" }).handler(async () => {
+  await auth();
+  await boot();
+  return listMaterialPendencias();
+});

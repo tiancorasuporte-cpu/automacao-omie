@@ -10,8 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AssistenciaRouteImport } from './routes/assistencia'
 import { Route as ConversasRouteImport } from './routes/conversas'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as EquipesRouteImport } from './routes/equipes'
 import { Route as EstoqueRouteImport } from './routes/estoque'
 import { Route as FacilitiesRouteImport } from './routes/facilities'
 import { Route as FrotaRouteImport } from './routes/frota'
@@ -24,6 +26,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TabelaPrecosRouteImport } from './routes/tabela-precos'
 import { Route as TerceirosRouteImport } from './routes/terceiros'
+import { Route as TicketsRouteImport } from './routes/tickets'
 import { Route as UniformesRouteImport } from './routes/uniformes'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as VencimentosRouteImport } from './routes/vencimentos'
@@ -37,6 +40,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AssistenciaRoute = AssistenciaRouteImport.update({
+  id: '/assistencia',
+  path: '/assistencia',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConversasRoute = ConversasRouteImport.update({
   id: '/conversas',
   path: '/conversas',
@@ -45,6 +53,11 @@ const ConversasRoute = ConversasRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EquipesRoute = EquipesRouteImport.update({
+  id: '/equipes',
+  path: '/equipes',
   getParentRoute: () => rootRouteImport,
 } as any)
 const EstoqueRoute = EstoqueRouteImport.update({
@@ -107,6 +120,11 @@ const TerceirosRoute = TerceirosRouteImport.update({
   path: '/terceiros',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TicketsRoute = TicketsRouteImport.update({
+  id: '/tickets',
+  path: '/tickets',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UniformesRoute = UniformesRouteImport.update({
   id: '/uniformes',
   path: '/uniformes',
@@ -145,8 +163,10 @@ const ApiWahaWebhookRoute = ApiWahaWebhookRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/assistencia': typeof AssistenciaRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
+  '/equipes': typeof EquipesRoute
   '/estoque': typeof EstoqueRoute
   '/facilities': typeof FacilitiesRoute
   '/frota': typeof FrotaRoute
@@ -159,6 +179,7 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/tabela-precos': typeof TabelaPrecosRoute
   '/terceiros': typeof TerceirosRoute
+  '/tickets': typeof TicketsRoute
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
@@ -169,8 +190,10 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/assistencia': typeof AssistenciaRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
+  '/equipes': typeof EquipesRoute
   '/estoque': typeof EstoqueRoute
   '/facilities': typeof FacilitiesRoute
   '/frota': typeof FrotaRoute
@@ -183,6 +206,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/tabela-precos': typeof TabelaPrecosRoute
   '/terceiros': typeof TerceirosRoute
+  '/tickets': typeof TicketsRoute
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
@@ -194,8 +218,10 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/assistencia': typeof AssistenciaRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
+  '/equipes': typeof EquipesRoute
   '/estoque': typeof EstoqueRoute
   '/facilities': typeof FacilitiesRoute
   '/frota': typeof FrotaRoute
@@ -208,6 +234,7 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/tabela-precos': typeof TabelaPrecosRoute
   '/terceiros': typeof TerceirosRoute
+  '/tickets': typeof TicketsRoute
   '/uniformes': typeof UniformesRoute
   '/users': typeof UsersRoute
   '/vencimentos': typeof VencimentosRoute
@@ -220,8 +247,10 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/assistencia'
     | '/conversas'
     | '/dashboard'
+    | '/equipes'
     | '/estoque'
     | '/facilities'
     | '/frota'
@@ -234,6 +263,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/tabela-precos'
     | '/terceiros'
+    | '/tickets'
     | '/uniformes'
     | '/users'
     | '/vencimentos'
@@ -244,8 +274,10 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/assistencia'
     | '/conversas'
     | '/dashboard'
+    | '/equipes'
     | '/estoque'
     | '/facilities'
     | '/frota'
@@ -258,6 +290,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/tabela-precos'
     | '/terceiros'
+    | '/tickets'
     | '/uniformes'
     | '/users'
     | '/vencimentos'
@@ -268,8 +301,10 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/assistencia'
     | '/conversas'
     | '/dashboard'
+    | '/equipes'
     | '/estoque'
     | '/facilities'
     | '/frota'
@@ -282,6 +317,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/tabela-precos'
     | '/terceiros'
+    | '/tickets'
     | '/uniformes'
     | '/users'
     | '/vencimentos'
@@ -293,8 +329,10 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AssistenciaRoute: typeof AssistenciaRoute
   ConversasRoute: typeof ConversasRoute
   DashboardRoute: typeof DashboardRoute
+  EquipesRoute: typeof EquipesRoute
   EstoqueRoute: typeof EstoqueRoute
   FacilitiesRoute: typeof FacilitiesRoute
   FrotaRoute: typeof FrotaRoute
@@ -307,6 +345,7 @@ export interface RootRouteChildren {
   SetupRoute: typeof SetupRoute
   TabelaPrecosRoute: typeof TabelaPrecosRoute
   TerceirosRoute: typeof TerceirosRoute
+  TicketsRoute: typeof TicketsRoute
   UniformesRoute: typeof UniformesRoute
   UsersRoute: typeof UsersRoute
   VencimentosRoute: typeof VencimentosRoute
@@ -325,6 +364,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/assistencia': {
+      id: '/assistencia'
+      path: '/assistencia'
+      fullPath: '/assistencia'
+      preLoaderRoute: typeof AssistenciaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/conversas': {
       id: '/conversas'
       path: '/conversas'
@@ -337,6 +383,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/equipes': {
+      id: '/equipes'
+      path: '/equipes'
+      fullPath: '/equipes'
+      preLoaderRoute: typeof EquipesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/estoque': {
@@ -423,6 +476,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TerceirosRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/tickets': {
+      id: '/tickets'
+      path: '/tickets'
+      fullPath: '/tickets'
+      preLoaderRoute: typeof TicketsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/uniformes': {
       id: '/uniformes'
       path: '/uniformes'
@@ -477,8 +537,10 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AssistenciaRoute: AssistenciaRoute,
   ConversasRoute: ConversasRoute,
   DashboardRoute: DashboardRoute,
+  EquipesRoute: EquipesRoute,
   EstoqueRoute: EstoqueRoute,
   FacilitiesRoute: FacilitiesRoute,
   FrotaRoute: FrotaRoute,
@@ -491,6 +553,7 @@ const rootRouteChildren: RootRouteChildren = {
   SetupRoute: SetupRoute,
   TabelaPrecosRoute: TabelaPrecosRoute,
   TerceirosRoute: TerceirosRoute,
+  TicketsRoute: TicketsRoute,
   UniformesRoute: UniformesRoute,
   UsersRoute: UsersRoute,
   VencimentosRoute: VencimentosRoute,

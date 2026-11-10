@@ -22,13 +22,17 @@ function toPublicUser(row: AppUserRow): AppUser {
     role,
     active: row.active,
     modules: modulesForRole(role, row.modules ?? null),
+    isTecnico: Boolean(row.is_tecnico),
+    defaultVehicleId:
+      row.default_vehicle_id == null ? null : Number(row.default_vehicle_id),
   };
 }
 
 export async function findUserByUsername(username: string) {
   const db = await getDb();
   const rows = (await db`
-    select id, username, password_hash, name, role, active, modules
+    select id, username, password_hash, name, role, active, modules,
+           coalesce(is_tecnico, false) as is_tecnico, default_vehicle_id
     from users
     where username = ${username}
     limit 1
@@ -40,13 +44,15 @@ export async function findUserById(id: number, opts?: { includeInactive?: boolea
   const db = await getDb();
   const rows = opts?.includeInactive
     ? ((await db`
-        select id, username, password_hash, name, role, active, modules
+        select id, username, password_hash, name, role, active, modules,
+               coalesce(is_tecnico, false) as is_tecnico, default_vehicle_id
         from users
         where id = ${id}
         limit 1
       `) as AppUserRow[])
     : ((await db`
-        select id, username, password_hash, name, role, active, modules
+        select id, username, password_hash, name, role, active, modules,
+               coalesce(is_tecnico, false) as is_tecnico, default_vehicle_id
         from users
         where id = ${id} and active = true
         limit 1
@@ -66,8 +72,22 @@ export async function authenticateUser(username: string, password: string) {
 export async function listUsers() {
   const db = await getDb();
   const rows = (await db`
-    select id, username, password_hash, name, role, active, modules
+    select id, username, password_hash, name, role, active, modules,
+           coalesce(is_tecnico, false) as is_tecnico, default_vehicle_id
     from users
+    order by name
+  `) as AppUserRow[];
+  return rows.map(toPublicUser);
+}
+
+export async function listTecnicos(activeOnly = true) {
+  const db = await getDb();
+  const rows = (await db`
+    select id, username, password_hash, name, role, active, modules,
+           coalesce(is_tecnico, false) as is_tecnico, default_vehicle_id
+    from users
+    where coalesce(is_tecnico, false) = true
+      and (${activeOnly}::boolean = false or active = true)
     order by name
   `) as AppUserRow[];
   return rows.map(toPublicUser);
@@ -79,18 +99,26 @@ export async function createUser(input: {
   name: string;
   role: Exclude<AppRole, "superadmin">;
   modules?: AppModuleId[];
+  isTecnico?: boolean;
+  defaultVehicleId?: number | null;
 }) {
   const db = await getDb();
   const passwordHash = await hash(input.password, 10);
   const modulesJson =
     input.role === "operator" ? serializeModules(input.modules ?? []) : null;
   const rows = (await db`
-    insert into users (username, password_hash, name, role, active, modules)
+    insert into users (
+      username, password_hash, name, role, active, modules,
+      is_tecnico, default_vehicle_id
+    )
     values (
       ${input.username}, ${passwordHash}, ${input.name}, ${input.role}, true,
-      ${modulesJson}
+      ${modulesJson},
+      ${Boolean(input.isTecnico)},
+      ${input.defaultVehicleId ?? null}
     )
-    returning id, username, password_hash, name, role, active, modules
+    returning id, username, password_hash, name, role, active, modules,
+              coalesce(is_tecnico, false) as is_tecnico, default_vehicle_id
   `) as AppUserRow[];
   const row = rows[0];
   if (!row) throw new Error("Não foi possível criar o usuário");
@@ -112,6 +140,26 @@ export async function updateUserModules(id: number, modules: AppModuleId[]) {
   await db`
     update users
     set modules = ${serializeModules(modules)}, updated_at = now()
+    where id = ${id}
+  `;
+  return findUserById(id, { includeInactive: true });
+}
+
+export async function updateUserStaff(
+  id: number,
+  input: {
+    isTecnico: boolean;
+    defaultVehicleId: number | null;
+  },
+) {
+  const db = await getDb();
+  const target = await findUserById(id, { includeInactive: true });
+  if (!target) throw new Error("Usuário não encontrado.");
+  await db`
+    update users
+    set is_tecnico = ${input.isTecnico},
+        default_vehicle_id = ${input.defaultVehicleId},
+        updated_at = now()
     where id = ${id}
   `;
   return findUserById(id, { includeInactive: true });

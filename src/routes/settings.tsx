@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
+import { PageTitle } from "@/components/PageChrome";
 import {
   getNotificationSettingsFn,
   getOmieAppsFn,
@@ -46,14 +47,12 @@ function SettingsPage() {
     <AppShell mobileTitle="Configurações">
       <main className="flex-1 p-margin-mobile md:p-margin-desktop">
         <div className="mx-auto max-w-3xl space-y-lg">
-          <div>
-            <h2 className="text-headline-lg tracking-tight text-primary">Configurações</h2>
-            <p className="mt-base text-body-lg text-on-surface-variant">
-              WAHA, Integgri Chat, alertas automáticos, assistente Groq e aplicativos Omie configurados no `.env`.
-            </p>
-          </div>
+          <PageTitle
+            title="Configurações"
+            subtitle="WAHA, Integgri Chat, alertas, Groq e apps Omie do .env."
+          />
 
-          <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-lg">
+          <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
             <h3 className="mb-sm flex items-center gap-xs text-title-lg text-primary">
               <Icon name="apps" className="text-secondary" />
               Aplicativos Omie
@@ -115,7 +114,7 @@ function NotificationSettings({
   const [message, setMessage] = useState<string | null>(null);
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-lg">
+    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
       <h3 className="mb-sm flex items-center gap-xs text-title-lg text-primary">
         <Icon name="notifications" className="text-secondary" />
         Alertas de vencimento
@@ -211,7 +210,7 @@ function NotificationSettings({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
+          className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
         >
           {pending ? "Salvando..." : "Salvar alertas"}
         </button>
@@ -247,7 +246,7 @@ function InteggriSettings({
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-lg">
+    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
       <h3 className="mb-sm flex items-center gap-xs text-title-lg text-primary">
         <Icon name="hub" className="text-secondary" />
         Integgri Chat
@@ -336,7 +335,7 @@ function InteggriSettings({
           <button
             type="submit"
             disabled={pending}
-            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
+            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
           >
             Salvar Integgri
           </button>
@@ -420,7 +419,7 @@ function WahaSettings({
     : "Listener inativo — rode npm run bot:listen";
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-lg">
+    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
       <h3 className="mb-sm flex items-center gap-xs text-title-lg text-primary">
         <Icon name="chat" className="text-secondary" />
         WAHA (WhatsApp)
@@ -517,7 +516,7 @@ function WahaSettings({
           <button
             type="submit"
             disabled={pending}
-            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
+            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
           >
             Salvar WAHA
           </button>
@@ -648,7 +647,7 @@ function GroqSettings({
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-lg">
+    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
       <h3 className="mb-sm flex items-center gap-xs text-title-lg text-primary">
         <Icon name="smart_toy" className="text-secondary" />
         Assistente Groq (IA)
@@ -698,7 +697,7 @@ function GroqSettings({
           <button
             type="submit"
             disabled={pending}
-            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
+            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
           >
             Salvar Groq
           </button>

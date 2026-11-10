@@ -1,9 +1,10 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+﻿import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
+import { PageTitle } from "@/components/PageChrome";
 import { paginateList, TablePager } from "@/components/TablePager";
 import {
   getNotificationSettingsFn,
@@ -422,32 +423,23 @@ function VencimentosPage() {
     <AppShell mobileTitle="Vencimentos" searchPlaceholder="Busca rápida (cliente, documento, telefone)...">
       <main className="flex-1 p-margin-mobile md:p-margin-desktop">
         <div className="mx-auto max-w-7xl space-y-lg">
-          <div className="flex w-full flex-col gap-md sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0 flex-1">
-              <p className="text-label-md uppercase tracking-wider text-on-surface-variant">
-                Cobrança
-              </p>
-              <h2 className="mt-xs text-headline-lg tracking-tight text-primary">Vencimentos</h2>
-              <p className="mt-base text-body-md text-on-surface-variant">
-                Documentos em aberto · padrão{" "}
-                <span className="font-medium text-primary">{currentMonthLabel()}</span>
-              </p>
-              {testMode ? (
-                <p className="mt-sm rounded-lg border border-error/30 bg-error-container/25 px-md py-sm text-body-md text-error">
-                  Modo teste ativo — envios vão só para{" "}
-                  <span className="font-semibold tabular-nums">
-                    {notifySettings?.testNotifyPhone || "o número de teste"}
-                  </span>
-                  , não para os clientes. Desligue em Configurações para envio real.
-                </p>
-              ) : null}
-            </div>
+          <PageTitle
+            title="Vencimentos"
+            subtitle={
+              <>
+                Documentos em aberto · padrão {currentMonthLabel()}
+                {testMode
+                  ? ` · Modo teste: ${notifySettings?.testNotifyPhone || "número de teste"}`
+                  : null}
+              </>
+            }
+          >
             <button
               type="button"
               onClick={() => setFiltersOpen((value) => !value)}
-              className="inline-flex shrink-0 items-center gap-xs rounded-lg border border-outline-variant bg-surface-container-lowest px-md py-sm text-label-md text-primary hover:bg-surface-container-high"
+              className="inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10"
             >
-              <Icon name="tune" className="text-[18px]" />
+              <Icon name="tune" className="text-[16px]" />
               {filtersOpen ? "Ocultar filtros" : "Filtros"}
               {hasActiveFilters ? (
                 <span className="ml-xs rounded-full bg-secondary-container px-sm py-px text-[0.65rem] font-bold text-on-secondary-container">
@@ -455,7 +447,7 @@ function VencimentosPage() {
                 </span>
               ) : null}
             </button>
-          </div>
+          </PageTitle>
 
           <div className="grid gap-sm sm:grid-cols-2 xl:grid-cols-4">
             <StatCard label="Documentos" value={String(summary.count)} hint="Com os filtros atuais" />
@@ -652,12 +644,12 @@ function VencimentosPage() {
             </div>
           ) : null}
 
-          <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-sm">
-            <div className="overflow-x-auto">
+          <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
+            <div className="overflow-x-auto p-md">
               <table className="min-w-full text-left text-body-md">
-                <thead className="sticky top-0 z-10 border-b border-outline-variant bg-surface-container-low/95 backdrop-blur">
+                <thead className="sticky top-0 z-10 bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                   <tr>
-                    <th className="w-10 px-md py-sm">
+                    <th className="w-10 px-sm py-xs">
                       <input
                         type="checkbox"
                         checked={allPageSelected}
@@ -667,17 +659,15 @@ function VencimentosPage() {
                         className="size-4 accent-[var(--color-secondary)]"
                       />
                     </th>
-                    <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Tipo</th>
-                    <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Cliente</th>
-                    <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Documento</th>
-                    <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Emissão</th>
-                    <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Vencimento</th>
-                    <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Empresa</th>
-                    <th className="px-md py-sm text-right text-label-md font-medium text-on-surface-variant">
-                      Valor
-                    </th>
-                    <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Contato</th>
-                    <th className="px-md py-sm text-label-md font-medium text-on-surface-variant">Ações</th>
+                    <th className="px-sm py-xs">Tipo</th>
+                    <th className="px-sm py-xs">Cliente</th>
+                    <th className="px-sm py-xs">Documento</th>
+                    <th className="px-sm py-xs">Emissão</th>
+                    <th className="px-sm py-xs">Vencimento</th>
+                    <th className="px-sm py-xs">Empresa</th>
+                    <th className="px-sm py-xs text-right">Valor</th>
+                    <th className="px-sm py-xs">Contato</th>
+                    <th className="px-sm py-xs">Ações</th>
                   </tr>
                 </thead>
                 <tbody>

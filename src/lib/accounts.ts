@@ -41,8 +41,33 @@ export const listUsersFn = createServerFn({ method: "GET" }).handler(async () =>
   return { ok: true as const, users: await listUsers() };
 });
 
+export const getUsersAdminBootstrapFn = createServerFn({ method: "GET" }).handler(async () => {
+  const { requireAdmin } = await import("@/lib/require-auth");
+  await requireAdmin();
+  const { ensureSchema } = await import("@/db/schema");
+  await ensureSchema();
+  const { listUsers } = await import("@/db/users");
+  const { listFleetVehicles } = await import("@/db/frota");
+  const [users, vehicles] = await Promise.all([listUsers(), listFleetVehicles(false)]);
+  return {
+    ok: true as const,
+    users,
+    vehicles: vehicles.map((v) => ({
+      id: v.id,
+      name: v.name,
+      plate: v.plate,
+      active: v.active,
+    })),
+  };
+});
+
+const createSchemaWithStaff = createSchema.extend({
+  isTecnico: z.boolean().optional(),
+  defaultVehicleId: z.number().int().positive().nullable().optional(),
+});
+
 export const createUserFn = createServerFn({ method: "POST" })
-  .validator(createSchema)
+  .validator(createSchemaWithStaff)
   .handler(async ({ data }) => {
     const { requireAdmin } = await import("@/lib/require-auth");
     await requireAdmin();
@@ -68,6 +93,8 @@ export const createUserFn = createServerFn({ method: "POST" })
         password: data.password,
         role: data.role,
         modules: data.role === "operator" ? data.modules ?? [] : [...ALL_MODULE_IDS],
+        isTecnico: Boolean(data.isTecnico),
+        defaultVehicleId: data.defaultVehicleId ?? null,
       });
       const { canAccessModule } = await import("@/lib/require-auth");
       if (canAccessModule(user, "frota")) {
@@ -83,6 +110,35 @@ export const createUserFn = createServerFn({ method: "POST" })
       return {
         ok: false as const,
         error: error instanceof Error ? error.message : "Não foi possível criar o usuário",
+      };
+    }
+  });
+
+export const updateUserStaffFn = createServerFn({ method: "POST" })
+  .validator(
+    z.object({
+      id: z.number().int().positive(),
+      isTecnico: z.boolean(),
+      defaultVehicleId: z.number().int().positive().nullable(),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const { requireAdmin } = await import("@/lib/require-auth");
+    await requireAdmin();
+    const { ensureSchema } = await import("@/db/schema");
+    await ensureSchema();
+    const { updateUserStaff } = await import("@/db/users");
+    try {
+      const user = await updateUserStaff(data.id, {
+        isTecnico: data.isTecnico,
+        defaultVehicleId: data.defaultVehicleId,
+      });
+      if (!user) return { ok: false as const, error: "Usuário não encontrado." };
+      return { ok: true as const, user };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Não foi possível salvar.",
       };
     }
   });

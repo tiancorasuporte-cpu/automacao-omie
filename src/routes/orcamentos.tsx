@@ -1,8 +1,14 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+﻿import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
+import {
+  PageSection,
+  PageTitle,
+  tableHeadCellClass,
+  tableHeadClass,
+} from "@/components/PageChrome";
 import { TablePager } from "@/components/TablePager";
 import {
   AlertDialog,
@@ -27,6 +33,7 @@ import {
   createOrcamentoFn,
   deactivateMonthlyServiceFn,
   deleteOrcamentoFn,
+  enviarPedidoAssistenciaFn,
   getOmieClientDetailsFn,
   getOrcamentoEmpresaFn,
   getOrcamentoFn,
@@ -273,6 +280,7 @@ function OrcamentosPage() {
   const [syncingClients, setSyncingClients] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendingPedido, setSendingPedido] = useState(false);
   const [loadingQuote, setLoadingQuote] = useState(false);
   const [duplicatingQuoteId, setDuplicatingQuoteId] = useState<number | null>(null);
   const [deletingQuoteId, setDeletingQuoteId] = useState<number | null>(null);
@@ -922,6 +930,46 @@ function OrcamentosPage() {
     }
   }
 
+  async function handleEnviarPedido(quoteId?: number | null) {
+    setSendingPedido(true);
+    setFeedback(null);
+    try {
+      let id = quoteId ?? editingQuoteId;
+      if (!id) {
+        const saved = await saveOrcamentoFn({ data: buildPayload() });
+        if (!saved.ok) {
+          setFeedback({ type: "error", text: saved.error });
+          return;
+        }
+        id = saved.quoteId;
+        setEditingQuoteId(saved.quoteId);
+        setNumeroInterno(saved.numeroInterno);
+        setQuoteStatus("draft");
+        await refreshQuotes();
+      }
+      const result = await enviarPedidoAssistenciaFn({ data: { quoteId: id } });
+      if (!result.ok) {
+        setFeedback({ type: "error", text: result.error });
+        return;
+      }
+      setFeedback({
+        type: "ok",
+        text: result.alreadyExists
+          ? `Orçamento ${result.numeroInterno} já tem OS ${result.osNum} na Assistência.`
+          : `Pedido enviado: OS ${result.osNum} criada no Kanban da Assistência.`,
+      });
+      await router.invalidate();
+      await router.navigate({ to: "/assistencia" });
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao enviar pedido à Assistência.",
+      });
+    } finally {
+      setSendingPedido(false);
+    }
+  }
+
   async function handleSendSaved(quoteId: number) {
     setSending(true);
     setFeedback(null);
@@ -1334,50 +1382,49 @@ function OrcamentosPage() {
   return (
     <AppShell mobileTitle="Orçamentos" searchPlaceholder="Buscar produtos...">
       <div className="space-y-md p-margin-mobile pb-32 md:px-md md:py-md md:pb-md xl:px-lg">
-        <div className="flex flex-wrap items-center justify-between gap-sm">
-          <div>
-            <h1 className="text-title-lg text-primary">Orçamentos</h1>
-            <p className="hidden text-label-md text-on-surface-variant @[56rem]:block">
-              Salve, imprima PDF e envie à Omie · F1 atalhos
-            </p>
-            <p className="text-label-md text-on-surface-variant @[56rem]:hidden">
-              Monte, adicione produtos e envie à Omie.
-            </p>
-          </div>
-          <div className="flex w-full flex-wrap gap-sm sm:w-auto">
-            {editingQuoteId ? (
-              <button
-                type="button"
-                onClick={() => {
-                  resetForm();
-                  setMobileTab("montar");
-                }}
-                className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary sm:flex-none"
-              >
-                <Icon name="add" className="text-[18px]" />
-                Novo orçamento
-              </button>
-            ) : null}
+        <PageTitle
+          title="Orçamentos"
+          subtitle={
+            <>
+              <span className="hidden @[56rem]:inline">
+                Salve, imprima PDF e envie à Omie · F1 atalhos
+              </span>
+              <span className="@[56rem]:hidden">Monte, adicione produtos e envie à Omie.</span>
+            </>
+          }
+        >
+          {editingQuoteId ? (
             <button
               type="button"
-              disabled={syncingClients || apps.length === 0}
-              onClick={handleSyncClients}
-              className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg border border-outline-variant bg-surface px-sm py-xs text-label-md text-primary disabled:opacity-50 sm:flex-none"
+              onClick={() => {
+                resetForm();
+                setMobileTab("montar");
+              }}
+              className="inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10"
             >
-              <Icon name={syncingClients ? "hourglass_empty" : "sync"} className="text-[16px]" />
-              {syncingClients ? "Sincronizando..." : `Sync clientes (${clientCount})`}
+              <Icon name="add" className="text-[16px]" />
+              Novo orçamento
             </button>
-            <button
-              type="button"
-              disabled={syncing || apps.length === 0}
-              onClick={handleSyncProducts}
-              className="inline-flex flex-1 items-center justify-center gap-xs rounded-lg bg-primary px-sm py-xs text-label-md text-on-primary disabled:opacity-50 sm:flex-none"
-            >
-              <Icon name={syncing ? "hourglass_empty" : "sync"} className="text-[16px]" />
-              {syncing ? "Sincronizando..." : `Sync produtos (${productCount})`}
-            </button>
-          </div>
-        </div>
+          ) : null}
+          <button
+            type="button"
+            disabled={syncingClients || apps.length === 0}
+            onClick={handleSyncClients}
+            className="inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10 disabled:opacity-50"
+          >
+            <Icon name={syncingClients ? "hourglass_empty" : "sync"} className="text-[16px]" />
+            {syncingClients ? "Sincronizando..." : `Sync clientes (${clientCount})`}
+          </button>
+          <button
+            type="button"
+            disabled={syncing || apps.length === 0}
+            onClick={handleSyncProducts}
+            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+          >
+            <Icon name={syncing ? "hourglass_empty" : "sync"} className="text-[16px]" />
+            {syncing ? "Sincronizando..." : `Sync produtos (${productCount})`}
+          </button>
+        </PageTitle>
 
         <div className="sticky top-0 z-20 -mx-margin-mobile border-b border-outline-variant bg-background/95 px-margin-mobile py-sm backdrop-blur-md @[56rem]:hidden">
           <div className="grid grid-cols-2 gap-xs rounded-xl bg-surface-container-low p-xs">
@@ -1644,7 +1691,7 @@ function OrcamentosPage() {
                     <>
                       <div className="overflow-x-auto rounded-lg border border-outline-variant bg-surface">
                         <table className="min-w-full text-left text-body-md">
-                          <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+                          <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                             <tr>
                               <th className="px-sm py-xs">Serviço</th>
                               <th className="px-sm py-xs w-20">Qtd</th>
@@ -1835,7 +1882,7 @@ function OrcamentosPage() {
                     type="button"
                     disabled={savingServico}
                     onClick={handleCreateMonthlyService}
-                    className="inline-flex items-center justify-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-50"
+                    className="inline-flex items-center justify-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
                   >
                     <Icon name="add" className="text-[18px]" />
                     {savingServico ? "Salvando..." : "Cadastrar"}
@@ -2014,7 +2061,7 @@ function OrcamentosPage() {
                   </div>
                   <div className="hidden max-h-[min(70vh,42rem)] overflow-auto rounded-lg border border-outline-variant @[56rem]:block">
                   <table className="min-w-full text-left text-label-md">
-                    <thead className="sticky top-0 z-10 bg-surface-container-low text-label-md text-on-surface-variant">
+                    <thead className="sticky top-0 z-10 bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                       <tr>
                         {!locked ? <th className="w-8 px-xs py-xs" aria-label="Reordenar" /> : null}
                         <th className="px-xs py-xs">Produto</th>
@@ -2193,6 +2240,21 @@ function OrcamentosPage() {
               </button>
               <button
                 type="button"
+                disabled={
+                  sendingPedido || locked || !selectedClient || cart.length === 0
+                }
+                onClick={() => void handleEnviarPedido()}
+                className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+                title="Cria OS de pedido aprovado no Kanban da Assistência"
+              >
+                <Icon
+                  name={sendingPedido ? "hourglass_empty" : "handyman"}
+                  className="text-[16px]"
+                />
+                {sendingPedido ? "Enviando..." : "Enviar pedido"}
+              </button>
+              <button
+                type="button"
                 onClick={() => setShortcutsHelpOpen(true)}
                 className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-on-surface-variant hover:bg-surface-container-high"
                 title="Atalhos de teclado"
@@ -2204,11 +2266,8 @@ function OrcamentosPage() {
           </section>
         </div>
 
-        <section
-          className={cn(
-            "rounded-xl border border-outline-variant bg-surface-container-lowest p-md",
-            mobileTab !== "salvos" && "hidden @[56rem]:block",
-          )}
+        <PageSection
+          className={cn(mobileTab !== "salvos" && "hidden @[56rem]:block")}
         >
           <div className="mb-sm flex flex-wrap items-end justify-between gap-md">
             <div>
@@ -2340,6 +2399,19 @@ function OrcamentosPage() {
                           Omie {omieCodigoLabel(quote)}
                         </button>
                       ) : null}
+                      <button
+                        type="button"
+                        disabled={sendingPedido}
+                        onClick={() => void handleEnviarPedido(quote.id)}
+                        className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+                        title="Enviar pedido ao Kanban da Assistência"
+                      >
+                        <Icon
+                          name={sendingPedido ? "hourglass_empty" : "handyman"}
+                          className="text-[16px]"
+                        />
+                        Enviar pedido
+                      </button>
                       {canDeleteQuotes ? (
                         <button
                           type="button"
@@ -2360,15 +2432,15 @@ function OrcamentosPage() {
               </div>
               <div className="hidden overflow-x-auto @[56rem]:block">
               <table className="min-w-full text-left text-body-md">
-                <thead className="text-label-md text-on-surface-variant">
+                <thead className={tableHeadClass}>
                   <tr>
-                    <th className="px-sm py-xs">Nº</th>
-                    <th className="px-sm py-xs">Cliente</th>
-                    <th className="px-sm py-xs">Usuário</th>
-                    <th className="px-sm py-xs">Total</th>
-                    <th className="px-sm py-xs">Status</th>
-                    <th className="px-sm py-xs">Quando</th>
-                    <th className="px-sm py-xs">Ações</th>
+                    <th className={tableHeadCellClass}>Nº</th>
+                    <th className={tableHeadCellClass}>Cliente</th>
+                    <th className={tableHeadCellClass}>Usuário</th>
+                    <th className={tableHeadCellClass}>Total</th>
+                    <th className={tableHeadCellClass}>Status</th>
+                    <th className={tableHeadCellClass}>Quando</th>
+                    <th className={tableHeadCellClass}>Ações</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2432,6 +2504,19 @@ function OrcamentosPage() {
                               Omie {omieCodigoLabel(quote)}
                             </button>
                           ) : null}
+                          <button
+                            type="button"
+                            disabled={sendingPedido}
+                            onClick={() => void handleEnviarPedido(quote.id)}
+                            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+                            title="Enviar pedido ao Kanban da Assistência"
+                          >
+                            <Icon
+                              name={sendingPedido ? "hourglass_empty" : "handyman"}
+                              className="text-[16px]"
+                            />
+                            Enviar pedido
+                          </button>
                           {canDeleteQuotes ? (
                             <button
                               type="button"
@@ -2469,7 +2554,7 @@ function OrcamentosPage() {
               ) : null}
             </>
           )}
-        </section>
+        </PageSection>
 
         {mobileTab === "montar" ? (
           <div
@@ -2500,7 +2585,7 @@ function OrcamentosPage() {
                 type="button"
                 disabled={saving || locked || !selectedClient || cart.length === 0}
                 onClick={() => void handleSave()}
-                className="rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary disabled:opacity-50"
+                className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
               >
                 {saving ? "..." : editingQuoteId ? "Atualizar" : "Salvar"}
               </button>
@@ -2599,7 +2684,7 @@ function OrcamentosPage() {
           <DialogFooter>
             <button
               type="button"
-              className="rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary"
+              className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
               onClick={() => setProductsDialogOpen(false)}
             >
               Concluir

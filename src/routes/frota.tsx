@@ -1,8 +1,9 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+﻿import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { z } from "zod";
 
 import { AppShell } from "@/components/AppShell";
+import { PageTitle } from "@/components/PageChrome";
 import { FleetBrandMark } from "@/components/FleetBrandMark";
 import { Icon } from "@/components/Icon";
 import { PhotoCapture, type CapturedPhoto } from "@/components/PhotoCapture";
@@ -120,9 +121,10 @@ function FrotaPage() {
   const [drivers, setDrivers] = useState(boot.drivers);
   const [reminders, setReminders] = useState(boot.reminders);
   const [currentDriverId, setCurrentDriverId] = useState(boot.currentDriverId);
-  const [vehicleId, setVehicleId] = useState<number | null>(
-    boot.vehicles.find((v) => v.active)?.id ?? boot.vehicles[0]?.id ?? null,
-  );
+  const [vehicleId, setVehicleId] = useState<number | null>(() => {
+    if (boot.defaultVehicleId) return boot.defaultVehicleId;
+    return boot.vehicles.find((v) => v.active)?.id ?? boot.vehicles[0]?.id ?? null;
+  });
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [dailyKm, setDailyKm] = useState<DailyKmItem[]>([]);
   const [report, setReport] = useState<Report | null>(null);
@@ -159,7 +161,14 @@ function FrotaPage() {
     setDrivers(next.drivers);
     setReminders(next.reminders);
     setCurrentDriverId(next.currentDriverId);
-    if (vehicleId == null && next.vehicles[0]) setVehicleId(next.vehicles[0].id);
+    if (vehicleId == null) {
+      setVehicleId(
+        next.defaultVehicleId ??
+          next.vehicles.find((v) => v.active)?.id ??
+          next.vehicles[0]?.id ??
+          null,
+      );
+    }
   }
 
   async function reloadHistory() {
@@ -240,9 +249,13 @@ function FrotaPage() {
   }
 
   return (
-    <AppShell title="Frota" subtitle="Controle de veículos, custos e manutenção">
-      <div className="mx-auto w-full max-w-6xl space-y-lg">
-        <section className="rounded-2xl border border-outline-variant bg-surface-container-lowest p-md shadow-sm sm:p-lg">
+    <AppShell mobileTitle="Frota">
+      <div className="mx-auto w-full max-w-6xl space-y-lg p-margin-mobile md:p-margin-desktop">
+        <PageTitle
+          title="Frota"
+          subtitle="Controle de veículos, custos e manutenção."
+        />
+        <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md sm:p-lg">
           <div className="flex flex-col gap-md sm:flex-row sm:items-end sm:justify-between">
             <div className="grid flex-1 gap-xs sm:max-w-lg">
               <label className="text-label-sm font-medium text-on-surface-variant">Veículo</label>
@@ -278,7 +291,7 @@ function FrotaPage() {
             <div className="flex flex-wrap gap-sm">
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-sm rounded-xl border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold text-primary shadow-sm transition hover:bg-surface-container-low"
+                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
                 onClick={() => setFormType("reading")}
                 disabled={!vehicleId}
               >
@@ -287,7 +300,7 @@ function FrotaPage() {
               </button>
               <button
                 type="button"
-                className="inline-flex items-center justify-center gap-sm rounded-xl bg-primary px-lg py-sm text-label-md font-semibold text-on-primary shadow-sm transition hover:opacity-90"
+                className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
                 onClick={() => setAddOpen(true)}
               >
                 <Icon name="add" className="text-xl" />
@@ -322,7 +335,7 @@ function FrotaPage() {
           </div>
         ) : null}
 
-        <section className="min-h-[20rem] rounded-2xl border border-outline-variant bg-surface-container-lowest p-md sm:p-lg">
+        <section className="min-h-[20rem] rounded-xl border border-outline-variant bg-surface-container-lowest p-md sm:p-lg">
           {tab === "historico" ? (
             <HistoryPanel
               loading={loading}
@@ -528,7 +541,7 @@ function DailyKmPanel({
           <button
             type="button"
             onClick={onAdd}
-            className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary"
+            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
           >
             <Icon name="speed" className="text-[18px]" />
             Lançar KM
@@ -627,7 +640,7 @@ function DailyKmPanel({
           <button
             type="button"
             onClick={onAdd}
-            className="inline-flex items-center gap-xs rounded-lg bg-primary px-md py-sm text-label-md font-semibold text-on-primary"
+            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
           >
             <Icon name="speed" className="text-[18px]" />
             Lançar KM
@@ -681,7 +694,7 @@ function DailyKmPanel({
 
           <div className="hidden overflow-x-auto md:block">
             <table className="min-w-full text-left text-body-md">
-              <thead className="bg-surface-container-low text-label-md text-on-surface-variant">
+              <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                 <tr>
                   <th className="px-md py-sm">Data/hora</th>
                   <th className="px-md py-sm">Veículo</th>
@@ -770,7 +783,7 @@ function HistoryPanel({
   if (!groups.length) {
     return (
       <div className="flex min-h-[14rem] flex-col items-center justify-center gap-md text-center">
-        <span className="inline-flex size-14 items-center justify-center rounded-2xl bg-surface-container-low text-primary">
+        <span className="inline-flex size-14 items-center justify-center rounded-xl bg-surface-container-low text-primary">
           <Icon name="history" className="text-3xl" />
         </span>
         <div>
@@ -782,7 +795,7 @@ function HistoryPanel({
         <button
           type="button"
           onClick={onAdd}
-          className="inline-flex items-center gap-sm rounded-xl bg-primary px-lg py-sm text-label-md font-semibold text-on-primary"
+          className="inline-flex items-center gap-sm rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
         >
           <Icon name="add" className="text-lg" />
           Novo registro
@@ -804,7 +817,7 @@ function HistoryPanel({
               {items.map((item) => (
                 <li key={`${item.kind}-${item.id}`} className="relative">
                   <span className="absolute -left-[1.4rem] top-3 size-2.5 rounded-full bg-primary" />
-                  <div className="flex items-start justify-between gap-md rounded-xl border border-outline-variant bg-surface px-md py-md shadow-sm">
+                  <div className="flex items-start justify-between gap-md rounded-xl border border-outline-variant bg-surface px-md py-md">
                     <div className="min-w-0">
                       <div className="truncate text-label-md font-semibold text-on-surface">{item.title}</div>
                       <div className="mt-2xs text-body-sm text-on-surface-variant">
@@ -921,7 +934,7 @@ function ReportKpi({
   accent?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-outline-variant bg-surface p-md shadow-sm">
+    <div className="rounded-xl border border-outline-variant bg-surface p-md">
       <div className="text-label-sm text-on-surface-variant">{label}</div>
       <div
         className={cn(
@@ -954,7 +967,7 @@ function MonthlyBars({
     total: d.total,
   }));
   return (
-    <div className="rounded-2xl border border-outline-variant bg-surface p-md shadow-sm">
+    <div className="rounded-xl border border-outline-variant bg-surface p-md">
       <div className="mb-md text-title-md font-semibold text-on-surface">{title}</div>
       {!chartData.length ? (
         <div className="flex h-48 items-center justify-center text-body-sm text-on-surface-variant">
@@ -1093,7 +1106,7 @@ function ReportPanel({ report, loading }: { report: Report | null; loading: bool
             />
           </div>
 
-          <div className="rounded-2xl border border-outline-variant bg-surface p-md shadow-sm">
+          <div className="rounded-xl border border-outline-variant bg-surface p-md">
             <div className="mb-md text-title-md font-semibold text-on-surface">
               Rotina de abastecimento
             </div>
@@ -1234,7 +1247,7 @@ function RemindersPanel({
         </button>
         <button
           type="button"
-          className="rounded-xl bg-primary px-md py-sm text-label-md font-semibold text-on-primary"
+          className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
           onClick={onAdd}
         >
           Novo lembrete
@@ -1251,7 +1264,7 @@ function RemindersPanel({
             return (
               <div
                 key={r.id}
-                className="rounded-2xl border border-outline-variant bg-surface px-md py-md shadow-sm"
+                className="rounded-xl border border-outline-variant bg-surface px-md py-md"
               >
                 <div className="flex items-start gap-md">
                   <span className="inline-flex size-10 items-center justify-center rounded-xl bg-violet-500/15 text-violet-700">
@@ -1296,7 +1309,7 @@ function VehiclesPanel({
         </button>
         <button
           type="button"
-          className="rounded-xl bg-primary px-md py-sm text-label-md font-semibold text-on-primary"
+          className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
           onClick={onNew}
         >
           Novo veículo
@@ -1311,7 +1324,7 @@ function VehiclesPanel({
           {vehicles.map((v) => (
             <div
               key={v.id}
-              className="rounded-2xl border border-outline-variant bg-surface px-md py-md shadow-sm"
+              className="rounded-xl border border-outline-variant bg-surface px-md py-md"
             >
               <div className="flex items-start gap-md">
                 <FleetBrandMark brand={v.brand} size="md" />
@@ -1356,7 +1369,7 @@ function DriversPanel({
         </button>
         <button
           type="button"
-          className="rounded-xl bg-primary px-md py-sm text-label-md font-semibold text-on-primary"
+          className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
           onClick={onNew}
         >
           Novo motorista
@@ -1371,7 +1384,7 @@ function DriversPanel({
           {drivers.map((d) => (
             <div
               key={d.id}
-              className="rounded-2xl border border-outline-variant bg-surface px-md py-md shadow-sm"
+              className="rounded-xl border border-outline-variant bg-surface px-md py-md"
             >
               <div className="flex items-start gap-md">
                 <span className="inline-flex size-10 items-center justify-center rounded-xl bg-surface-container-low text-on-surface">
@@ -1980,7 +1993,7 @@ function EntryFormDialog({
             <button
               type="submit"
               disabled={busy}
-              className="rounded-lg bg-primary px-md py-sm text-label-md text-on-primary disabled:opacity-60"
+              className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-60"
             >
               {busy ? "Salvando…" : "Cadastrar"}
             </button>
@@ -2076,7 +2089,7 @@ function VehicleFormDialog({
             <button
               type="submit"
               disabled={busy}
-              className="rounded-lg bg-primary px-md py-sm text-on-primary"
+              className="rounded-lg bg-secondary-container px-md py-sm font-semibold text-on-secondary-container"
             >
               Salvar
             </button>
@@ -2144,7 +2157,7 @@ function DriverFormDialog({
             <button
               type="submit"
               disabled={busy}
-              className="rounded-lg bg-primary px-md py-sm text-on-primary"
+              className="rounded-lg bg-secondary-container px-md py-sm font-semibold text-on-secondary-container"
             >
               Salvar
             </button>

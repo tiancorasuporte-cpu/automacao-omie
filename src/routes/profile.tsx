@@ -1,7 +1,8 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+﻿import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
+import { PageTitle } from "@/components/PageChrome";
 import { updateProfileFn } from "@/lib/accounts";
 import { roleLabel, requireAuth } from "@/lib/require-auth";
 import { APP_NAME } from "@/lib/brand";
@@ -31,14 +32,12 @@ function ProfilePage() {
     <AppShell mobileTitle="Perfil">
       <main className="min-w-0 w-full flex-1 p-margin-mobile md:p-margin-desktop">
         <div className="mx-auto w-full max-w-[36rem] space-y-lg">
-          <div>
-            <h2 className="text-headline-lg tracking-tight text-primary">Meu perfil</h2>
-            <p className="mt-base text-body-md text-on-surface-variant">
-              {roleLabel(user.role)} • login {user.username}
-            </p>
-          </div>
+          <PageTitle
+            title="Meu perfil"
+            subtitle={`${roleLabel(user.role)} · login ${user.username}`}
+          />
           <form
-            className="space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-lg"
+            className="space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-md"
             onSubmit={async (event) => {
               event.preventDefault();
               setError(null);
@@ -79,7 +78,7 @@ function ProfilePage() {
             <button
               type="submit"
               disabled={pending}
-              className="rounded-lg bg-primary px-md py-sm text-sm font-semibold text-on-primary disabled:opacity-70"
+              className="rounded-lg bg-secondary-container px-md py-sm text-sm font-semibold text-on-secondary-container disabled:opacity-70"
             >
               {pending ? "Salvando…" : "Salvar"}
             </button>

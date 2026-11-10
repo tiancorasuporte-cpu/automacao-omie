@@ -234,6 +234,7 @@
   font-family: "Material Symbols Outlined";
   font-weight: normal;
   font-style: normal;
+  font-size: 1.25rem;
   line-height: 1;
   letter-spacing: normal;
   text-transform: none;
@@ -241,12 +242,15 @@
   white-space: nowrap;
   word-wrap: normal;
   direction: ltr;
+  font-feature-settings: "liga";
   -webkit-font-feature-settings: "liga";
   -webkit-font-smoothing: antialiased;
+  /* Sempre declarar todos os eixos — só "FILL" gera ícone fantasma/duplicado. */
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
 }
 
 @utility icon-filled {
-  font-variation-settings: "FILL" 1;
+  font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
 }
 
 @utility input-glow {
@@ -273,21 +277,36 @@
   position: relative;
   z-index: 50;
   display: flex;
-  width: min(32rem, 100%);
-  min-width: min(18rem, 100%) !important;
+  width: min(40rem, calc(100vw - 2rem));
+  max-width: min(40rem, calc(100vw - 2rem));
+  min-width: 0;
   max-height: min(90vh, 56rem);
   flex-shrink: 0;
   flex-direction: column;
-  gap: var(--spacing-md);
+  gap: var(--spacing-lg);
   overflow-x: hidden;
   overflow-y: auto;
   border-radius: 0.75rem;
-  border: 1px solid var(--color-outline-variant);
+  border: 1px solid color-mix(in oklch, var(--color-outline-variant) 70%, transparent);
   background: var(--color-surface-container-lowest);
-  padding: var(--spacing-md);
+  padding: var(--spacing-xl);
   color: var(--color-on-surface);
   box-shadow:
     0 20px 40px -24px color-mix(in oklch, var(--primary) 35%, transparent);
+}
+
+/* Larguras opcionais via className no DialogContent */
+.ancora-dialog-panel.dialog-sm {
+  width: min(28rem, calc(100vw - 2rem));
+  max-width: min(28rem, calc(100vw - 2rem));
+}
+.ancora-dialog-panel.dialog-lg {
+  width: min(48rem, calc(100vw - 2rem));
+  max-width: min(48rem, calc(100vw - 2rem));
+}
+.ancora-dialog-panel.dialog-xl {
+  width: min(56rem, calc(100vw - 2rem));
+  max-width: min(56rem, calc(100vw - 2rem));
 }
 
 @keyframes login-rise {

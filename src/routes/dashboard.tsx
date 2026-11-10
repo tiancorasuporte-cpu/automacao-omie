@@ -3,6 +3,7 @@ import { useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
+import { btnOutline, btnPrimary, PageTitle } from "@/components/PageChrome";
 import { getDashboardFn, syncOmieFn, sendNotificationsFn } from "@/lib/omie";
 import { isAdmin, requireModule } from "@/lib/require-auth";
 import { APP_NAME } from "@/lib/brand";
@@ -41,15 +42,12 @@ function DashboardPage() {
     <AppShell mobileTitle="Painel">
       <main className="flex-1 p-margin-mobile md:p-margin-desktop">
         <div className="mx-auto max-w-6xl space-y-lg">
-          <div className="flex flex-col gap-md md:flex-row md:items-end md:justify-between">
-            <div>
-              <h2 className="text-headline-lg tracking-tight text-primary">Painel</h2>
-              <p className="mt-base text-body-lg text-on-surface-variant">
-                Boletos sincronizados do Omie com alertas WhatsApp via WAHA.
-              </p>
-            </div>
+          <PageTitle
+            title="Painel"
+            subtitle="Boletos sincronizados do Omie com alertas WhatsApp via WAHA."
+          >
             {admin ? (
-              <div className="flex flex-wrap gap-sm">
+              <>
                 <button
                   type="button"
                   disabled={pending !== null}
@@ -82,9 +80,9 @@ function DashboardPage() {
                       setPending(null);
                     }
                   }}
-                  className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
+                  className={btnPrimary}
                 >
-                  <Icon name="sync" className="text-[18px]" />
+                  <Icon name="sync" className="text-[16px]" />
                   {pending === "sync" ? "Sincronizando..." : "Sincronizar Omie"}
                 </button>
                 <button
@@ -109,20 +107,24 @@ function DashboardPage() {
                       setPending(null);
                     }
                   }}
-                  className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-md py-sm text-label-md font-semibold text-primary"
+                  className="inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10 disabled:opacity-50"
                 >
-                  <Icon name="send" className="text-[18px]" />
+                  <Icon name="send" className="text-[16px]" />
                   {pending === "notify" ? "Enviando..." : "Enviar alertas"}
                 </button>
-              </div>
+              </>
             ) : null}
-          </div>
+          </PageTitle>
 
           {message ? (
-            <p className="rounded-lg bg-secondary-fixed/30 px-md py-sm text-body-md text-primary">{message}</p>
+            <p className="rounded-lg border border-emerald-300 bg-emerald-50 px-md py-sm text-body-md text-emerald-900">
+              {message}
+            </p>
           ) : null}
           {error ? (
-            <p className="rounded-lg bg-error-container px-md py-sm text-body-md text-on-error-container">{error}</p>
+            <p className="rounded-lg border border-red-300 bg-red-50 px-md py-sm text-body-md text-red-900">
+              {error}
+            </p>
           ) : null}
 
           <div className="grid grid-cols-2 gap-gutter md:grid-cols-4">
@@ -131,17 +133,17 @@ function DashboardPage() {
                 key={card.label}
                 className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md"
               >
-                <div className="flex items-center gap-xs text-label-md uppercase text-on-surface-variant">
-                  <Icon name={card.icon} className="text-secondary" />
+                <div className="flex items-center gap-xs text-label-md text-on-surface-variant">
+                  <Icon name={card.icon} className="text-primary" />
                   {card.label}
                 </div>
-                <div className="mt-base text-headline-md text-primary">{card.value}</div>
+                <div className="mt-sm text-headline-md text-primary">{card.value}</div>
               </div>
             ))}
           </div>
 
-          <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-lg">
-            <h3 className="mb-md text-title-lg text-primary">Status da integração</h3>
+          <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+            <h3 className="mb-md text-title-md text-on-surface">Status da integração</h3>
             <dl className="grid gap-sm md:grid-cols-2">
               <div>
                 <dt className="text-label-md text-on-surface-variant">Aplicativos Omie no .env</dt>
@@ -154,8 +156,8 @@ function DashboardPage() {
             </dl>
           </section>
 
-          <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-lg">
-            <h3 className="mb-md text-title-lg text-primary">Últimas sincronizações</h3>
+          <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+            <h3 className="mb-md text-title-md text-on-surface">Últimas sincronizações</h3>
             {data.syncLogs.length === 0 ? (
               <p className="text-body-md text-on-surface-variant">Nenhuma sincronização registrada ainda.</p>
             ) : (
