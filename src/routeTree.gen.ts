@@ -40,6 +40,7 @@ import { Route as ApiMobileLogoutRouteImport } from './routes/api/mobile/logout'
 import { Route as ApiMobileMeRouteImport } from './routes/api/mobile/me'
 import { Route as ApiMobileSyncRouteImport } from './routes/api/mobile/sync'
 import { Route as ApiWahaWebhookRouteImport } from './routes/api/waha/webhook'
+import { Route as ApiMobileEstoqueIndexRouteImport } from './routes/api/mobile/estoque/index'
 import { Route as ApiMobileFrotaAbastecimentoRouteImport } from './routes/api/mobile/frota/abastecimento'
 import { Route as ApiMobileFrotaKmRouteImport } from './routes/api/mobile/frota/km'
 import { Route as ApiMobileFrotaServicoRouteImport } from './routes/api/mobile/frota/servico'
@@ -51,6 +52,7 @@ import { Route as ApiMobileOsIdCheckOutRouteImport } from './routes/api/mobile/o
 import { Route as ApiMobileOsIdPauseRouteImport } from './routes/api/mobile/os/$id/pause'
 import { Route as ApiMobileOsIdResumeRouteImport } from './routes/api/mobile/os/$id/resume'
 import { Route as ApiMobileOsIdStartRouteImport } from './routes/api/mobile/os/$id/start'
+import { Route as ApiMobileOsIdUsarEstoqueRouteImport } from './routes/api/mobile/os/$id/usar-estoque'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -207,6 +209,11 @@ const ApiWahaWebhookRoute = ApiWahaWebhookRouteImport.update({
   path: '/api/waha/webhook',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMobileEstoqueIndexRoute = ApiMobileEstoqueIndexRouteImport.update({
+  id: '/api/mobile/estoque/',
+  path: '/api/mobile/estoque/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiMobileFrotaAbastecimentoRoute =
   ApiMobileFrotaAbastecimentoRouteImport.update({
     id: '/api/mobile/frota/abastecimento',
@@ -263,6 +270,12 @@ const ApiMobileOsIdStartRoute = ApiMobileOsIdStartRouteImport.update({
   path: '/api/mobile/os/$id/start',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMobileOsIdUsarEstoqueRoute =
+  ApiMobileOsIdUsarEstoqueRouteImport.update({
+    id: '/api/mobile/os/$id/usar-estoque',
+    path: '/api/mobile/os/$id/usar-estoque',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -300,12 +313,14 @@ export interface FileRoutesByFullPath {
   '/api/mobile/frota/km': typeof ApiMobileFrotaKmRoute
   '/api/mobile/frota/servico': typeof ApiMobileFrotaServicoRoute
   '/api/mobile/frota/veiculo': typeof ApiMobileFrotaVeiculoRoute
+  '/api/mobile/estoque/': typeof ApiMobileEstoqueIndexRoute
   '/api/mobile/os/': typeof ApiMobileOsIndexRoute
   '/api/mobile/os/$id/check-in': typeof ApiMobileOsIdCheckInRoute
   '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
+  '/api/mobile/os/$id/usar-estoque': typeof ApiMobileOsIdUsarEstoqueRoute
   '/api/mobile/os/$id/': typeof ApiMobileOsIdIndexRoute
 }
 export interface FileRoutesByTo {
@@ -344,12 +359,14 @@ export interface FileRoutesByTo {
   '/api/mobile/frota/km': typeof ApiMobileFrotaKmRoute
   '/api/mobile/frota/servico': typeof ApiMobileFrotaServicoRoute
   '/api/mobile/frota/veiculo': typeof ApiMobileFrotaVeiculoRoute
+  '/api/mobile/estoque': typeof ApiMobileEstoqueIndexRoute
   '/api/mobile/os': typeof ApiMobileOsIndexRoute
   '/api/mobile/os/$id/check-in': typeof ApiMobileOsIdCheckInRoute
   '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
+  '/api/mobile/os/$id/usar-estoque': typeof ApiMobileOsIdUsarEstoqueRoute
   '/api/mobile/os/$id': typeof ApiMobileOsIdIndexRoute
 }
 export interface FileRoutesById {
@@ -389,12 +406,14 @@ export interface FileRoutesById {
   '/api/mobile/frota/km': typeof ApiMobileFrotaKmRoute
   '/api/mobile/frota/servico': typeof ApiMobileFrotaServicoRoute
   '/api/mobile/frota/veiculo': typeof ApiMobileFrotaVeiculoRoute
+  '/api/mobile/estoque/': typeof ApiMobileEstoqueIndexRoute
   '/api/mobile/os/': typeof ApiMobileOsIndexRoute
   '/api/mobile/os/$id/check-in': typeof ApiMobileOsIdCheckInRoute
   '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
+  '/api/mobile/os/$id/usar-estoque': typeof ApiMobileOsIdUsarEstoqueRoute
   '/api/mobile/os/$id/': typeof ApiMobileOsIdIndexRoute
 }
 export interface FileRouteTypes {
@@ -435,12 +454,14 @@ export interface FileRouteTypes {
     | '/api/mobile/frota/km'
     | '/api/mobile/frota/servico'
     | '/api/mobile/frota/veiculo'
+    | '/api/mobile/estoque/'
     | '/api/mobile/os/'
     | '/api/mobile/os/$id/check-in'
     | '/api/mobile/os/$id/check-out'
     | '/api/mobile/os/$id/pause'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
+    | '/api/mobile/os/$id/usar-estoque'
     | '/api/mobile/os/$id/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -479,12 +500,14 @@ export interface FileRouteTypes {
     | '/api/mobile/frota/km'
     | '/api/mobile/frota/servico'
     | '/api/mobile/frota/veiculo'
+    | '/api/mobile/estoque'
     | '/api/mobile/os'
     | '/api/mobile/os/$id/check-in'
     | '/api/mobile/os/$id/check-out'
     | '/api/mobile/os/$id/pause'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
+    | '/api/mobile/os/$id/usar-estoque'
     | '/api/mobile/os/$id'
   id:
     | '__root__'
@@ -523,12 +546,14 @@ export interface FileRouteTypes {
     | '/api/mobile/frota/km'
     | '/api/mobile/frota/servico'
     | '/api/mobile/frota/veiculo'
+    | '/api/mobile/estoque/'
     | '/api/mobile/os/'
     | '/api/mobile/os/$id/check-in'
     | '/api/mobile/os/$id/check-out'
     | '/api/mobile/os/$id/pause'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
+    | '/api/mobile/os/$id/usar-estoque'
     | '/api/mobile/os/$id/'
   fileRoutesById: FileRoutesById
 }
@@ -568,12 +593,14 @@ export interface RootRouteChildren {
   ApiMobileFrotaKmRoute: typeof ApiMobileFrotaKmRoute
   ApiMobileFrotaServicoRoute: typeof ApiMobileFrotaServicoRoute
   ApiMobileFrotaVeiculoRoute: typeof ApiMobileFrotaVeiculoRoute
+  ApiMobileEstoqueIndexRoute: typeof ApiMobileEstoqueIndexRoute
   ApiMobileOsIndexRoute: typeof ApiMobileOsIndexRoute
   ApiMobileOsIdCheckInRoute: typeof ApiMobileOsIdCheckInRoute
   ApiMobileOsIdCheckOutRoute: typeof ApiMobileOsIdCheckOutRoute
   ApiMobileOsIdPauseRoute: typeof ApiMobileOsIdPauseRoute
   ApiMobileOsIdResumeRoute: typeof ApiMobileOsIdResumeRoute
   ApiMobileOsIdStartRoute: typeof ApiMobileOsIdStartRoute
+  ApiMobileOsIdUsarEstoqueRoute: typeof ApiMobileOsIdUsarEstoqueRoute
   ApiMobileOsIdIndexRoute: typeof ApiMobileOsIdIndexRoute
 }
 
@@ -796,6 +823,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiWahaWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mobile/estoque/': {
+      id: '/api/mobile/estoque/'
+      path: '/api/mobile/estoque'
+      fullPath: '/api/mobile/estoque/'
+      preLoaderRoute: typeof ApiMobileEstoqueIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/mobile/frota/abastecimento': {
       id: '/api/mobile/frota/abastecimento'
       path: '/api/mobile/frota/abastecimento'
@@ -873,6 +907,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMobileOsIdStartRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mobile/os/$id/usar-estoque': {
+      id: '/api/mobile/os/$id/usar-estoque'
+      path: '/api/mobile/os/$id/usar-estoque'
+      fullPath: '/api/mobile/os/$id/usar-estoque'
+      preLoaderRoute: typeof ApiMobileOsIdUsarEstoqueRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -912,12 +953,14 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMobileFrotaKmRoute: ApiMobileFrotaKmRoute,
   ApiMobileFrotaServicoRoute: ApiMobileFrotaServicoRoute,
   ApiMobileFrotaVeiculoRoute: ApiMobileFrotaVeiculoRoute,
+  ApiMobileEstoqueIndexRoute: ApiMobileEstoqueIndexRoute,
   ApiMobileOsIndexRoute: ApiMobileOsIndexRoute,
   ApiMobileOsIdCheckInRoute: ApiMobileOsIdCheckInRoute,
   ApiMobileOsIdCheckOutRoute: ApiMobileOsIdCheckOutRoute,
   ApiMobileOsIdPauseRoute: ApiMobileOsIdPauseRoute,
   ApiMobileOsIdResumeRoute: ApiMobileOsIdResumeRoute,
   ApiMobileOsIdStartRoute: ApiMobileOsIdStartRoute,
+  ApiMobileOsIdUsarEstoqueRoute: ApiMobileOsIdUsarEstoqueRoute,
   ApiMobileOsIdIndexRoute: ApiMobileOsIdIndexRoute,
 }
 export const routeTree = rootRouteImport

@@ -1,5 +1,5 @@
 ﻿import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ActivitiesCalendar,
@@ -232,6 +232,10 @@ function toAssistRelatorioPdfRow(os: OsRow): AssistRelatorioPdfRow {
       devolvido: it.devolvido,
     })),
     fotos: (os.rel?.fotos ?? []).filter((f) => typeof f === "string" && f.startsWith("data:image/")),
+    assinatura:
+      typeof os.rel?.assinatura === "string" && os.rel.assinatura.trim().length > 16
+        ? os.rel.assinatura.trim()
+        : null,
   };
 }
 
@@ -277,6 +281,8 @@ function AssistenciaPage() {
   const [relPdfBusy, setRelPdfBusy] = useState(false);
   const [dragOsId, setDragOsId] = useState<number | null>(null);
   const [dragOverStage, setDragOverStage] = useState<number | null>(null);
+  const dragOsIdRef = useRef<number | null>(null);
+  const suppressCardClickRef = useRef(false);
 
   useEffect(() => {
     setOsList(boot.osList);
@@ -513,14 +519,44 @@ function AssistenciaPage() {
     });
   }, [filtered, boot.user]);
 
-  async function onKanbanDrop(toStage: number) {
-    const osId = dragOsId;
+  function canSilentKanbanAdvance(os: OsRow, toStage: number) {
+    if (toStage <= os.stage) return false;
+    if (os.stage === 0 && toStage === 1) return true;
+    if (os.stage === 1 && (toStage === 2 || toStage === 3)) return true;
+    if (os.stage === 6 && toStage === 7) return true;
+    return false;
+  }
+
+  async function onKanbanDrop(toStage: number, osIdArg?: number | null) {
+    const osId = osIdArg ?? dragOsIdRef.current ?? dragOsId;
+    dragOsIdRef.current = null;
     setDragOverStage(null);
     setDragOsId(null);
-    if (osId == null) return;
+    if (osId == null || busy) return;
     const os = osList.find((o) => o.id === osId);
     if (!os || os.stage === toStage) return;
-    await run(() => moveOsKanbanFn({ data: { osId, toStage } }));
+
+    const cta = osCardPrimaryCta(os);
+
+    // Voltar etapa: mantém fluxo de retorno/aprovação.
+    if (toStage < os.stage) {
+      await run(() => moveOsKanbanFn({ data: { osId, toStage } }));
+      return;
+    }
+
+    // Etapas que precisam da tela do botão (agendar / iniciar / abrir).
+    if (cta.kind === "schedule" || cta.kind === "start" || cta.kind === "open") {
+      await onOsCardCta(os, cta);
+      return;
+    }
+
+    // Avanço simples só quando a coluna bate com o próximo passo.
+    if (cta.kind === "advance" && canSilentKanbanAdvance(os, toStage)) {
+      await run(() => moveOsKanbanFn({ data: { osId, toStage } }));
+      return;
+    }
+
+    await onOsCardCta(os, cta);
   }
 
   function osNeedsDisposition(os: OsRow) {
@@ -2202,6 +2238,7 @@ function AssistenciaPage() {
                   )}
                   onDragOver={(e) => {
                     e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
                     setDragOverStage(stage.idx);
                   }}
                   onDragLeave={() => {
@@ -2209,7 +2246,10 @@ function AssistenciaPage() {
                   }}
                   onDrop={(e) => {
                     e.preventDefault();
-                    void onKanbanDrop(stage.idx);
+                    const raw = Number(e.dataTransfer.getData("text/plain"));
+                    const fromData =
+                      Number.isFinite(raw) && raw > 0 ? raw : null;
+                    void onKanbanDrop(stage.idx, fromData);
                   }}
                 >
                   <div className={cn("px-md py-sm", style.header)}>
@@ -2329,30 +2369,58 @@ function AssistenciaPage() {
                       return (
                         <div
                           key={os.id}
-                          draggable={!busy}
+                          draggable
                           onDragStart={(e) => {
+                            if (
+                              (e.target as HTMLElement | null)?.closest?.(
+                                "[data-no-drag]",
+                              )
+                            ) {
+                              e.preventDefault();
+                              return;
+                            }
+                            suppressCardClickRef.current = true;
+                            dragOsIdRef.current = os.id;
                             setDragOsId(os.id);
                             e.dataTransfer.setData("text/plain", String(os.id));
                             e.dataTransfer.effectAllowed = "move";
                           }}
                           onDragEnd={() => {
+                            dragOsIdRef.current = null;
                             setDragOsId(null);
                             setDragOverStage(null);
+                            window.setTimeout(() => {
+                              suppressCardClickRef.current = false;
+                            }, 50);
                           }}
                           className={cn(
-                            "cursor-grab rounded-xl border p-sm transition active:cursor-grabbing",
+                            "cursor-grab select-none rounded-xl border p-sm transition active:cursor-grabbing",
                             style.card,
                             selectedId === os.id && "ring-2 ring-amber-600",
                             dragOsId === os.id && "opacity-60",
                           )}
                         >
-                          <button
-                            type="button"
-                            onClick={() => void openDetail(os)}
-                            className="w-full text-left"
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              if (suppressCardClickRef.current) return;
+                              void openDetail(os);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                void openDetail(os);
+                              }
+                            }}
+                            className="w-full cursor-grab text-left active:cursor-grabbing"
                           >
                             <div className="flex items-start justify-between gap-xs">
-                              <span className="text-label-md font-bold tracking-wide text-on-surface">
+                              <span className="inline-flex items-center gap-2xs text-label-md font-bold tracking-wide text-on-surface">
+                                <Icon
+                                  name="drag_indicator"
+                                  className="text-[16px] text-on-surface-variant"
+                                />
                                 {os.num}
                               </span>
                               <span
@@ -2439,13 +2507,14 @@ function AssistenciaPage() {
                                 Divergência material
                               </div>
                             ) : null}
-                          </button>
+                          </div>
                           <div className="mt-sm flex items-center justify-between gap-xs">
                             <span className="text-label-sm text-on-surface-variant">
                               {mineCard ? "Com você" : "Outro setor"}
                             </span>
                             <button
                               type="button"
+                              data-no-drag
                               disabled={busy}
                               className={cn(
                                 btnPrimary,

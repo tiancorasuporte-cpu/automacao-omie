@@ -1067,6 +1067,18 @@ export async function checkOutOs(input: {
     });
   } catch {
     // Check-out ok; material em campo ou visita sem levantamento fica para conferência.
+    // Ainda assim sai de "Em execução" para o técnico ver "Aguardando conferência".
+    await db`
+      update assist_os
+      set stage = 6, updated_at = now()
+      where id = ${os.id} and stage = 5
+    `;
+    await addOsEvent({
+      osId: os.id,
+      quem: input.quem,
+      userId: input.userId,
+      acao: "Finalizado pelo técnico · aguardando conferência",
+    });
     return getOsById(os.id);
   }
 }

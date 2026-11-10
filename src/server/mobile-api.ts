@@ -138,6 +138,21 @@ export async function handleMobileLogout(request: Request) {
   return jsonOk({ ok: true });
 }
 
+async function listTeamsForTecnico(userId: number) {
+  const { getDb } = await import("@/db/schema");
+  const db = await getDb();
+  const rows = await db<{ id: number; name: string }[]>`
+    select distinct t.id, t.name
+    from assist_teams t
+    join assist_team_members m on m.team_id = t.id
+    where m.user_id = ${userId}
+      and coalesce(m.active, true) = true
+      and coalesce(t.active, true) = true
+    order by t.name asc
+  `;
+  return rows.map((r) => ({ id: Number(r.id), name: String(r.name) }));
+}
+
 export async function handleMobileMe(request: Request) {
   await ensureSchema();
   const auth = await requireMobileTecnico(request);
@@ -146,10 +161,120 @@ export async function handleMobileMe(request: Request) {
   if (auth.user.defaultVehicleId) {
     vehicle = await getFleetVehicleById(auth.user.defaultVehicleId);
   }
+  const teams = await listTeamsForTecnico(auth.user.id);
   return jsonOk({
     ok: true,
     user: publicUser(auth.user),
     vehicle,
+    teams,
+  });
+}
+
+export async function handleMobileEstoque(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const teams = await listTeamsForTecnico(auth.user.id);
+  if (!teams.length) {
+    return jsonOk({ ok: true, teams: [], items: [] });
+  }
+  const { listTeamStock } = await import("@/db/team-stock");
+  const items = (
+    await Promise.all(teams.map((t) => listTeamStock({ teamId: t.id })))
+  ).flat();
+  return jsonOk({ ok: true, teams, items });
+}
+
+export async function handleMobileUsarEstoque(
+  request: Request,
+  osId: number,
+) {
+  return withOwnedOs(request, osId, async (user, ownedOs) => {
+    const body = await readJsonBody<{
+      productId?: number;
+      quantidade?: number;
+      teamId?: number;
+    }>(request);
+    const productId = Number(body?.productId);
+    const quantidade = Number(body?.quantidade ?? 1);
+    if (!Number.isFinite(productId) || productId <= 0) {
+      return jsonError("Produto inválido.");
+    }
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      return jsonError("Quantidade inválida.");
+    }
+    if (ownedOs.stage !== 5) {
+      return jsonError("Só é possível usar estoque com a O.S. em execução.");
+    }
+
+    const teams = await listTeamsForTecnico(user.id);
+    const teamId =
+      Number(body?.teamId) ||
+      ownedOs.teamId ||
+      teams[0]?.id ||
+      null;
+    if (!teamId) return jsonError("Técnico sem equipe vinculada.");
+    if (!teams.some((t) => t.id === teamId) && ownedOs.teamId !== teamId) {
+      return jsonError("Equipe não autorizada.");
+    }
+
+    const { getDb } = await import("@/db/schema");
+    const { creditTeamStock, debitTeamStock, teamStockTransaction } =
+      await import("@/db/team-stock");
+    const { addOsItem } = await import("@/db/assistencia");
+    const db = await getDb();
+
+    const [stockRow] = (await db`
+      select nome from team_stock
+      where team_id = ${teamId} and product_id = ${productId}
+      limit 1
+    `) as { nome: string }[];
+    if (!stockRow) throw new Error("Produto sem saldo no estoque da equipe.");
+    const productName = String(stockRow.nome);
+
+    await teamStockTransaction(db, async (tx) => {
+      await debitTeamStock(tx, {
+        teamId,
+        productId,
+        quantidade,
+        tipo: "aplicado_os",
+        tecnicoNome: user.name,
+        osId,
+        motivo: `Usado na OS ${ownedOs.num} (app técnico)`,
+        userId: user.id,
+        userName: user.name,
+      });
+    });
+
+    try {
+      const os = await addOsItem({
+        osId,
+        qtd: quantidade,
+        nome: productName,
+        status: "extra",
+        origem: "estoque_equipe",
+        productId,
+        quem: user.name,
+        userId: user.id,
+      });
+      return jsonOk({ ok: true, os: serializeOs(os!) });
+    } catch (error) {
+      await teamStockTransaction(db, async (tx) => {
+        await creditTeamStock(tx, {
+          teamId,
+          productId,
+          nome: productName,
+          quantidade,
+          tipo: "ajuste",
+          tecnicoNome: user.name,
+          osId,
+          motivo: `Rollback uso estoque · OS ${ownedOs.num}`,
+          userId: user.id,
+          userName: user.name,
+        });
+      }).catch(() => undefined);
+      throw error;
+    }
   });
 }
 

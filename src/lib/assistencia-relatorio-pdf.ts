@@ -30,6 +30,8 @@ export type AssistRelatorioPdfRow = {
   items: Array<{ qtd: number; nome: string; usado: number | null; devolvido: number | null }>;
   /** data URLs (jpeg/png) das fotos do relatório/check-out */
   fotos: string[];
+  /** data URL da assinatura do cliente (png/jpeg/svg) */
+  assinatura: string | null;
 };
 
 export type AssistRelatorioPdfInput = {
@@ -86,6 +88,98 @@ function imageFormat(dataUrl: string): "JPEG" | "PNG" | null {
   if (/^data:image\/png;/i.test(dataUrl)) return "PNG";
   if (/^data:image\/(jpeg|jpg);/i.test(dataUrl)) return "JPEG";
   return null;
+}
+
+/** jsPDF não embute SVG — converte assinatura (svg/png/jpeg) para PNG. */
+async function signatureToPngDataUrl(dataUrl: string): Promise<string | null> {
+  if (typeof document === "undefined") return null;
+  if (!dataUrl || typeof dataUrl !== "string") return null;
+  if (/^data:image\/(png|jpeg|jpg);/i.test(dataUrl)) {
+    return shrinkPhotoForPdf(dataUrl, 720);
+  }
+  if (!/^data:image\/svg\+xml/i.test(dataUrl)) return null;
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("assinatura"));
+      el.src = dataUrl;
+    });
+    const w = Math.max(320, img.naturalWidth || 320);
+    const h = Math.max(120, img.naturalHeight || 120);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL("image/png");
+  } catch {
+    return null;
+  }
+}
+
+async function drawAssinaturaBlock(
+  doc: import("jspdf").jsPDF,
+  assinatura: string | null | undefined,
+  startY: number,
+  opts?: { margin?: number; maxW?: number; maxH?: number },
+) {
+  if (!assinatura) return startY;
+  const png = await signatureToPngDataUrl(assinatura);
+  if (!png) return startY;
+
+  const M = opts?.margin ?? 14;
+  const maxW = opts?.maxW ?? 90;
+  const maxH = opts?.maxH ?? 36;
+  const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
+  let y = startY + 6;
+
+  if (y > H - 50) {
+    doc.addPage();
+    y = 18;
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...INK);
+  doc.text("Assinatura do cliente", M, y);
+  y += 5;
+
+  const size = (await loadImageSize(png)) ?? { w: 320, h: 120 };
+  const ratio = size.w / Math.max(size.h, 1);
+  let drawW = maxW;
+  let drawH = drawW / ratio;
+  if (drawH > maxH) {
+    drawH = maxH;
+    drawW = drawH * ratio;
+  }
+
+  if (y + drawH > H - 16) {
+    doc.addPage();
+    y = 18;
+  }
+
+  try {
+    doc.addImage(png, "PNG", M, y, drawW, drawH);
+    doc.setDrawColor(200);
+    doc.rect(M, y, drawW, drawH);
+  } catch {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(...MUT);
+    doc.text("(assinatura indisponível no PDF)", M, y + 6);
+  }
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(...MUT);
+  doc.text("Confirmo a execução do serviço.", M, y + drawH + 5);
+  void W;
+  return y + drawH + 10;
 }
 
 function loadImageSize(dataUrl: string): Promise<{ w: number; h: number } | null> {
@@ -343,17 +437,35 @@ export async function downloadAssistRelatorioPdf(input: AssistRelatorioPdfInput)
         : [["—", "Nenhuma OS no filtro.", "", "", "", "", "", "", "", ""]],
   });
 
-  const withFotos = input.rows.filter((r) => (r.fotos?.length ?? 0) > 0);
-  for (const row of withFotos) {
+  const withExtras = input.rows.filter(
+    (r) => (r.fotos?.length ?? 0) > 0 || Boolean(r.assinatura),
+  );
+  for (const row of withExtras) {
     doc.addPage();
+    const bits = [
+      row.fotos?.length ? `${row.fotos.length} foto(s)` : null,
+      row.assinatura ? "assinatura" : null,
+    ].filter(Boolean);
     drawHeader(doc, {
-      title: `OS ${row.num} · Fotos`,
+      title: `OS ${row.num} · Evidências`,
       subtitle: `${row.clientName}${row.clientCity ? ` · ${row.clientCity}` : ""}`,
       rightTop: input.generatedAt,
-      rightBottom: `${row.fotos.length} foto(s)`,
+      rightBottom: bits.join(" · ") || "—",
       logo,
     });
-    await drawPhotoGrid(doc, row.fotos, 36, { margin: 12, cols: 3, maxH: 52 });
+    let yExtras = 36;
+    if (row.fotos?.length) {
+      yExtras = await drawPhotoGrid(doc, row.fotos, yExtras, {
+        margin: 12,
+        cols: 3,
+        maxH: 52,
+      });
+    }
+    await drawAssinaturaBlock(doc, row.assinatura, yExtras, {
+      margin: 12,
+      maxW: 110,
+      maxH: 40,
+    });
   }
 
   drawFooter(doc);
@@ -458,13 +570,20 @@ export async function downloadAssistOsPdf(row: AssistRelatorioPdfRow) {
     (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ??
     y + 20;
 
+  let yAfter = afterTable + 8;
   if (row.fotos?.length) {
-    await drawPhotoGrid(doc, row.fotos, afterTable + 8, {
+    yAfter = await drawPhotoGrid(doc, row.fotos, yAfter, {
       margin: M,
       cols: 2,
       maxH: 62,
     });
   }
+
+  await drawAssinaturaBlock(doc, row.assinatura, yAfter, {
+    margin: M,
+    maxW: W - 2 * M,
+    maxH: 42,
+  });
 
   drawFooter(doc);
   saveBlob(doc, `OS-${row.num.replace(/\s+/g, "")}.pdf`);
