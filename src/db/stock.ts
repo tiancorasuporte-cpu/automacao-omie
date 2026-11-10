@@ -1,6 +1,7 @@
 import "@tanstack/react-start/server-only";
 
 import { getDb } from "@/db/schema";
+import { effectiveCmc } from "@/lib/product-pricing";
 
 type Db = Awaited<ReturnType<typeof getDb>>;
 
@@ -20,6 +21,14 @@ export type ProductStockRow = {
   quantidadeFisica: number;
   estoqueMinimo: number;
   diferenca: number;
+  /** CMC Omie (oficial). */
+  cmc: number | null;
+  /** CMC interno (override local). */
+  cmcInterno: number | null;
+  /** CMC efetivo usado para custo (interno se houver, senão Omie). */
+  cmcEfetivo: number | null;
+  /** quantidadeFisica × cmcEfetivo */
+  custoTotal: number;
   stockUpdatedAt: string | null;
   hasMoves: boolean;
 };
@@ -50,6 +59,8 @@ type ListRow = {
   estoque_fiscal_synced_at: string | Date | null;
   quantidade_fisica: string | number | null;
   estoque_minimo: string | number | null;
+  cmc: string | number | null;
+  cmc_interno: string | number | null;
   stock_updated_at: string | Date | null;
   has_moves: boolean;
 };
@@ -81,6 +92,16 @@ function toIso(value: string | Date | null | undefined) {
 function mapStockRow(row: ListRow): ProductStockRow {
   const estoqueFiscal = toNumber(row.estoque_fiscal);
   const quantidadeFisica = toNumber(row.quantidade_fisica);
+  const cmcRaw = row.cmc == null ? null : toNumber(row.cmc);
+  const cmcInternoRaw = row.cmc_interno == null ? null : toNumber(row.cmc_interno);
+  const cmc = cmcRaw != null && Number.isFinite(cmcRaw) ? cmcRaw : null;
+  const cmcInterno =
+    cmcInternoRaw != null && Number.isFinite(cmcInternoRaw) ? cmcInternoRaw : null;
+  const cmcEfetivo = effectiveCmc(cmc, cmcInterno);
+  const custoTotal =
+    cmcEfetivo != null && Number.isFinite(cmcEfetivo)
+      ? Math.round(quantidadeFisica * cmcEfetivo * 100) / 100
+      : 0;
   return {
     productId: row.product_id,
     omieAppId: row.omie_app_id,
@@ -95,6 +116,10 @@ function mapStockRow(row: ListRow): ProductStockRow {
     quantidadeFisica,
     estoqueMinimo: toNumber(row.estoque_minimo),
     diferenca: quantidadeFisica - estoqueFiscal,
+    cmc,
+    cmcInterno,
+    cmcEfetivo,
+    custoTotal,
     stockUpdatedAt: toIso(row.stock_updated_at),
     hasMoves: Boolean(row.has_moves),
   };
@@ -150,6 +175,8 @@ export async function listProductStock(input?: {
       p.estoque_fiscal_synced_at,
       coalesce(s.quantidade_fisica, 0) as quantidade_fisica,
       coalesce(s.estoque_minimo, 0) as estoque_minimo,
+      p.cmc,
+      p.cmc_interno,
       s.updated_at as stock_updated_at,
       exists (
         select 1 from product_stock_moves m where m.product_id = p.id

@@ -198,6 +198,7 @@ function UsersPage() {
   const [newPassword, setNewPassword] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [createIsTecnico, setCreateIsTecnico] = useState(false);
+  const [createIsComprador, setCreateIsComprador] = useState(false);
   const [createVehicleId, setCreateVehicleId] = useState<number | "">("");
   const users = loaded.ok ? loaded.users : [];
   const vehicles = loaded.ok ? loaded.vehicles : [];
@@ -301,7 +302,7 @@ function UsersPage() {
 
         <div className="space-y-sm rounded-lg border border-outline-variant bg-surface p-md">
           <p className="text-label-md font-semibold text-on-surface-variant">
-            Técnico e veículo
+            Funções e veículo
           </p>
           <label className="flex items-center gap-sm text-body-md text-on-surface">
             <input
@@ -317,6 +318,7 @@ function UsersPage() {
                     data: {
                       id: user.id,
                       isTecnico: e.target.checked,
+                      isComprador: Boolean(user.isComprador),
                       defaultVehicleId: user.defaultVehicleId,
                     },
                   });
@@ -336,6 +338,40 @@ function UsersPage() {
             />
             É técnico (para equipes e app futuro)
           </label>
+          <label className="flex items-center gap-sm text-body-md text-on-surface">
+            <input
+              type="checkbox"
+              checked={Boolean(user.isComprador)}
+              disabled={busyId === user.id}
+              onChange={async (e) => {
+                setBusyId(user.id);
+                setError(null);
+                setMessage(null);
+                try {
+                  const result = await updateUserStaffFn({
+                    data: {
+                      id: user.id,
+                      isTecnico: Boolean(user.isTecnico),
+                      isComprador: e.target.checked,
+                      defaultVehicleId: user.defaultVehicleId,
+                    },
+                  });
+                  if (!result.ok) setError(result.error);
+                  else {
+                    setMessage(
+                      e.target.checked
+                        ? `${user.name} marcado como comprador.`
+                        : `${user.name} removido de comprador.`,
+                    );
+                    await router.invalidate();
+                  }
+                } finally {
+                  setBusyId(null);
+                }
+              }}
+            />
+            É comprador (cotações, CMC e Kanban de compras)
+          </label>
           <label className="block text-label-md text-on-surface-variant">
             Veículo padrão
             <select
@@ -353,6 +389,7 @@ function UsersPage() {
                     data: {
                       id: user.id,
                       isTecnico: Boolean(user.isTecnico),
+                      isComprador: Boolean(user.isComprador),
                       defaultVehicleId: nextId,
                     },
                   });
@@ -581,6 +618,7 @@ function UsersPage() {
                         password: String(data.get("password") ?? ""),
                         role,
                         isTecnico: createIsTecnico,
+                        isComprador: createIsComprador,
                         defaultVehicleId: createVehicleId === "" ? null : Number(createVehicleId),
                         ...(role === "operator" ? { modules } : {}),
                       },
@@ -594,6 +632,7 @@ function UsersPage() {
                     setRole("operator");
                     setModules(APP_MODULES.map((m) => m.id));
                     setCreateIsTecnico(false);
+                    setCreateIsComprador(false);
                     setCreateVehicleId("");
                     setCreateOpen(false);
                     await router.invalidate();
@@ -669,6 +708,14 @@ function UsersPage() {
                     onChange={(e) => setCreateIsTecnico(e.target.checked)}
                   />
                   É técnico
+                </label>
+                <label className="flex items-center gap-sm text-body-md text-on-surface md:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={createIsComprador}
+                    onChange={(e) => setCreateIsComprador(e.target.checked)}
+                  />
+                  É comprador
                 </label>
                 <label className="block text-label-md text-on-surface-variant md:col-span-2">
                   Veículo padrão

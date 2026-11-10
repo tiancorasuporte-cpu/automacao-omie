@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AssistenciaRouteImport } from './routes/assistencia'
+import { Route as ComprasRouteImport } from './routes/compras'
 import { Route as ConversasRouteImport } from './routes/conversas'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EquipesRouteImport } from './routes/equipes'
@@ -43,6 +44,11 @@ const IndexRoute = IndexRouteImport.update({
 const AssistenciaRoute = AssistenciaRouteImport.update({
   id: '/assistencia',
   path: '/assistencia',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ComprasRoute = ComprasRouteImport.update({
+  id: '/compras',
+  path: '/compras',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConversasRoute = ConversasRouteImport.update({
@@ -164,6 +170,7 @@ const ApiWahaWebhookRoute = ApiWahaWebhookRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/assistencia': typeof AssistenciaRoute
+  '/compras': typeof ComprasRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
   '/equipes': typeof EquipesRoute
@@ -191,6 +198,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/assistencia': typeof AssistenciaRoute
+  '/compras': typeof ComprasRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
   '/equipes': typeof EquipesRoute
@@ -219,6 +227,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/assistencia': typeof AssistenciaRoute
+  '/compras': typeof ComprasRoute
   '/conversas': typeof ConversasRoute
   '/dashboard': typeof DashboardRoute
   '/equipes': typeof EquipesRoute
@@ -248,6 +257,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/assistencia'
+    | '/compras'
     | '/conversas'
     | '/dashboard'
     | '/equipes'
@@ -275,6 +285,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/assistencia'
+    | '/compras'
     | '/conversas'
     | '/dashboard'
     | '/equipes'
@@ -302,6 +313,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/assistencia'
+    | '/compras'
     | '/conversas'
     | '/dashboard'
     | '/equipes'
@@ -330,6 +342,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AssistenciaRoute: typeof AssistenciaRoute
+  ComprasRoute: typeof ComprasRoute
   ConversasRoute: typeof ConversasRoute
   DashboardRoute: typeof DashboardRoute
   EquipesRoute: typeof EquipesRoute
@@ -369,6 +382,13 @@ declare module '@tanstack/react-router' {
       path: '/assistencia'
       fullPath: '/assistencia'
       preLoaderRoute: typeof AssistenciaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/compras': {
+      id: '/compras'
+      path: '/compras'
+      fullPath: '/compras'
+      preLoaderRoute: typeof ComprasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/conversas': {
@@ -538,6 +558,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AssistenciaRoute: AssistenciaRoute,
+  ComprasRoute: ComprasRoute,
   ConversasRoute: ConversasRoute,
   DashboardRoute: DashboardRoute,
   EquipesRoute: EquipesRoute,

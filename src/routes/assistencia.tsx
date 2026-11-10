@@ -20,12 +20,17 @@ import {
   PageTitle,
 } from "@/components/PageChrome";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  SoftDialogBody,
+  SoftDialogContent,
+  SoftDialogFooter,
+  SoftDialogHeader,
+  SoftSummaryCard,
+  softCancelBtnClass,
+  softFieldLabelClass,
+  softInputClass,
+  softPrimaryBtnClass,
+} from "@/components/SoftOsDialog";
+import { Dialog } from "@/components/ui/dialog";
 import {
   acceptConferenceFn,
   addOsItemFn,
@@ -33,6 +38,8 @@ import {
   checkInOsFn,
   checkOutOsFn,
   createOsFn,
+  pauseOsFn,
+  resumeOsFn,
   finishVisitaFn,
   getAssistenciaBootstrapFn,
   getOsFn,
@@ -48,6 +55,7 @@ import {
   saveOsResolucaoFn,
   scheduleOsFn,
   searchAssistClientsFn,
+  searchAssistProductsFn,
   searchQuotesFn,
   startExecOsFn,
   submitConferenceFn,
@@ -180,6 +188,14 @@ function osScheduleTitle(tipo: string) {
   return "AGENDAR OS";
 }
 
+function osDetailTitle(tipo: string) {
+  if (tipo === "pedido") return "DETALHE · INSTALAÇÃO";
+  if (tipo === "manut") return "DETALHE · MANUTENÇÃO";
+  if (tipo === "monit") return "DETALHE · MONITORAMENTO";
+  if (tipo === "visita") return "DETALHE · ORÇAMENTO";
+  return "DETALHE DA OS";
+}
+
 function osReportDate(os: OsRow) {
   if (os.finDate) return os.finDate;
   if (os.coAt) return os.coAt.slice(0, 10);
@@ -202,6 +218,9 @@ function toAssistRelatorioPdfRow(os: OsRow): AssistRelatorioPdfRow {
     hora: os.hora,
     teamName: os.teamName,
     tecnicoNome: os.tecnicoNome,
+    aprovadoPor: os.aprovadoPor,
+    aprovadoEm: os.aprovadoEm,
+    aprovacaoAnexoName: os.aprovacaoAnexo?.name ?? null,
     reportDate: osReportDate(os),
     ciAt: os.ciAt,
     coAt: os.coAt,
@@ -332,6 +351,8 @@ function AssistenciaPage() {
   const [hora, setHora] = useState("");
   const [teamId, setTeamId] = useState<number | "">("");
   const [tecnicoNome, setTecnicoNome] = useState("");
+  const [pauseOpen, setPauseOpen] = useState(false);
+  const [pauseMotivo, setPauseMotivo] = useState("");
 
   const [checkoutText, setCheckoutText] = useState("");
   const [checkoutFotos, setCheckoutFotos] = useState<CapturedPhoto[]>([]);
@@ -345,6 +366,19 @@ function AssistenciaPage() {
   const [levQtd, setLevQtd] = useState("1");
   const [levItens, setLevItens] = useState<Array<{ qtd: number; nome: string }>>([]);
   const [extraNome, setExtraNome] = useState("");
+  const [extraQtd, setExtraQtd] = useState("1");
+  const [extraProductId, setExtraProductId] = useState<number | null>(null);
+  const [extraProductCode, setExtraProductCode] = useState<number | null>(null);
+  const [extraProductResults, setExtraProductResults] = useState<
+    Array<{
+      id: number;
+      codigoProduto: number;
+      descricao: string;
+      unidade: string | null;
+      cmcEfetivo: number | null;
+    }>
+  >([]);
+  const [searchingExtraProducts, setSearchingExtraProducts] = useState(false);
   const [matDisp, setMatDisp] = useState<
     Record<number, { usado: string; sobraDestino: "" | "devolver" | "equipe" }>
   >({});
@@ -353,6 +387,38 @@ function AssistenciaPage() {
     () => osList.find((o) => o.id === selectedId) ?? null,
     [osList, selectedId],
   );
+
+  useEffect(() => {
+    const q = extraNome.trim();
+    if (q.length < 2 || extraProductId != null) {
+      setExtraProductResults([]);
+      setSearchingExtraProducts(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setSearchingExtraProducts(true);
+      try {
+        const appId = selected?.omieAppId || omieAppId || undefined;
+        const rows = await searchAssistProductsFn({
+          data: { omieAppId: appId, query: q, limit: 40 },
+        });
+        setExtraProductResults(
+          rows.map((r) => ({
+            id: r.id,
+            codigoProduto: r.codigoProduto,
+            descricao: r.descricao,
+            unidade: r.unidade,
+            cmcEfetivo: r.cmcEfetivo,
+          })),
+        );
+      } catch {
+        setExtraProductResults([]);
+      } finally {
+        setSearchingExtraProducts(false);
+      }
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [extraNome, extraProductId, selected?.omieAppId, omieAppId]);
 
   const globalDateRange = useMemo(
     () => resolveDatePreset(globalDatePreset, globalDateFrom, globalDateTo),
@@ -410,7 +476,7 @@ function AssistenciaPage() {
   const agendaCalendarItems = useMemo(
     () =>
       agendaOs.map((os) => {
-        const st = osActivityStatus(os.stage, Boolean(os.agDate));
+        const st = osActivityStatus(os.stage, Boolean(os.agDate), Boolean(os.pausedAt));
         const resp = osResponsavelLabel(os);
         return {
           id: os.id,
@@ -686,14 +752,32 @@ function AssistenciaPage() {
     setHistOpen(true);
   }
 
+  function membersOfTeam(id: number | "") {
+    if (id === "") return [];
+    const team = boot.teams.find((t) => t.id === id);
+    return (team?.members ?? []).filter((m) => m.active);
+  }
+
+  function resolveTecnicoForTeam(id: number | "", current: string) {
+    const members = membersOfTeam(id);
+    if (!members.length) {
+      if (id === "") return current;
+      const team = boot.teams.find((t) => t.id === id);
+      return current || team?.name || "";
+    }
+    if (current && members.some((m) => m.name === current)) return current;
+    return members.length === 1 ? members[0]!.name : "";
+  }
+
   function openSchedule(os: OsRow) {
     applyOsDetailState(os);
     setAgDate(os.agDate ?? "");
     setPeriodo(os.periodo ?? "Manhã");
     setHora(os.hora ?? "");
     setHoraEspecifica(Boolean(os.hora));
-    setTeamId(os.teamId ?? "");
-    setTecnicoNome(os.tecnicoNome ?? "");
+    const nextTeam = os.teamId ?? "";
+    setTeamId(nextTeam);
+    setTecnicoNome(resolveTecnicoForTeam(nextTeam, os.tecnicoNome ?? ""));
     setSchedOpen(true);
   }
 
@@ -733,20 +817,87 @@ function AssistenciaPage() {
   }
 
 
+  function renderOsSummaryCard(os: OsRow) {
+    return (
+      <SoftSummaryCard>
+        <div className="flex flex-wrap items-center gap-xs">
+          <span className="rounded-full bg-neutral-900 px-xs py-2xs text-[10px] font-bold uppercase tracking-wide text-white">
+            {osTipoBadgeLabel(os.tipo)}
+          </span>
+          <span className="text-label-sm text-on-surface-variant">{osStageName(os.stage)}</span>
+          {os.subtipo ? (
+            <span className="text-label-sm text-on-surface-variant">· {os.subtipo}</span>
+          ) : null}
+          {os.quoteNumero ? (
+            <span className="text-label-sm text-on-surface-variant">· {os.quoteNumero}</span>
+          ) : null}
+        </div>
+        <div className="mt-xs text-body-md font-bold text-on-surface">
+          {os.clientName}
+          <span className="font-normal text-on-surface-variant">
+            {" "}
+            · {os.servico ? `— ${os.servico}` : "—"}
+          </span>
+        </div>
+        <div className="mt-sm flex flex-wrap gap-x-md gap-y-2xs text-label-sm text-on-surface-variant">
+          <div className="flex items-center gap-xs">
+            <Icon name={os.items.length ? "inventory_2" : "public"} className="text-[15px]" />
+            <span>{osMaterialHint(os)}</span>
+          </div>
+          {osAgendaHint(os) ? (
+            <div className="flex items-center gap-xs">
+              <Icon name="calendar_month" className="text-[15px]" />
+              <span>{osAgendaHint(os)}</span>
+            </div>
+          ) : null}
+          <div className="flex items-center gap-xs">
+            {osResponsavelInitial(os) ? (
+              <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[9px] font-bold text-white">
+                {osResponsavelInitial(os)}
+              </span>
+            ) : (
+              <Icon name="group" className="text-[15px]" />
+            )}
+            <span>{osResponsavelLabel(os) ?? "Sem responsável"}</span>
+          </div>
+        </div>
+        {os.items.length ? (
+          <ul className="mt-sm space-y-xs border-t border-outline-variant pt-sm text-label-md text-on-surface">
+            {os.items.map((it) => (
+              <li key={it.id} className="flex items-start justify-between gap-sm">
+                <span className="min-w-0">
+                  <span className="font-semibold">{it.qtd}×</span> {it.nome}
+                </span>
+                <span className="shrink-0 text-label-sm text-on-surface-variant">
+                  {OS_ITEM_STATUS_LABEL[it.status as OsItemStatus] ?? it.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </SoftSummaryCard>
+    );
+  }
+
   // Função de render (não componente): evita remount a cada tecla no textarea.
   function renderOsDetail(variant: "dialog" | "panel" = "dialog") {
     if (!selected) return null;
     return (
       <>
-        {variant === "dialog" ? (
-          <DialogHeader>
-            <DialogTitle>
-              OS {selected.num} · {osStageName(selected.stage)}
-            </DialogTitle>
-          </DialogHeader>
-        ) : null}
         <div className="flex flex-col gap-md">
-
+                {variant === "dialog" ? (
+                  <div className="flex flex-wrap items-start justify-between gap-sm">
+                    <div className="min-w-0 flex-1">{renderOsSummaryCard(selected)}</div>
+                    <button
+                      type="button"
+                      className={cn(softCancelBtnClass, "shrink-0")}
+                      onClick={() => setHistOpen(true)}
+                    >
+                      <Icon name="history" className="text-[16px]" />
+                      Histórico
+                    </button>
+                  </div>
+                ) : (
                 <div className="flex flex-wrap items-start justify-between gap-sm">
                   <div className="min-w-0">
                     <div className="text-body-md font-medium">{selected.clientName}</div>
@@ -785,6 +936,7 @@ function AssistenciaPage() {
                     Histórico
                   </button>
                 </div>
+                )}
 
                 {selected.pending ? (
                   <div className="rounded-lg border border-error/40 bg-error-container/20 p-sm">
@@ -939,32 +1091,101 @@ function AssistenciaPage() {
                     </ul>
                     {(selected.stage === 1 || selected.stage === 5) &&
                     (boot.user.canEstoque || boot.user.canAssistencia || boot.user.isAdmin) ? (
-                      <div className="mt-sm flex gap-sm">
-                        <input
-                          value={extraNome}
-                          onChange={(e) => setExtraNome(e.target.value)}
-                          placeholder="Item extra"
-                          className="min-w-0 flex-1 rounded-lg border border-outline-variant px-sm py-xs text-body-md"
-                        />
-                        <button
-                          type="button"
-                          disabled={busy || !extraNome.trim()}
-                          onClick={() =>
-                            run(() =>
-                              addOsItemFn({
-                                data: {
-                                  osId: selected.id,
-                                  qtd: 1,
-                                  nome: extraNome,
-                                  status: selected.stage === 5 ? "extra" : "pendente",
-                                },
-                              }),
-                            ).then(() => setExtraNome(""))
-                          }
-                          className="rounded-lg bg-secondary-container px-md py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
-                        >
-                          Add
-                        </button>
+                      <div className="relative mt-sm flex flex-col gap-xs">
+                        <div className="flex gap-sm">
+                          <input
+                            value={extraQtd}
+                            onChange={(e) => setExtraQtd(e.target.value)}
+                            className="w-16 shrink-0 rounded-lg border border-outline-variant px-sm py-xs text-body-md"
+                            title="Quantidade"
+                          />
+                          <input
+                            value={extraNome}
+                            onChange={(e) => {
+                              setExtraNome(e.target.value);
+                              setExtraProductId(null);
+                              setExtraProductCode(null);
+                            }}
+                            placeholder="Buscar produto Omie…"
+                            className="min-w-0 flex-1 rounded-lg border border-outline-variant px-sm py-xs text-body-md"
+                            autoComplete="off"
+                          />
+                          <button
+                            type="button"
+                            disabled={busy || !extraNome.trim()}
+                            onClick={() =>
+                              run(() =>
+                                addOsItemFn({
+                                  data: {
+                                    osId: selected.id,
+                                    qtd: Number(extraQtd.replace(",", ".")) || 1,
+                                    nome: extraNome.trim(),
+                                    productId: extraProductId,
+                                    status: selected.stage === 5 ? "extra" : "pendente",
+                                  },
+                                }),
+                              ).then(() => {
+                                setExtraNome("");
+                                setExtraQtd("1");
+                                setExtraProductId(null);
+                                setExtraProductCode(null);
+                                setExtraProductResults([]);
+                              })
+                            }
+                            className="rounded-lg bg-secondary-container px-md py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+                          >
+                            Add
+                          </button>
+                        </div>
+                        {searchingExtraProducts ? (
+                          <p className="text-label-sm text-on-surface-variant">Buscando na Omie…</p>
+                        ) : null}
+                        {extraProductResults.length && extraProductId == null ? (
+                          <ul className="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-auto rounded-lg border border-outline-variant bg-white shadow-lg">
+                            {extraProductResults.map((p) => (
+                              <li key={p.id}>
+                                <button
+                                  type="button"
+                                  className="flex w-full flex-col gap-2xs px-sm py-xs text-left hover:bg-surface-container"
+                                  onClick={() => {
+                                    setExtraNome(p.descricao);
+                                    setExtraProductId(p.id);
+                                    setExtraProductCode(p.codigoProduto);
+                                    setExtraProductResults([]);
+                                  }}
+                                >
+                                  <span className="text-body-md font-medium text-on-surface">
+                                    {p.descricao}
+                                  </span>
+                                  <span className="text-label-sm text-on-surface-variant">
+                                    #{p.codigoProduto}
+                                    {p.unidade ? ` · ${p.unidade}` : ""}
+                                    {p.cmcEfetivo != null
+                                      ? ` · CMC ${p.cmcEfetivo.toLocaleString("pt-BR", {
+                                          style: "currency",
+                                          currency: "BRL",
+                                        })}`
+                                      : ""}
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        {extraNome.trim().length >= 2 &&
+                        !searchingExtraProducts &&
+                        !extraProductResults.length &&
+                        extraProductId == null ? (
+                          <p className="text-label-sm text-on-surface-variant">
+                            Nenhum produto Omie encontrado — você ainda pode adicionar o texto livre.
+                          </p>
+                        ) : null}
+                        {extraProductId != null ? (
+                          <p className="text-label-sm text-emerald-800">
+                            Produto Omie vinculado
+                            {extraProductCode != null ? ` · #${extraProductCode}` : ""}
+                          </p>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -1018,7 +1239,51 @@ function AssistenciaPage() {
                       Check-in
                     </button>
                   ) : null}
+                  {selected.stage === 5 &&
+                  selected.ciAt &&
+                  !selected.coAt &&
+                  !selected.pausedAt &&
+                  (boot.user.canAssistencia || boot.user.isAdmin) ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setPauseMotivo("");
+                        setPauseOpen(true);
+                      }}
+                      className="rounded-lg border border-amber-300 bg-amber-50 px-md py-sm text-label-md font-semibold text-amber-900"
+                    >
+                      Pausar OS
+                    </button>
+                  ) : null}
+                  {selected.stage === 5 &&
+                  selected.pausedAt &&
+                  !selected.coAt &&
+                  (boot.user.canAssistencia || boot.user.isAdmin) ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        run(() => resumeOsFn({ data: { osId: selected.id } }))
+                      }
+                      className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
+                    >
+                      Retomar OS
+                    </button>
+                  ) : null}
                 </div>
+
+                {selected.stage === 5 && selected.pausedAt ? (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 px-md py-sm text-body-md text-amber-950">
+                    <div className="font-semibold">OS pausada</div>
+                    <p className="mt-2xs text-label-md">
+                      {selected.pauseMotivo || "Sem motivo informado"}
+                      {selected.pausedAt
+                        ? ` · desde ${new Date(selected.pausedAt).toLocaleString("pt-BR")}`
+                        : ""}
+                    </p>
+                  </div>
+                ) : null}
 
                 {selected.stage === 5 ? (
                   <div
@@ -1031,6 +1296,10 @@ function AssistenciaPage() {
                     {!selected.ciAt ? (
                       <p className="text-label-md text-on-surface-variant">
                         Você pode digitar a resolução agora. O check-out exige check-in antes.
+                      </p>
+                    ) : selected.pausedAt ? (
+                      <p className="text-label-md text-amber-900">
+                        OS pausada — retome para liberar o check-out.
                       </p>
                     ) : null}
                     <textarea
@@ -1112,7 +1381,7 @@ function AssistenciaPage() {
                           >
                             Salvar rascunho
                           </button>
-                          {selected.ciAt ? (
+                          {selected.ciAt && !selected.pausedAt ? (
                             <button
                               type="button"
                               disabled={busy || !checkoutText.trim()}
@@ -1132,6 +1401,10 @@ function AssistenciaPage() {
                             >
                               Check-out
                             </button>
+                          ) : selected.pausedAt ? (
+                            <span className="self-center text-label-md text-amber-900">
+                              Retome a OS para fazer check-out.
+                            </span>
                           ) : (
                             <span className="self-center text-label-md text-on-surface-variant">
                               Faça check-in para liberar o check-out.
@@ -2141,6 +2414,11 @@ function AssistenciaPage() {
                                 ) : null}
                               </ul>
                             ) : null}
+                            {os.pausedAt ? (
+                              <div className="mt-xs rounded bg-amber-100 px-xs py-2xs text-label-sm font-semibold text-amber-950">
+                                Pausada{os.pauseMotivo ? ` · ${os.pauseMotivo}` : ""}
+                              </div>
+                            ) : null}
                             {os.pending ? (
                               <div className="mt-xs rounded bg-error-container/40 px-xs py-2xs text-label-sm text-on-error-container">
                                 Retorno pendente
@@ -2655,6 +2933,29 @@ function AssistenciaPage() {
                         {os.ticketId ? ` · #${os.ticketId}` : ""}
                       </dd>
                     </div>
+                    {os.aprovadoPor ? (
+                      <div className="sm:col-span-2">
+                        <dt className="text-label-sm text-on-surface-variant">Aprovado por</dt>
+                        <dd className="font-medium">
+                          {os.aprovadoPor}
+                          {os.aprovadoEm
+                            ? ` · ${new Date(os.aprovadoEm).toLocaleString("pt-BR")}`
+                            : ""}
+                          {os.aprovacaoAnexo ? (
+                            <>
+                              {" · "}
+                              <a
+                                href={os.aprovacaoAnexo.data}
+                                download={os.aprovacaoAnexo.name}
+                                className="text-primary underline"
+                              >
+                                {os.aprovacaoAnexo.name}
+                              </a>
+                            </>
+                          ) : null}
+                        </dd>
+                      </div>
+                    ) : null}
                   </dl>
 
                   {os.resolucao || os.rel?.texto ? (
@@ -2709,21 +3010,41 @@ function AssistenciaPage() {
       </div>
 
       <Dialog open={histOpen && Boolean(selected)} onOpenChange={setHistOpen}>
-        <DialogContent className="dialog-lg max-h-[90vh] overflow-y-auto">
-          {selected ? (
-            <>
-              <DialogHeader>
-                <DialogTitle>
-                  Histórico · {selected.num}
-                </DialogTitle>
-              </DialogHeader>
-              <div className="flex flex-col gap-md">
-                <p className="text-label-md text-on-surface-variant">
-                  {selected.clientName} · {osStageName(selected.stage)}
-                </p>
+        <SoftDialogContent size="lg">
+          <SoftDialogHeader
+            eyebrow={selected ? `OS ${selected.num}` : "OS"}
+            title="HISTÓRICO"
+          />
+          <SoftDialogBody>
+            {selected ? (
+              <>
+                {renderOsSummaryCard(selected)}
+
+                {selected.aprovadoPor ? (
+                  <SoftSummaryCard>
+                    <h3 className="mb-sm text-label-md font-semibold text-on-surface">
+                      Aprovação do pedido
+                    </h3>
+                    <p className="text-body-md text-on-surface">
+                      <span className="font-semibold">{selected.aprovadoPor}</span>
+                      {selected.aprovadoEm
+                        ? ` · ${new Date(selected.aprovadoEm).toLocaleString("pt-BR")}`
+                        : ""}
+                    </p>
+                    {selected.aprovacaoAnexo ? (
+                      <a
+                        href={selected.aprovacaoAnexo.data}
+                        download={selected.aprovacaoAnexo.name}
+                        className="mt-xs inline-block text-label-md font-medium text-primary underline"
+                      >
+                        {selected.aprovacaoAnexo.name}
+                      </a>
+                    ) : null}
+                  </SoftSummaryCard>
+                ) : null}
 
                 {(selected.rel?.fotos?.length || selected.rel?.anexos?.length || selected.resolucao) ? (
-                  <div className="rounded-xl border border-outline-variant bg-surface p-md">
+                  <SoftSummaryCard>
                     <h3 className="mb-sm text-label-md font-semibold text-on-surface">
                       Resolução e anexos
                     </h3>
@@ -2766,18 +3087,18 @@ function AssistenciaPage() {
                         ))}
                       </ul>
                     ) : null}
-                  </div>
+                  </SoftSummaryCard>
                 ) : null}
 
                 <div>
-                  <h3 className="mb-sm text-label-md font-semibold text-on-surface-variant">
+                  <h3 className="mb-sm text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
                     Linha do tempo
                   </h3>
                   {(selected.events ?? []).length ? (
                     <ul className="space-y-sm border-l border-outline-variant pl-md">
                       {(selected.events ?? []).map((ev) => (
                         <li key={ev.id} className="relative">
-                          <span className="absolute -left-[1.15rem] top-1.5 size-2 rounded-full bg-primary" />
+                          <span className="absolute -left-[1.15rem] top-1.5 size-2 rounded-full bg-[#F5C518]" />
                           <div className="text-label-sm text-on-surface-variant">
                             {new Date(ev.quando).toLocaleString("pt-BR")} · {ev.quem}
                           </div>
@@ -2791,25 +3112,59 @@ function AssistenciaPage() {
                     </p>
                   )}
                 </div>
-              </div>
-            </>
-          ) : null}
-        </DialogContent>
+              </>
+            ) : null}
+          </SoftDialogBody>
+          <SoftDialogFooter>
+            <button
+              type="button"
+              className={softCancelBtnClass}
+              onClick={() => setHistOpen(false)}
+            >
+              Fechar
+            </button>
+          </SoftDialogFooter>
+        </SoftDialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(selected) && !histOpen && !(tab === "agenda" && agendaView === "calendario" && calSheetOpen)} onOpenChange={(open) => { if (!open) { setSelectedId(null); setCalSheetOpen(false); } }}>
-        <DialogContent className="dialog-lg max-h-[90vh] overflow-y-auto">
-          {selected ? renderOsDetail("dialog") : null}
-        </DialogContent>
+      <Dialog
+        open={Boolean(selected) && !histOpen && !(tab === "agenda" && agendaView === "calendario" && calSheetOpen)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedId(null);
+            setCalSheetOpen(false);
+          }
+        }}
+      >
+        <SoftDialogContent size="lg">
+          <SoftDialogHeader
+            eyebrow={selected ? `OS ${selected.num}` : "OS"}
+            title={selected ? osDetailTitle(selected.tipo) : "DETALHE DA OS"}
+          />
+          <SoftDialogBody className="max-h-[min(75vh,48rem)]">
+            {selected ? renderOsDetail("dialog") : null}
+          </SoftDialogBody>
+          <SoftDialogFooter>
+            <button
+              type="button"
+              className={softCancelBtnClass}
+              onClick={() => {
+                setSelectedId(null);
+                setCalSheetOpen(false);
+              }}
+            >
+              Fechar
+            </button>
+          </SoftDialogFooter>
+        </SoftDialogContent>
       </Dialog>
 
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
-        <DialogContent className="dialog-lg">
-          <DialogHeader>
-            <DialogTitle>Nova OS</DialogTitle>
-          </DialogHeader>
+        <SoftDialogContent size="lg">
+          <SoftDialogHeader eyebrow="ASSISTÊNCIA" title="NOVA OS" />
+          <SoftDialogBody>
           <div className="grid gap-lg sm:grid-cols-2">
-            <label className="block text-label-md text-on-surface-variant sm:col-span-2">
+            <label className={cn(softFieldLabelClass, "sm:col-span-2")}>
               Tipo
               <select
                 value={tipo}
@@ -2817,7 +3172,7 @@ function AssistenciaPage() {
                   setTipo(e.target.value as typeof tipo);
                   setSubtipo("");
                 }}
-                className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
+                className={softInputClass}
               >
                 {boot.catalogs.tipos.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -3026,11 +3381,12 @@ function AssistenciaPage() {
               </div>
             ) : null}
           </div>
-          <DialogFooter>
+          </SoftDialogBody>
+          <SoftDialogFooter>
             <button
               type="button"
               onClick={() => setNewOpen(false)}
-              className="rounded-lg px-md py-sm text-label-md text-on-surface-variant hover:bg-surface-container"
+              className={softCancelBtnClass}
             >
               Cancelar
             </button>
@@ -3062,110 +3418,39 @@ function AssistenciaPage() {
                 );
                 setNewOpen(false);
               }}
-              className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+              className={softPrimaryBtnClass}
             >
-              Criar
+              Criar OS
             </button>
-          </DialogFooter>
-        </DialogContent>
+          </SoftDialogFooter>
+        </SoftDialogContent>
       </Dialog>
 
       <Dialog open={schedOpen} onOpenChange={setSchedOpen}>
-        <DialogContent
-          className={cn(
-            "gap-0 overflow-hidden p-0",
-            "[&>button]:right-4 [&>button]:top-4 [&>button]:text-white [&>button]:opacity-80 [&>button]:hover:opacity-100 [&>button]:focus:ring-amber-300",
-          )}
-        >
-          <DialogHeader className="gap-0 border-b-2 border-[#F5C518] bg-neutral-950 px-xl py-md pr-3xl text-left">
-            <p className="text-label-sm font-bold tracking-wide text-[#F5C518]">
-              OS {selected?.num ?? "—"}
-            </p>
-            <DialogTitle className="text-title-md font-bold uppercase tracking-wide text-white">
-              {selected ? osScheduleTitle(selected.tipo) : "AGENDAR OS"}
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="flex max-h-[min(70vh,40rem)] flex-col gap-md overflow-y-auto px-xl py-md">
-            {selected ? (
-              <div className="rounded-xl border border-outline-variant bg-surface px-md py-sm">
-                <div className="flex items-start justify-between gap-sm">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-xs">
-                      <span className="rounded-full bg-neutral-900 px-xs py-2xs text-[10px] font-bold uppercase tracking-wide text-white">
-                        {osTipoBadgeLabel(selected.tipo)}
-                      </span>
-                      <span className="text-label-sm text-on-surface-variant">
-                        {osStageName(selected.stage)}
-                      </span>
-                    </div>
-                    <div className="mt-xs text-body-md font-bold text-on-surface">
-                      {selected.clientName}
-                      <span className="font-normal text-on-surface-variant">
-                        {" "}
-                        · {selected.servico ? `— ${selected.servico}` : "—"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div className="mt-sm flex flex-wrap gap-x-md gap-y-2xs text-label-sm text-on-surface-variant">
-                  <div className="flex items-center gap-xs">
-                    <Icon
-                      name={selected.items.length ? "inventory_2" : "public"}
-                      className="text-[15px]"
-                    />
-                    <span>{osMaterialHint(selected)}</span>
-                  </div>
-                  {osAgendaHint(selected) ? (
-                    <div className="flex items-center gap-xs">
-                      <Icon name="calendar_month" className="text-[15px]" />
-                      <span>{osAgendaHint(selected)}</span>
-                    </div>
-                  ) : null}
-                  <div className="flex items-center gap-xs">
-                    {osResponsavelInitial(selected) ? (
-                      <span className="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[9px] font-bold text-white">
-                        {osResponsavelInitial(selected)}
-                      </span>
-                    ) : (
-                      <Icon name="group" className="text-[15px]" />
-                    )}
-                    <span>{osResponsavelLabel(selected) ?? "Sem responsável"}</span>
-                  </div>
-                </div>
-                {selected.items.length ? (
-                  <ul className="mt-sm space-y-xs border-t border-outline-variant pt-sm text-label-md text-on-surface">
-                    {selected.items.map((it) => (
-                      <li key={it.id} className="flex items-start justify-between gap-sm">
-                        <span className="min-w-0">
-                          <span className="font-semibold">{it.qtd}×</span> {it.nome}
-                        </span>
-                        <span className="shrink-0 text-label-sm text-on-surface-variant">
-                          {OS_ITEM_STATUS_LABEL[it.status as OsItemStatus] ?? it.status}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </div>
-            ) : null}
+        <SoftDialogContent>
+          <SoftDialogHeader
+            eyebrow={selected ? `OS ${selected.num}` : "OS"}
+            title={selected ? osScheduleTitle(selected.tipo) : "AGENDAR OS"}
+          />
+          <SoftDialogBody>
+            {selected ? renderOsSummaryCard(selected) : null}
 
             <div className="grid gap-md sm:grid-cols-2">
-              <label className="flex flex-col gap-2xs text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+              <label className={softFieldLabelClass}>
                 Data
                 <input
                   type="date"
                   value={agDate}
                   onChange={(e) => setAgDate(e.target.value)}
-                  className="w-full rounded-md border border-neutral-300 bg-white px-md py-sm text-body-md font-normal normal-case tracking-normal text-on-surface outline-none focus:border-neutral-800 focus:ring-1 focus:ring-neutral-800"
+                  className={softInputClass}
                 />
               </label>
-              <label className="flex flex-col gap-2xs text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+              <label className={softFieldLabelClass}>
                 Período
                 <select
                   value={periodo}
                   onChange={(e) => setPeriodo(e.target.value)}
-                  className="w-full rounded-md border border-neutral-300 bg-white px-md py-sm text-body-md font-normal normal-case tracking-normal text-on-surface outline-none focus:border-neutral-800 focus:ring-1 focus:ring-neutral-800"
+                  className={softInputClass}
                 >
                   {boot.catalogs.periodos.map((p) => (
                     <option key={p} value={p}>
@@ -3190,26 +3475,28 @@ function AssistenciaPage() {
                 Horário específico
               </label>
               {horaEspecifica ? (
-                <label className="flex max-w-[12rem] flex-col gap-2xs text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+                <label className={cn(softFieldLabelClass, "max-w-[12rem]")}>
                   Horário
                   <input
                     type="time"
                     value={hora}
                     onChange={(e) => setHora(e.target.value)}
-                    className="w-full rounded-md border border-neutral-300 bg-white px-md py-sm text-body-md font-normal normal-case tracking-normal text-on-surface outline-none focus:border-neutral-800 focus:ring-1 focus:ring-neutral-800"
+                    className={softInputClass}
                   />
                 </label>
               ) : null}
             </div>
 
-            <label className="flex flex-col gap-2xs text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+            <label className={softFieldLabelClass}>
               Equipe técnica (opcional)
               <select
                 value={teamId}
-                onChange={(e) =>
-                  setTeamId(e.target.value ? Number(e.target.value) : "")
-                }
-                className="w-full rounded-md border border-neutral-300 bg-white px-md py-sm text-body-md font-normal normal-case tracking-normal text-on-surface outline-none focus:border-neutral-800 focus:ring-1 focus:ring-neutral-800"
+                onChange={(e) => {
+                  const next = e.target.value ? Number(e.target.value) : "";
+                  setTeamId(next);
+                  setTecnicoNome(resolveTecnicoForTeam(next, ""));
+                }}
+                className={softInputClass}
               >
                 <option value="">Definir depois, na execução</option>
                 {boot.teams.map((t) => (
@@ -3224,21 +3511,41 @@ function AssistenciaPage() {
               quando a OS for colocada em execução.
             </p>
 
-            <label className="flex flex-col gap-2xs text-[11px] font-semibold uppercase tracking-wide text-on-surface-variant">
+            <label className={softFieldLabelClass}>
               Técnico / responsável (opcional)
-              <input
-                value={tecnicoNome}
-                onChange={(e) => setTecnicoNome(e.target.value)}
-                placeholder="Nome do técnico"
-                className="w-full rounded-md border border-neutral-300 bg-white px-md py-sm text-body-md font-normal normal-case tracking-normal text-on-surface outline-none focus:border-neutral-800 focus:ring-1 focus:ring-neutral-800"
-              />
+              {membersOfTeam(teamId).length > 0 ? (
+                <select
+                  value={tecnicoNome}
+                  onChange={(e) => setTecnicoNome(e.target.value)}
+                  className={softInputClass}
+                >
+                  <option value="">Selecionar técnico da equipe</option>
+                  {membersOfTeam(teamId).map((m) => (
+                    <option key={m.id} value={m.name}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={tecnicoNome}
+                  onChange={(e) => setTecnicoNome(e.target.value)}
+                  placeholder={
+                    teamId
+                      ? "Equipe sem técnicos cadastrados"
+                      : "Escolha a equipe para listar técnicos"
+                  }
+                  className={softInputClass}
+                  disabled={!teamId}
+                />
+              )}
             </label>
-          </div>
+          </SoftDialogBody>
 
-          <DialogFooter className="mt-0 border-t border-outline-variant/50 px-xl py-md">
+          <SoftDialogFooter>
             <button
               type="button"
-              className={cn(btnOutline, "justify-center border-neutral-800 text-on-surface")}
+              className={softCancelBtnClass}
               onClick={() => setSchedOpen(false)}
             >
               Cancelar
@@ -3267,15 +3574,76 @@ function AssistenciaPage() {
                 );
                 setSchedOpen(false);
               }}
-              className={cn(
-                btnPrimary,
-                "justify-center bg-[#F5C518] text-neutral-950 hover:bg-[#e6b800]",
-              )}
+              className={softPrimaryBtnClass}
             >
               Confirmar agendamento
             </button>
-          </DialogFooter>
-        </DialogContent>
+          </SoftDialogFooter>
+        </SoftDialogContent>
+      </Dialog>
+
+      <Dialog
+        open={pauseOpen && Boolean(selected)}
+        onOpenChange={(open) => {
+          if (!open && !busy) {
+            setPauseOpen(false);
+            setPauseMotivo("");
+          }
+        }}
+      >
+        <SoftDialogContent size="md">
+          <SoftDialogHeader
+            eyebrow={selected ? `OS ${selected.num}` : "OS"}
+            title="PAUSAR EXECUÇÃO"
+          />
+          <SoftDialogBody>
+            <p className="text-body-md text-on-surface-variant">
+              Informe o motivo da pausa. O check-out fica bloqueado até retomar.
+            </p>
+            <label className={cn(softFieldLabelClass, "mt-md")}>
+              Motivo
+              <textarea
+                value={pauseMotivo}
+                onChange={(e) => setPauseMotivo(e.target.value)}
+                rows={3}
+                placeholder="Ex.: aguardando peça, cliente ausente, intervalo…"
+                className={softInputClass}
+                autoFocus
+              />
+            </label>
+          </SoftDialogBody>
+          <SoftDialogFooter>
+            <button
+              type="button"
+              className={softCancelBtnClass}
+              disabled={busy}
+              onClick={() => {
+                setPauseOpen(false);
+                setPauseMotivo("");
+              }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={busy || !pauseMotivo.trim() || !selected}
+              className={softPrimaryBtnClass}
+              onClick={() => {
+                if (!selected) return;
+                void run(() =>
+                  pauseOsFn({
+                    data: { osId: selected.id, motivo: pauseMotivo.trim() },
+                  }),
+                ).then(() => {
+                  setPauseOpen(false);
+                  setPauseMotivo("");
+                });
+              }}
+            >
+              Confirmar pausa
+            </button>
+          </SoftDialogFooter>
+        </SoftDialogContent>
       </Dialog>
     </AppShell>
   );

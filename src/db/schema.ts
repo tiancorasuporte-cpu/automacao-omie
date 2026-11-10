@@ -17,6 +17,7 @@ export type AppUser = {
   /** Módulos liberados. Admin/superadmin sempre têm todos. */
   modules: AppModuleId[];
   isTecnico: boolean;
+  isComprador: boolean;
   defaultVehicleId: number | null;
 };
 
@@ -29,6 +30,7 @@ export type AppUserRow = {
   active: boolean;
   modules?: string | null;
   is_tecnico?: boolean | null;
+  is_comprador?: boolean | null;
   default_vehicle_id?: number | null;
 };
 
@@ -131,6 +133,11 @@ export async function ensureSchema() {
   if (!(await columnExists("users", "is_tecnico"))) {
     await sql.unsafe(
       "alter table users add column is_tecnico boolean not null default false",
+    );
+  }
+  if (!(await columnExists("users", "is_comprador"))) {
+    await sql.unsafe(
+      "alter table users add column is_comprador boolean not null default false",
     );
   }
   if (!(await columnExists("users", "default_vehicle_id"))) {
@@ -1286,6 +1293,21 @@ export async function ensureSchema() {
   if (!(await indexExists("assist_os_ag_date_idx"))) {
     await sql.unsafe("create index assist_os_ag_date_idx on assist_os (ag_date)");
   }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "aprovado_por"))) {
+    await sql.unsafe("alter table assist_os add column aprovado_por varchar(160)");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "aprovado_em"))) {
+    await sql.unsafe("alter table assist_os add column aprovado_em timestamptz");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "aprovacao_anexo_json"))) {
+    await sql.unsafe("alter table assist_os add column aprovacao_anexo_json text");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "paused_at"))) {
+    await sql.unsafe("alter table assist_os add column paused_at timestamptz");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "pause_motivo"))) {
+    await sql.unsafe("alter table assist_os add column pause_motivo text");
+  }
 
   if (!(await tableExists("assist_os_items"))) {
     await sql`
@@ -1494,6 +1516,86 @@ export async function ensureSchema() {
   }
   if (!(await indexExists("ticket_events_ticket_idx"))) {
     await sql.unsafe("create index ticket_events_ticket_idx on ticket_events (ticket_id, id)");
+  }
+
+  if (!(await tableExists("compras_solicitacoes"))) {
+    await sql`
+      create table compras_solicitacoes (
+        id serial primary key,
+        origem varchar(24) not null,
+        status varchar(24) not null default 'aberta',
+        product_id integer references omie_products(id) on delete set null,
+        codigo_produto bigint,
+        descricao varchar(400) not null,
+        unidade varchar(40),
+        qtd numeric(15, 4) not null default 1,
+        quote_id integer,
+        quote_numero varchar(40),
+        os_id integer references assist_os(id) on delete set null,
+        os_item_id integer,
+        cmc_omie numeric(15, 4),
+        cmc_interno numeric(15, 4),
+        cmc_efetivo numeric(15, 4),
+        fornecedores_json text,
+        observacao text,
+        solicitado_por integer references users(id) on delete set null,
+        solicitado_por_nome varchar(120) not null,
+        fornecedor_nome varchar(200),
+        fornecedor_id integer,
+        valor_compra numeric(15, 4),
+        cmc_novo numeric(15, 4),
+        previsao date,
+        notas_compra text,
+        comprado_por integer references users(id) on delete set null,
+        comprado_por_nome varchar(120),
+        comprado_em timestamptz,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("compras_solicitacoes_status_idx"))) {
+    await sql.unsafe(
+      "create index compras_solicitacoes_status_idx on compras_solicitacoes (status, created_at desc)",
+    );
+  }
+  if (!(await indexExists("compras_solicitacoes_origem_idx"))) {
+    await sql.unsafe(
+      "create index compras_solicitacoes_origem_idx on compras_solicitacoes (origem, created_at desc)",
+    );
+  }
+  if (
+    (await tableExists("compras_solicitacoes")) &&
+    !(await columnExists("compras_solicitacoes", "motivo"))
+  ) {
+    await sql.unsafe("alter table compras_solicitacoes add column motivo text");
+  }
+  if (
+    (await tableExists("compras_solicitacoes")) &&
+    !(await columnExists("compras_solicitacoes", "links_json"))
+  ) {
+    await sql.unsafe("alter table compras_solicitacoes add column links_json text");
+  }
+  if (
+    (await tableExists("compras_solicitacoes")) &&
+    !(await columnExists("compras_solicitacoes", "visto_em"))
+  ) {
+    await sql.unsafe("alter table compras_solicitacoes add column visto_em timestamptz");
+    // Itens já existentes não devem disparar notificação retroativa.
+    await sql.unsafe(
+      "update compras_solicitacoes set visto_em = coalesce(created_at, now()) where visto_em is null",
+    );
+  }
+  if (
+    (await tableExists("assist_os_items")) &&
+    !(await columnExists("assist_os_items", "compra_visto_em"))
+  ) {
+    await sql.unsafe("alter table assist_os_items add column compra_visto_em timestamptz");
+    await sql.unsafe(`
+      update assist_os_items
+      set compra_visto_em = coalesce(updated_at, now())
+      where status = 'comprar' and compra_visto_em is null
+    `);
   }
 
   // FK tardia: tickets existe depois de assist_os.ticket_id

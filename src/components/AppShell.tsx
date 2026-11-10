@@ -14,12 +14,19 @@ import { HelpChat } from "@/components/HelpChat";
 import { Icon } from "@/components/Icon";
 import { logoutFn } from "@/lib/auth";
 import { APP_NAME, APP_VERSION } from "@/lib/brand";
+import { getComprasUnreadFn } from "@/lib/compras";
 import { consumeLoginEnter } from "@/lib/login-enter";
 import { isAdmin, isSuperadmin, canAccessModule, roleLabel } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 import { Route as RootRoute } from "@/routes/__root";
 import type { AppUser } from "@/db/schema";
 import type { AppModuleId } from "@/lib/modules";
+
+type ComprasUnread = {
+  cotacoes: number;
+  kanban: number;
+  total: number;
+};
 
 const ShellSearchContext = createContext<{
   query: string;
@@ -41,6 +48,7 @@ type NavPath =
   | "/terceiros"
   | "/uniformes"
   | "/estoque"
+  | "/compras"
   | "/frota"
   | "/assistencia"
   | "/equipes"
@@ -68,6 +76,7 @@ type NavEntry =
       id: string;
       label: string;
       icon: string;
+      badge?: string | number;
       children: NavLeaf[];
     };
 
@@ -160,6 +169,42 @@ const NAV: NavEntry[] = [
   },
   {
     kind: "group",
+    id: "compras",
+    label: "Compras",
+    icon: "shopping_cart",
+    children: [
+      {
+        to: "/compras",
+        label: "Kanban OS",
+        icon: "view_kanban",
+        module: "compras",
+        search: "tab=kanban",
+      },
+      {
+        to: "/compras",
+        label: "Cotações",
+        icon: "request_quote",
+        module: "compras",
+        search: "tab=cotacoes",
+      },
+      {
+        to: "/compras",
+        label: "Solicitar",
+        icon: "add_shopping_cart",
+        module: "compras",
+        search: "tab=solicitar",
+      },
+      {
+        to: "/compras",
+        label: "Histórico",
+        icon: "history",
+        module: "compras",
+        search: "tab=historico",
+      },
+    ],
+  },
+  {
+    kind: "group",
     id: "operacoes",
     label: "Operações",
     icon: "home_work",
@@ -194,6 +239,10 @@ function isPathActive(pathname: string, to: string, search?: string) {
       const view = readSearchParam("view");
       return !view || view === "kanban";
     }
+    if (to === "/compras") {
+      const tab = readSearchParam("tab");
+      return !tab || tab === "kanban";
+    }
     return true;
   }
   const wanted = new URLSearchParams(search);
@@ -203,12 +252,42 @@ function isPathActive(pathname: string, to: string, search?: string) {
       if (current && current !== "kanban") return false;
       continue;
     }
+    if (key === "tab" && value === "kanban" && to === "/compras") {
+      if (current && current !== "kanban") return false;
+      continue;
+    }
     if (current !== value) return false;
   }
   return true;
 }
 
-function visibleNav(user: AppUser | null): NavEntry[] {
+function applyComprasUnreadBadges(
+  entries: NavEntry[],
+  unread: ComprasUnread | null,
+): NavEntry[] {
+  if (!unread || unread.total <= 0) return entries;
+  return entries.map((entry) => {
+    if (entry.kind !== "group" || entry.id !== "compras") return entry;
+    return {
+      ...entry,
+      badge: unread.total > 99 ? "99+" : unread.total,
+      children: entry.children.map((child) => {
+        if (child.search === "tab=kanban" && unread.kanban > 0) {
+          return { ...child, badge: unread.kanban > 99 ? "99+" : unread.kanban };
+        }
+        if (child.search === "tab=cotacoes" && unread.cotacoes > 0) {
+          return {
+            ...child,
+            badge: unread.cotacoes > 99 ? "99+" : unread.cotacoes,
+          };
+        }
+        return child;
+      }),
+    };
+  });
+}
+
+function visibleNav(user: AppUser | null, unread?: ComprasUnread | null): NavEntry[] {
   const out: NavEntry[] = [];
   for (const entry of NAV) {
     if (entry.kind === "link") {
@@ -218,13 +297,16 @@ function visibleNav(user: AppUser | null): NavEntry[] {
     const children = entry.children.filter((child) => canSeeLeaf(user, child));
     if (children.length) out.push({ ...entry, children });
   }
-  return out;
+  return applyComprasUnreadBadges(out, unread ?? null);
 }
 
-function leafItems(user: AppUser | null, opts?: { includeAdmin?: boolean }) {
+function leafItems(
+  user: AppUser | null,
+  opts?: { includeAdmin?: boolean; comprasUnread?: ComprasUnread | null },
+) {
   const includeAdmin = opts?.includeAdmin ?? false;
   const leaves: NavLeaf[] = [];
-  for (const entry of visibleNav(user)) {
+  for (const entry of visibleNav(user, opts?.comprasUnread ?? null)) {
     if (entry.kind === "link") {
       if (!includeAdmin && entry.adminOnly) continue;
       if (entry.comingSoon) continue;
@@ -236,6 +318,16 @@ function leafItems(user: AppUser | null, opts?: { includeAdmin?: boolean }) {
       // No mobile: um atalho por path (ex.: Quadro de OS cobre Assistência).
       if (leaves.some((l) => l.to === child.to && !child.search)) continue;
       if (child.search && leaves.some((l) => l.to === child.to)) continue;
+      if (entry.kind === "group" && entry.id === "compras") {
+        leaves.push({
+          ...child,
+          label: "Compras",
+          icon: entry.icon,
+          search: undefined,
+          ...(entry.badge != null ? { badge: entry.badge } : {}),
+        });
+        continue;
+      }
       leaves.push(child);
     }
   }
@@ -255,13 +347,16 @@ const SIDEBAR_COLLAPSED_WIDTH = 76;
 
 function NavBadge({ value }: { value: string | number }) {
   const soon = String(value).toUpperCase() === "EM BREVE";
+  const numeric = typeof value === "number" || /^\d+\+?$/.test(String(value));
   return (
     <span
       className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide",
+        "shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-semibold tracking-wide",
         soon
-          ? "bg-white/15 text-white/65"
-          : "bg-secondary-container/90 text-on-secondary-container",
+          ? "bg-white/15 uppercase text-white/65"
+          : numeric
+            ? "bg-amber-400 text-amber-950"
+            : "bg-secondary-container/90 uppercase text-on-secondary-container",
       )}
     >
       {value}
@@ -296,7 +391,12 @@ function NavLinkItem({
 
   const body = (
     <>
-      <Icon name={item.icon} filled={active} className="text-xl" />
+      <span className="relative shrink-0">
+        <Icon name={item.icon} filled={active} className="text-xl" />
+        {collapsed && item.badge != null ? (
+          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-400" />
+        ) : null}
+      </span>
       {!collapsed ? (
         <>
           <span className="min-w-0 flex-1 truncate">{item.label}</span>
@@ -391,6 +491,7 @@ function NavGroupItem({
       >
         <Icon name={entry.icon} filled={childActive} className="text-xl" />
         <span className="flex-1">{entry.label}</span>
+        {entry.badge != null ? <NavBadge value={entry.badge} /> : null}
         <Icon
           name={open ? "expand_less" : "expand_more"}
           className="text-lg text-white/50"
@@ -418,13 +519,15 @@ function NavList({
   user,
   onNavigate,
   collapsed = false,
+  comprasUnread = null,
 }: {
   pathname: string;
   user: AppUser | null;
   onNavigate?: (() => void) | undefined;
   collapsed?: boolean;
+  comprasUnread?: ComprasUnread | null;
 }) {
-  const items = visibleNav(user);
+  const items = visibleNav(user, comprasUnread);
   return (
     <nav className="flex-1 space-y-1.5 overflow-y-auto pr-1">
       {items.map((entry) =>
@@ -453,11 +556,13 @@ function NavList({
 function MobileBottomNav({
   pathname,
   user,
+  comprasUnread = null,
 }: {
   pathname: string;
   user: AppUser | null;
+  comprasUnread?: ComprasUnread | null;
 }) {
-  const items = leafItems(user, { includeAdmin: false });
+  const items = leafItems(user, { includeAdmin: false, comprasUnread });
   if (items.length === 0) return null;
 
   return (
@@ -482,11 +587,16 @@ function MobileBottomNav({
             >
               <span
                 className={cn(
-                  "flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                  "relative flex h-8 w-8 items-center justify-center rounded-full transition-colors",
                   active && "bg-secondary-container text-on-secondary-container",
                 )}
               >
                 <Icon name={item.icon} filled={active} className="text-[22px]" />
+                {item.badge != null ? (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[0.6rem] font-bold text-amber-950">
+                    {item.badge}
+                  </span>
+                ) : null}
               </span>
               <span
                 className={cn(
@@ -510,12 +620,14 @@ function SidebarInner({
   user,
   collapsed = false,
   onToggleCollapsed,
+  comprasUnread = null,
 }: {
   onNavigate?: (() => void) | undefined;
   pathname: string;
   user: AppUser | null;
   collapsed?: boolean;
   onToggleCollapsed?: (() => void) | undefined;
+  comprasUnread?: ComprasUnread | null;
 }) {
   const navigate = useNavigate();
 
@@ -549,7 +661,13 @@ function SidebarInner({
         </button>
       ) : null}
 
-      <NavList pathname={pathname} user={user} onNavigate={onNavigate} collapsed={collapsed} />
+      <NavList
+        pathname={pathname}
+        user={user}
+        onNavigate={onNavigate}
+        collapsed={collapsed}
+        comprasUnread={comprasUnread}
+      />
 
       <div className="mt-auto space-y-1 border-t border-white/15 pt-lg">
         <button
@@ -676,8 +794,10 @@ export function AppShell({
   });
   const [query, setQuery] = useState("");
   const [enterAnim, setEnterAnim] = useState(false);
+  const [comprasUnread, setComprasUnread] = useState<ComprasUnread | null>(null);
   const search = useMemo(() => ({ query, setQuery }), [query]);
   const sidebarWidth = collapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_WIDTH;
+  const canSeeCompras = canAccessModule(user, "compras");
 
   useEffect(() => {
     setQuery("");
@@ -698,6 +818,35 @@ export function AppShell({
     }
   }, [collapsed]);
 
+  useEffect(() => {
+    if (!canSeeCompras) {
+      setComprasUnread(null);
+      return;
+    }
+    let cancelled = false;
+    async function loadUnread() {
+      try {
+        const next = await getComprasUnreadFn();
+        if (!cancelled) setComprasUnread(next);
+      } catch {
+        if (!cancelled) setComprasUnread(null);
+      }
+    }
+    void loadUnread();
+    const timer = window.setInterval(() => void loadUnread(), 45_000);
+    function onChanged() {
+      void loadUnread();
+    }
+    window.addEventListener("compras-unread-changed", onChanged);
+    window.addEventListener("focus", onChanged);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("compras-unread-changed", onChanged);
+      window.removeEventListener("focus", onChanged);
+    };
+  }, [canSeeCompras, pathname]);
+
   return (
     <ShellSearchContext.Provider value={search}>
       <div
@@ -717,6 +866,7 @@ export function AppShell({
             user={user}
             collapsed={collapsed}
             onToggleCollapsed={() => setCollapsed((value) => !value)}
+            comprasUnread={comprasUnread}
           />
         </aside>
 
@@ -728,7 +878,12 @@ export function AppShell({
               onClick={() => setOpen(false)}
             />
             <div className="absolute left-0 top-0 h-full w-[280px] border-r border-white/10 bg-primary">
-              <SidebarInner pathname={pathname} user={user} onNavigate={() => setOpen(false)} />
+              <SidebarInner
+                pathname={pathname}
+                user={user}
+                onNavigate={() => setOpen(false)}
+                comprasUnread={comprasUnread}
+              />
             </div>
           </div>
         ) : null}
@@ -780,7 +935,7 @@ export function AppShell({
             </div>
           )}
         </div>
-        <MobileBottomNav pathname={pathname} user={user} />
+        <MobileBottomNav pathname={pathname} user={user} comprasUnread={comprasUnread} />
         {!fullHeight ? <HelpChat /> : null}
       </div>
     </ShellSearchContext.Provider>

@@ -115,6 +115,9 @@ export type AssistOs = {
   prevista: boolean;
   ciAt: string | null;
   coAt: string | null;
+  /** Quando a OS está pausada em execução (após check-in). */
+  pausedAt: string | null;
+  pauseMotivo: string | null;
   resolucao: string | null;
   finDate: string | null;
   envio: AssistOsEnvio | null;
@@ -132,6 +135,10 @@ export type AssistOs = {
   } | null;
   fromCompras: boolean;
   fromTecnico: boolean;
+  /** Quem aprovou o orçamento / pedido (quando veio do Comercial). */
+  aprovadoPor: string | null;
+  aprovadoEm: string | null;
+  aprovacaoAnexo: { name: string; mime: string; data: string } | null;
   createdBy: number | null;
   createdByName: string | null;
   createdAt: string;
@@ -213,6 +220,8 @@ function mapOs(row: Record<string, unknown>, items: AssistOsItem[] = []): Assist
     prevista: Boolean(row["prevista"]),
     ciAt: iso(row["ci_at"]),
     coAt: iso(row["co_at"]),
+    pausedAt: iso(row["paused_at"]),
+    pauseMotivo: nullableStr(row["pause_motivo"]),
     resolucao: nullableStr(row["resolucao"]),
     finDate: dateOnly(row["fin_date"]),
     envio: parseJson<AssistOsEnvio>(row["envio_json"]),
@@ -259,6 +268,19 @@ function mapOs(row: Record<string, unknown>, items: AssistOsItem[] = []): Assist
     })(),
     fromCompras: Boolean(row["from_compras"]),
     fromTecnico: Boolean(row["from_tecnico"]),
+    aprovadoPor: nullableStr(row["aprovado_por"]),
+    aprovadoEm: iso(row["aprovado_em"]),
+    aprovacaoAnexo: (() => {
+      const raw = parseJson<{ name?: string; mime?: string; data?: string }>(
+        row["aprovacao_anexo_json"],
+      );
+      if (!raw?.name || !raw?.data) return null;
+      return {
+        name: str(raw.name),
+        mime: str(raw.mime) || "application/octet-stream",
+        data: str(raw.data),
+      };
+    })(),
     createdBy: row["created_by"] == null ? null : num(row["created_by"]),
     createdByName: nullableStr(row["created_by_name"]),
     createdAt: iso(row["created_at"]) ?? "",
@@ -469,6 +491,8 @@ export async function createOs(input: {
   quoteNumero?: string | null | undefined;
   ticketId?: number | null | undefined;
   items?: Array<{ qtd: number; nome: string }> | undefined;
+  aprovadoPor?: string | null | undefined;
+  aprovacaoAnexo?: { name: string; mime: string; data: string } | null | undefined;
   createdBy: number | null;
   createdByName: string;
 }) {
@@ -481,10 +505,20 @@ export async function createOs(input: {
   const stage = entryStageForTipo(input.tipo);
   const db = await getDb();
   const numOs = await nextOsNum();
+  const aprovadoPor = nullableStr(input.aprovadoPor);
+  const anexo = input.aprovacaoAnexo?.name?.trim() && input.aprovacaoAnexo?.data
+    ? {
+        name: input.aprovacaoAnexo.name.trim(),
+        mime: input.aprovacaoAnexo.mime || "application/octet-stream",
+        data: input.aprovacaoAnexo.data,
+      }
+    : null;
   const [row] = (await db`
     insert into assist_os (
       num, tipo, subtipo, stage, omie_app_id, client_code, client_name, client_city,
-      client_address, servico, quote_id, quote_numero, ticket_id, created_by, created_by_name
+      client_address, servico, quote_id, quote_numero, ticket_id,
+      aprovado_por, aprovado_em, aprovacao_anexo_json,
+      created_by, created_by_name
     ) values (
       ${numOs},
       ${input.tipo},
@@ -499,6 +533,9 @@ export async function createOs(input: {
       ${input.quoteId ?? null},
       ${nullableStr(input.quoteNumero)},
       ${input.ticketId ?? null},
+      ${aprovadoPor},
+      ${aprovadoPor ? new Date() : null},
+      ${anexo ? JSON.stringify(anexo) : null},
       ${input.createdBy},
       ${input.createdByName}
     )
@@ -520,6 +557,14 @@ export async function createOs(input: {
     userId: input.createdBy,
     acao: `OS criada (${input.tipo}${input.subtipo ? ` · ${input.subtipo}` : ""})`,
   });
+  if (aprovadoPor) {
+    await addOsEvent({
+      osId,
+      quem: input.createdByName,
+      userId: input.createdBy,
+      acao: `Pedido aprovado por ${aprovadoPor}${anexo ? ` · anexo ${anexo.name}` : ""}`,
+    });
+  }
   return getOsById(osId);
 }
 
@@ -551,10 +596,16 @@ export async function updateOsItemStatus(input: {
     select * from assist_os_items where id = ${input.itemId} limit 1
   `) as Record<string, unknown>[];
   if (!item) throw new Error("Item não encontrado.");
+  const prevStatus = str(item["status"]);
+  const goingToComprar = input.status === "comprar" && prevStatus !== "comprar";
   await db`
     update assist_os_items
     set status = ${input.status},
         previsao = ${input.previsao ?? null},
+        compra_visto_em = case
+          when ${goingToComprar}::boolean then null
+          else compra_visto_em
+        end,
         updated_at = now()
     where id = ${input.itemId}
   `;
@@ -574,18 +625,20 @@ export async function addOsItem(input: {
   nome: string;
   status?: OsItemStatus | undefined;
   origem?: string | null | undefined;
+  productId?: number | null | undefined;
   quem: string;
   userId?: number | null | undefined;
 }) {
   const db = await getDb();
   await db`
-    insert into assist_os_items (os_id, qtd, nome, status, origem)
+    insert into assist_os_items (os_id, qtd, nome, status, origem, product_id)
     values (
       ${input.osId},
       ${input.qtd},
       ${input.nome.trim()},
       ${input.status ?? "extra"},
-      ${nullableStr(input.origem)}
+      ${nullableStr(input.origem)},
+      ${input.productId ?? null}
     )
   `;
   await addOsEvent({
@@ -847,6 +900,71 @@ export async function checkInOs(input: {
   return getOsById(os.id);
 }
 
+export async function pauseOs(input: {
+  osId: number;
+  motivo: string;
+  quem: string;
+  userId?: number | null;
+  isAdmin: boolean;
+  canRole: (role: OsWorkflowRole) => boolean;
+}) {
+  const os = await getOsById(input.osId);
+  if (!os) throw new Error("OS não encontrada.");
+  if (os.stage !== 5) throw new Error("Pausa só em execução.");
+  assertCanMoveStage(5, input.canRole, input.isAdmin);
+  if (!os.ciAt) throw new Error("Faça check-in antes de pausar.");
+  if (os.coAt) throw new Error("OS já teve check-out.");
+  if (os.pausedAt) throw new Error("OS já está pausada.");
+  const motivo = input.motivo.trim();
+  if (!motivo) throw new Error("Informe o motivo da pausa.");
+  const db = await getDb();
+  await db`
+    update assist_os
+    set paused_at = now(),
+        pause_motivo = ${motivo},
+        updated_at = now()
+    where id = ${os.id}
+  `;
+  await addOsEvent({
+    osId: os.id,
+    quem: input.quem,
+    userId: input.userId,
+    acao: `OS pausada · ${motivo}`,
+  });
+  return getOsById(os.id);
+}
+
+export async function resumeOs(input: {
+  osId: number;
+  quem: string;
+  userId?: number | null;
+  isAdmin: boolean;
+  canRole: (role: OsWorkflowRole) => boolean;
+}) {
+  const os = await getOsById(input.osId);
+  if (!os) throw new Error("OS não encontrada.");
+  if (os.stage !== 5) throw new Error("Retomada só em execução.");
+  assertCanMoveStage(5, input.canRole, input.isAdmin);
+  if (!os.pausedAt) throw new Error("OS não está pausada.");
+  if (os.coAt) throw new Error("OS já teve check-out.");
+  const db = await getDb();
+  const motivo = os.pauseMotivo;
+  await db`
+    update assist_os
+    set paused_at = null,
+        pause_motivo = null,
+        updated_at = now()
+    where id = ${os.id}
+  `;
+  await addOsEvent({
+    osId: os.id,
+    quem: input.quem,
+    userId: input.userId,
+    acao: motivo ? `OS retomada (pausa: ${motivo})` : "OS retomada",
+  });
+  return getOsById(os.id);
+}
+
 export async function checkOutOs(input: {
   osId: number;
   resolucao: string;
@@ -862,6 +980,7 @@ export async function checkOutOs(input: {
   if (os.stage !== 5) throw new Error("Check-out só em execução.");
   assertCanMoveStage(5, input.canRole, input.isAdmin);
   if (!os.ciAt) throw new Error("Faça check-in antes.");
+  if (os.pausedAt) throw new Error("OS pausada. Retome a execução antes do check-out.");
   if (!input.resolucao.trim()) throw new Error("Informe a resolução.");
   const fotos = (input.fotos ?? os.rel?.fotos ?? []).filter(Boolean).slice(0, 12);
   const anexos = (input.anexos ?? os.rel?.anexos ?? [])

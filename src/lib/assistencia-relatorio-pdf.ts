@@ -20,6 +20,9 @@ export type AssistRelatorioPdfRow = {
   hora: string | null;
   teamName: string | null;
   tecnicoNome: string | null;
+  aprovadoPor: string | null;
+  aprovadoEm: string | null;
+  aprovacaoAnexoName: string | null;
   reportDate: string;
   ciAt: string | null;
   coAt: string | null;
@@ -291,7 +294,20 @@ export async function downloadAssistRelatorioPdf(input: AssistRelatorioPdfInput)
     theme: "striped",
     headStyles: { fillColor: NAVY, textColor: 255, fontSize: 7 },
     styles: { fontSize: 7, cellPadding: 1.2, textColor: [20, 32, 44], overflow: "linebreak" },
-    head: [["OS", "Cliente", "Tipo", "Data", "Responsável", "Etapa", "Serviço", "Materiais", "Fotos"]],
+    head: [
+      [
+        "OS",
+        "Cliente",
+        "Tipo",
+        "Data",
+        "Responsável",
+        "Aprovado por",
+        "Etapa",
+        "Serviço",
+        "Materiais",
+        "Fotos",
+      ],
+    ],
     body:
       input.rows.length > 0
         ? input.rows.map((row) => [
@@ -310,6 +326,11 @@ export async function downloadAssistRelatorioPdf(input: AssistRelatorioPdfInput)
                 .join(" · "),
             ),
             clean(responsavel(row)),
+            clean(
+              row.aprovadoPor
+                ? `${row.aprovadoPor}${row.aprovacaoAnexoName ? ` · ${row.aprovacaoAnexoName}` : ""}`
+                : "—",
+            ),
             clean(osStageName(row.stage)),
             clean(row.servico || "—"),
             clean(
@@ -319,7 +340,7 @@ export async function downloadAssistRelatorioPdf(input: AssistRelatorioPdfInput)
             ),
             String(row.fotos?.length ?? 0),
           ])
-        : [["—", "Nenhuma OS no filtro.", "", "", "", "", "", "", ""]],
+        : [["—", "Nenhuma OS no filtro.", "", "", "", "", "", "", "", ""]],
   });
 
   const withFotos = input.rows.filter((r) => (r.fotos?.length ?? 0) > 0);
@@ -375,6 +396,18 @@ export async function downloadAssistOsPdf(row: AssistRelatorioPdfRow) {
       [formatDateBr(row.agDate), row.periodo, row.hora].filter(Boolean).join(" · ") || "—",
     ],
     ["Responsável", responsavel(row)],
+    [
+      "Aprovado por",
+      row.aprovadoPor
+        ? [
+            row.aprovadoPor,
+            row.aprovadoEm ? formatDateTimeBr(row.aprovadoEm) : null,
+            row.aprovacaoAnexoName ? `anexo: ${row.aprovacaoAnexoName}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : "—",
+    ],
     ["Check-in", formatDateTimeBr(row.ciAt)],
     ["Check-out", formatDateTimeBr(row.coAt)],
   ];

@@ -47,6 +47,7 @@ import {
   syncOmieClientsFn,
   syncOmieProductsFn,
 } from "@/lib/orcamentos";
+import { createCompraSolicitacaoFn, listCotacoesOrcamentoFn } from "@/lib/compras";
 import { openOrcamentoPdf } from "@/lib/orcamento-pdf";
 import { downloadOrcamentoExcel } from "@/lib/orcamento-excel";
 import { effectiveCmc, isUnitBelowCmc, isUnitBelowSuggested, suggestedPriceFromCmc } from "@/lib/product-pricing";
@@ -77,6 +78,55 @@ type CartItem = {
   markup: number | null;
   ncm: string | null;
 };
+
+type CotacaoCartStatus = {
+  solicitacaoId: number;
+  status: "aberta" | "em_cotacao" | "comprada" | "cancelada" | string;
+  valorCompra: number | null;
+  cmcNovo: number | null;
+  fornecedorNome: string | null;
+};
+
+function cotacaoStatusLabel(status: string) {
+  if (status === "comprada") return "Cotado e comprado";
+  if (status === "cancelada") return "Cotação cancelada";
+  if (status === "em_cotacao") return "Em cotação";
+  return "Enviado para cotação";
+}
+
+function cotacaoStatusClass(status: string) {
+  if (status === "comprada") return "bg-emerald-100 text-emerald-900";
+  if (status === "cancelada") return "bg-red-100 text-red-800";
+  if (status === "em_cotacao") return "bg-sky-100 text-sky-900";
+  return "bg-amber-100 text-amber-950";
+}
+
+function quoteCotacaoBadges(quote: {
+  cotacaoEnviados?: number | null;
+  cotacaoComprados?: number | null;
+}) {
+  const enviados = Number(quote.cotacaoEnviados ?? 0);
+  const comprados = Number(quote.cotacaoComprados ?? 0);
+  if (enviados <= 0 && comprados <= 0) return null;
+  return (
+    <span className="mt-2xs flex flex-wrap gap-2xs">
+      {enviados > 0 ? (
+        <span className="inline-flex rounded-full bg-amber-100 px-sm py-2xs text-[0.65rem] font-semibold text-amber-950">
+          {enviados === 1
+            ? "1 item enviado para cotação"
+            : `${enviados} itens enviados para cotação`}
+        </span>
+      ) : null}
+      {comprados > 0 ? (
+        <span className="inline-flex rounded-full bg-emerald-100 px-sm py-2xs text-[0.65rem] font-semibold text-emerald-900">
+          {comprados === 1
+            ? "1 item cotado e comprado"
+            : `${comprados} itens cotados e comprados`}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 type QuoteServicoMensal = {
   key: string;
@@ -281,6 +331,18 @@ function OrcamentosPage() {
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendingPedido, setSendingPedido] = useState(false);
+  const [pedidoAprovOpen, setPedidoAprovOpen] = useState(false);
+  const [pedidoAprovQuoteId, setPedidoAprovQuoteId] = useState<number | null>(null);
+  const [pedidoAprovadoPor, setPedidoAprovadoPor] = useState("");
+  const [pedidoAprovAnexo, setPedidoAprovAnexo] = useState<{
+    name: string;
+    mime: string;
+    data: string;
+  } | null>(null);
+  /** Status de cotação/compra por código de produto Omie. */
+  const [cotacaoByCodigo, setCotacaoByCodigo] = useState<
+    Record<number, CotacaoCartStatus>
+  >({});
   const [loadingQuote, setLoadingQuote] = useState(false);
   const [duplicatingQuoteId, setDuplicatingQuoteId] = useState<number | null>(null);
   const [deletingQuoteId, setDeletingQuoteId] = useState<number | null>(null);
@@ -497,6 +559,46 @@ function OrcamentosPage() {
     setAddServicoId("");
   }
 
+  async function refreshCotacoesStatus(
+    quoteId?: number | null,
+    quoteNumero?: string | null,
+  ) {
+    const id = quoteId ?? editingQuoteId;
+    const numero = quoteNumero ?? numeroInterno;
+    if (!id && !numero) {
+      setCotacaoByCodigo({});
+      return;
+    }
+    try {
+      const rows = await listCotacoesOrcamentoFn({
+        data: { quoteId: id, quoteNumero: numero },
+      });
+      const rank = (status: string) => {
+        if (status === "comprada") return 4;
+        if (status === "em_cotacao") return 3;
+        if (status === "aberta") return 2;
+        if (status === "cancelada") return 1;
+        return 0;
+      };
+      const next: Record<number, CotacaoCartStatus> = {};
+      for (const row of rows) {
+        if (row.codigoProduto == null) continue;
+        const current = next[row.codigoProduto];
+        if (current && rank(current.status) >= rank(row.status)) continue;
+        next[row.codigoProduto] = {
+          solicitacaoId: row.id,
+          status: row.status,
+          valorCompra: row.valorCompra,
+          cmcNovo: row.cmcNovo,
+          fornecedorNome: row.fornecedorNome,
+        };
+      }
+      setCotacaoByCodigo(next);
+    } catch {
+      /* ignore */
+    }
+  }
+
   function resetForm() {
     setEditingQuoteId(null);
     setNumeroInterno(null);
@@ -505,6 +607,7 @@ function OrcamentosPage() {
     setOmiePedidoCode(null);
     setNumeroPedidoOmie(null);
     setCopiedOmieCode(false);
+    setCotacaoByCodigo({});
     setSelectedClient(null);
     setClientQuery("");
     setContato("");
@@ -930,11 +1033,118 @@ function OrcamentosPage() {
     }
   }
 
+  function openPedidoAprovacao(quoteId?: number | null) {
+    setPedidoAprovQuoteId(quoteId ?? editingQuoteId ?? null);
+    setPedidoAprovadoPor("");
+    setPedidoAprovAnexo(null);
+    setPedidoAprovOpen(true);
+  }
+
+  async function handleEnviarCotacao(item: CartItem) {
+    const existing = cotacaoByCodigo[item.codigoProduto];
+    if (existing && existing.status !== "cancelada") {
+      setFeedback({
+        type: "error",
+        text:
+          existing.status === "comprada"
+            ? "Este item já foi cotado e comprado."
+            : "Este item já foi enviado para cotação.",
+      });
+      return;
+    }
+    setFeedback(null);
+    try {
+      let quoteId = editingQuoteId;
+      let quoteNumero = numeroInterno;
+      if (!quoteId) {
+        const saved = await saveOrcamentoFn({ data: buildPayload() });
+        if (!saved.ok) {
+          setFeedback({ type: "error", text: saved.error });
+          return;
+        }
+        quoteId = saved.quoteId;
+        quoteNumero = saved.numeroInterno;
+        setEditingQuoteId(saved.quoteId);
+        setNumeroInterno(saved.numeroInterno);
+        setQuoteStatus("draft");
+        await refreshQuotes();
+      }
+      const result = await createCompraSolicitacaoFn({
+        data: {
+          origem: "orcamento",
+          descricao: item.descricao,
+          unidade: item.unidade,
+          qtd: item.quantidade,
+          omieAppId: omieAppId || null,
+          codigoProduto: item.codigoProduto,
+          quoteId,
+          quoteNumero,
+          motivo: `Cotação do orçamento ${quoteNumero ?? quoteId}`,
+          observacao: `Item do orçamento ${quoteNumero ?? quoteId}`,
+        },
+      });
+      if (!result.ok) {
+        setFeedback({ type: "error", text: result.error });
+        return;
+      }
+      setCotacaoByCodigo((prev) => ({
+        ...prev,
+        [item.codigoProduto]: {
+          solicitacaoId: result.solicitacao.id,
+          status: result.solicitacao.status,
+          valorCompra: result.solicitacao.valorCompra,
+          cmcNovo: result.solicitacao.cmcNovo,
+          fornecedorNome: result.solicitacao.fornecedorNome,
+        },
+      }));
+      setFeedback({
+        type: "ok",
+        text: `${item.descricao} enviado para cotação em Compras.`,
+      });
+      try {
+        await reloadQuotesList();
+      } catch {
+        /* lista salvos pode atualizar no próximo refresh */
+      }
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao enviar para cotação.",
+      });
+    }
+  }
+
+  async function onPedidoAprovAnexo(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    if (file.size > 4_000_000) {
+      setFeedback({ type: "error", text: `Arquivo muito grande: ${file.name} (máx. 4 MB).` });
+      return;
+    }
+    const data = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ""));
+      reader.onerror = () => reject(new Error("Falha ao ler arquivo"));
+      reader.readAsDataURL(file);
+    });
+    if (!data) return;
+    setPedidoAprovAnexo({
+      name: file.name,
+      mime: file.type || "application/octet-stream",
+      data,
+    });
+  }
+
   async function handleEnviarPedido(quoteId?: number | null) {
+    const aprovadoPor = pedidoAprovadoPor.trim();
+    if (!aprovadoPor) {
+      setFeedback({ type: "error", text: "Informe quem aprovou o pedido." });
+      return;
+    }
     setSendingPedido(true);
     setFeedback(null);
     try {
-      let id = quoteId ?? editingQuoteId;
+      let id = quoteId ?? pedidoAprovQuoteId ?? editingQuoteId;
       if (!id) {
         const saved = await saveOrcamentoFn({ data: buildPayload() });
         if (!saved.ok) {
@@ -947,11 +1157,21 @@ function OrcamentosPage() {
         setQuoteStatus("draft");
         await refreshQuotes();
       }
-      const result = await enviarPedidoAssistenciaFn({ data: { quoteId: id } });
+      const result = await enviarPedidoAssistenciaFn({
+        data: {
+          quoteId: id,
+          aprovadoPor,
+          aprovacaoAnexo: pedidoAprovAnexo,
+        },
+      });
       if (!result.ok) {
         setFeedback({ type: "error", text: result.error });
         return;
       }
+      setPedidoAprovOpen(false);
+      setPedidoAprovQuoteId(null);
+      setPedidoAprovadoPor("");
+      setPedidoAprovAnexo(null);
       setFeedback({
         type: "ok",
         text: result.alreadyExists
@@ -1105,6 +1325,7 @@ function OrcamentosPage() {
           ncm: item.ncm,
         })),
       );
+      await refreshCotacoesStatus(quote.id, quote.numeroInterno);
       setFeedback({
         type: "ok",
         text: `Editando ${quote.numeroInterno} — ${quote.clientName ?? quote.clientCode}.`,
@@ -1960,6 +2181,8 @@ function OrcamentosPage() {
                       const belowCmc = isUnitBelowCmc(item.valorUnitario, cmcEfetivo);
                       const belowSuggested =
                         !belowCmc && isUnitBelowSuggested(item.valorUnitario, sugerido);
+                      const cotacao = cotacaoByCodigo[item.codigoProduto];
+                      const cotacaoAtiva = Boolean(cotacao && cotacao.status !== "cancelada");
                       return (
                         <article
                           key={item.key}
@@ -1987,6 +2210,16 @@ function OrcamentosPage() {
                                 <p className="text-title-md text-primary">{item.descricao}</p>
                                 {item.unidade ? (
                                   <p className="text-label-md text-on-surface-variant">{item.unidade}</p>
+                                ) : null}
+                                {cotacao ? (
+                                  <span
+                                    className={cn(
+                                      "mt-xs inline-flex rounded-full px-sm py-2xs text-label-md font-semibold",
+                                      cotacaoStatusClass(cotacao.status),
+                                    )}
+                                  >
+                                    {cotacaoStatusLabel(cotacao.status)}
+                                  </span>
                                 ) : null}
                               </div>
                             </div>
@@ -2055,6 +2288,24 @@ function OrcamentosPage() {
                           ) : belowSuggested ? (
                             <p className="mt-xs text-label-md text-amber-800">Abaixo do sugerido</p>
                           ) : null}
+                          <button
+                            type="button"
+                            disabled={cotacaoAtiva}
+                            className={cn(
+                              "mt-sm inline-flex items-center gap-2xs rounded-lg border px-sm py-xs text-label-md font-semibold",
+                              cotacaoAtiva
+                                ? "cursor-not-allowed border-outline-variant/60 text-on-surface-variant opacity-70"
+                                : "border-outline-variant text-on-surface",
+                            )}
+                            onClick={() => void handleEnviarCotacao(item)}
+                          >
+                            <Icon name="shopping_cart" className="text-[15px]" />
+                            {cotacao?.status === "comprada"
+                              ? "Cotado e comprado"
+                              : cotacaoAtiva
+                                ? "Enviado para cotação"
+                                : "Enviar para cotação"}
+                          </button>
                         </article>
                       );
                     })}
@@ -2079,6 +2330,8 @@ function OrcamentosPage() {
                         const belowCmc = isUnitBelowCmc(item.valorUnitario, cmcEfetivo);
                         const belowSuggested =
                           !belowCmc && isUnitBelowSuggested(item.valorUnitario, sugerido);
+                        const cotacao = cotacaoByCodigo[item.codigoProduto];
+                        const cotacaoAtiva = Boolean(cotacao && cotacao.status !== "cancelada");
                         return (
                         <tr
                           key={item.key}
@@ -2104,6 +2357,16 @@ function OrcamentosPage() {
                             <p className="line-clamp-2 text-body-md leading-snug">{item.descricao}</p>
                             {item.unidade ? (
                               <p className="text-label-md text-on-surface-variant">{item.unidade}</p>
+                            ) : null}
+                            {cotacao ? (
+                              <span
+                                className={cn(
+                                  "mt-2xs inline-flex rounded-full px-sm py-2xs text-[0.65rem] font-semibold",
+                                  cotacaoStatusClass(cotacao.status),
+                                )}
+                              >
+                                {cotacaoStatusLabel(cotacao.status)}
+                              </span>
                             ) : null}
                           </td>
                           <td className="px-xs py-1">
@@ -2155,15 +2418,43 @@ function OrcamentosPage() {
                             {formatMoney(item.quantidade * item.valorUnitario)}
                           </td>
                           <td className="px-xs py-1">
-                            {!locked ? (
+                            <div className="flex flex-col items-end gap-2xs">
                               <button
                                 type="button"
-                                className="text-label-md text-red-700"
-                                onClick={() => setCart((prev) => prev.filter((row) => row.key !== item.key))}
+                                disabled={cotacaoAtiva}
+                                className={cn(
+                                  "text-label-md font-semibold",
+                                  cotacaoAtiva
+                                    ? "cursor-not-allowed text-on-surface-variant"
+                                    : "text-primary",
+                                )}
+                                title={
+                                  cotacao?.status === "comprada"
+                                    ? "Item cotado e comprado"
+                                    : cotacaoAtiva
+                                      ? "Item já enviado para cotação"
+                                      : "Enviar produto para o comprador cotar"
+                                }
+                                onClick={() => void handleEnviarCotacao(item)}
                               >
-                                Remover
+                                {cotacao?.status === "comprada"
+                                  ? "Comprado"
+                                  : cotacaoAtiva
+                                    ? "Em cotação"
+                                    : "Cotar"}
                               </button>
-                            ) : null}
+                              {!locked ? (
+                                <button
+                                  type="button"
+                                  className="text-label-md text-red-700"
+                                  onClick={() =>
+                                    setCart((prev) => prev.filter((row) => row.key !== item.key))
+                                  }
+                                >
+                                  Remover
+                                </button>
+                              ) : null}
+                            </div>
                           </td>
                         </tr>
                         );
@@ -2243,7 +2534,7 @@ function OrcamentosPage() {
                 disabled={
                   sendingPedido || locked || !selectedClient || cart.length === 0
                 }
-                onClick={() => void handleEnviarPedido()}
+                onClick={() => openPedidoAprovacao()}
                 className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
                 title="Cria OS de pedido aprovado no Kanban da Assistência"
               >
@@ -2346,6 +2637,7 @@ function OrcamentosPage() {
                           {statusLabel(quote.status, quote.error)}
                           {quote.createdByName ? ` · ${quote.createdByName}` : ""}
                         </p>
+                        {quoteCotacaoBadges(quote)}
                       </div>
                       <p className="shrink-0 text-title-md font-semibold text-primary">
                         {quote.total != null ? formatMoney(quote.total) : "—"}
@@ -2402,7 +2694,7 @@ function OrcamentosPage() {
                       <button
                         type="button"
                         disabled={sendingPedido}
-                        onClick={() => void handleEnviarPedido(quote.id)}
+                        onClick={() => openPedidoAprovacao(quote.id)}
                         className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
                         title="Enviar pedido ao Kanban da Assistência"
                       >
@@ -2439,6 +2731,7 @@ function OrcamentosPage() {
                     <th className={tableHeadCellClass}>Usuário</th>
                     <th className={tableHeadCellClass}>Total</th>
                     <th className={tableHeadCellClass}>Status</th>
+                    <th className={tableHeadCellClass}>Cotação</th>
                     <th className={tableHeadCellClass}>Quando</th>
                     <th className={tableHeadCellClass}>Ações</th>
                   </tr>
@@ -2453,6 +2746,11 @@ function OrcamentosPage() {
                         {quote.total != null ? formatMoney(quote.total) : "—"}
                       </td>
                       <td className="px-sm py-xs">{statusLabel(quote.status, quote.error)}</td>
+                      <td className="px-sm py-xs">
+                        {quoteCotacaoBadges(quote) ?? (
+                          <span className="text-label-md text-on-surface-variant">—</span>
+                        )}
+                      </td>
                       <td className="px-sm py-xs">
                         {quote.createdAt ? new Date(quote.createdAt).toLocaleString("pt-BR") : "—"}
                       </td>
@@ -2507,7 +2805,7 @@ function OrcamentosPage() {
                           <button
                             type="button"
                             disabled={sendingPedido}
-                            onClick={() => void handleEnviarPedido(quote.id)}
+                            onClick={() => openPedidoAprovacao(quote.id)}
                             className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
                             title="Enviar pedido ao Kanban da Assistência"
                           >
@@ -2779,6 +3077,88 @@ function OrcamentosPage() {
               </button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={pedidoAprovOpen}
+        onOpenChange={(open) => {
+          if (!open && !sendingPedido) {
+            setPedidoAprovOpen(false);
+            setPedidoAprovQuoteId(null);
+            setPedidoAprovadoPor("");
+            setPedidoAprovAnexo(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-[28rem]">
+          <DialogHeader>
+            <DialogTitle>Aprovação do pedido</DialogTitle>
+            <DialogDescription>
+              Informe quem aprovou o orçamento antes de criar a OS na Assistência. O anexo
+              fica registrado no relatório da OS.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-md flex flex-col gap-md">
+            <label className="flex flex-col gap-xs text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+              Quem aprovou
+              <input
+                value={pedidoAprovadoPor}
+                onChange={(e) => setPedidoAprovadoPor(e.target.value)}
+                placeholder="Nome de quem aprovou"
+                className="rounded-lg border border-outline-variant bg-white px-md py-sm text-body-md font-normal normal-case tracking-normal text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50"
+                autoFocus
+              />
+            </label>
+            <label className="flex flex-col gap-xs text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+              Anexo (opcional)
+              <input
+                type="file"
+                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+                onChange={(e) => void onPedidoAprovAnexo(e.target.files)}
+                className="rounded-lg border border-outline-variant bg-white px-md py-sm text-body-md font-normal normal-case tracking-normal file:mr-sm file:rounded-md file:border-0 file:bg-neutral-900 file:px-sm file:py-xs file:text-label-sm file:font-semibold file:text-white"
+              />
+            </label>
+            {pedidoAprovAnexo ? (
+              <div className="flex items-center justify-between gap-sm rounded-lg bg-surface px-sm py-xs text-label-md text-on-surface">
+                <span className="min-w-0 truncate">{pedidoAprovAnexo.name}</span>
+                <button
+                  type="button"
+                  className="shrink-0 text-red-700 underline"
+                  onClick={() => setPedidoAprovAnexo(null)}
+                >
+                  Remover
+                </button>
+              </div>
+            ) : (
+              <p className="text-label-sm text-on-surface-variant">
+                PDF, imagem ou documento · máx. 4 MB
+              </p>
+            )}
+          </div>
+          <DialogFooter className="mt-md gap-sm">
+            <button
+              type="button"
+              disabled={sendingPedido}
+              className="rounded-lg px-md py-sm text-label-md"
+              onClick={() => {
+                setPedidoAprovOpen(false);
+                setPedidoAprovQuoteId(null);
+                setPedidoAprovadoPor("");
+                setPedidoAprovAnexo(null);
+              }}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={sendingPedido || !pedidoAprovadoPor.trim()}
+              className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+              onClick={() => void handleEnviarPedido(pedidoAprovQuoteId)}
+            >
+              {sendingPedido ? "Enviando…" : "Confirmar e enviar"}
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

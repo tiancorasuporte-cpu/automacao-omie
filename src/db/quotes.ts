@@ -36,6 +36,10 @@ export type Quote = {
   servicoMensalId: number | null;
   servicoMensalNome: string | null;
   servicoMensalValor: number | null;
+  /** Itens em cotação (aberta / em_cotacao). */
+  cotacaoEnviados: number;
+  /** Itens já cotados e comprados. */
+  cotacaoComprados: number;
 };
 
 export type QuoteItem = {
@@ -98,7 +102,65 @@ function mapQuote(r: Record<string, unknown>): Quote {
     servicoMensalNome: r["servico_mensal_nome"] == null ? null : String(r["servico_mensal_nome"]),
     servicoMensalValor:
       r["servico_mensal_valor"] == null ? null : toNumber(r["servico_mensal_valor"]),
+    cotacaoEnviados: toNumber(r["cotacao_enviados"] ?? 0),
+    cotacaoComprados: toNumber(r["cotacao_comprados"] ?? 0),
   };
+}
+
+async function attachCotacaoCounts(quotes: Quote[]) {
+  for (const quote of quotes) {
+    quote.cotacaoEnviados = 0;
+    quote.cotacaoComprados = 0;
+  }
+  if (!quotes.length) return quotes;
+  try {
+    const db = await getDb();
+    const ids = quotes.map((q) => q.id);
+    const numeros = [
+      ...new Set(quotes.map((q) => q.numeroInterno.trim()).filter(Boolean)),
+    ];
+    const rows = (await db`
+      select
+        quote_id,
+        quote_numero,
+        status,
+        count(*)::int as total
+      from compras_solicitacoes
+      where origem = 'orcamento'
+        and status in ('aberta', 'em_cotacao', 'comprada')
+        and (
+          quote_id in ${db(ids)}
+          or (
+            ${numeros.length > 0}::boolean
+            and quote_numero in ${db(numeros.length ? numeros : ["__none__"])}
+          )
+        )
+      group by quote_id, quote_numero, status
+    `) as Array<{
+      quote_id: number | null;
+      quote_numero: string | null;
+      status: string;
+      total: number;
+    }>;
+
+    const byId = new Map(quotes.map((q) => [q.id, q]));
+    const byNumero = new Map(
+      quotes.filter((q) => q.numeroInterno).map((q) => [q.numeroInterno, q]),
+    );
+
+    for (const row of rows) {
+      const quote =
+        (row.quote_id != null ? byId.get(Number(row.quote_id)) : undefined) ??
+        (row.quote_numero ? byNumero.get(String(row.quote_numero)) : undefined);
+      if (!quote) continue;
+      const total = Number(row.total) || 0;
+      if (row.status === "comprada") quote.cotacaoComprados += total;
+      else quote.cotacaoEnviados += total;
+    }
+  } catch {
+    // tabela de compras pode ainda não existir em ambientes antigos
+  }
+  return quotes;
 }
 
 export async function nextNumeroInterno(): Promise<string> {
@@ -396,8 +458,9 @@ export async function listQuotes(input: {
     offset ${safeOffset}
   `) as Array<Record<string, unknown>>;
 
+  const quotes = await attachCotacaoCounts(rows.map(mapQuote));
   return {
-    quotes: rows.map(mapQuote),
+    quotes,
     total: Number(countRows[0]?.total ?? 0),
   };
 }

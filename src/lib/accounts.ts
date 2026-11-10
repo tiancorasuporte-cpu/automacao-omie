@@ -63,6 +63,7 @@ export const getUsersAdminBootstrapFn = createServerFn({ method: "GET" }).handle
 
 const createSchemaWithStaff = createSchema.extend({
   isTecnico: z.boolean().optional(),
+  isComprador: z.boolean().optional(),
   defaultVehicleId: z.number().int().positive().nullable().optional(),
 });
 
@@ -94,6 +95,7 @@ export const createUserFn = createServerFn({ method: "POST" })
         role: data.role,
         modules: data.role === "operator" ? data.modules ?? [] : [...ALL_MODULE_IDS],
         isTecnico: Boolean(data.isTecnico),
+        isComprador: Boolean(data.isComprador),
         defaultVehicleId: data.defaultVehicleId ?? null,
       });
       const { canAccessModule } = await import("@/lib/require-auth");
@@ -119,6 +121,7 @@ export const updateUserStaffFn = createServerFn({ method: "POST" })
     z.object({
       id: z.number().int().positive(),
       isTecnico: z.boolean(),
+      isComprador: z.boolean(),
       defaultVehicleId: z.number().int().positive().nullable(),
     }),
   )
@@ -131,6 +134,7 @@ export const updateUserStaffFn = createServerFn({ method: "POST" })
     try {
       const user = await updateUserStaff(data.id, {
         isTecnico: data.isTecnico,
+        isComprador: data.isComprador,
         defaultVehicleId: data.defaultVehicleId,
       });
       if (!user) return { ok: false as const, error: "Usuário não encontrado." };

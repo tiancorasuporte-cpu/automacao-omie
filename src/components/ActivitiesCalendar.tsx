@@ -550,7 +550,11 @@ export function activityInitial(name: string | null | undefined) {
   return s ? s.charAt(0).toUpperCase() : null;
 }
 
-export function osActivityStatus(stage: number, hasDate: boolean): {
+export function osActivityStatus(
+  stage: number,
+  hasDate: boolean,
+  paused = false,
+): {
   key: string;
   label: string;
   barClass: string;
@@ -563,6 +567,14 @@ export function osActivityStatus(stage: number, hasDate: boolean): {
       // Finalizadas ficam “apagadas” no calendário
       barClass: "bg-emerald-600/45 opacity-45 hover:opacity-65",
       dotClass: "bg-emerald-300",
+    };
+  }
+  if (stage === 5 && paused) {
+    return {
+      key: "pausada",
+      label: "Pausada",
+      barClass: "bg-amber-500 hover:bg-amber-600",
+      dotClass: "bg-amber-500",
     };
   }
   if (stage === 5) {
@@ -592,6 +604,7 @@ export function osActivityStatus(stage: number, hasDate: boolean): {
 export const OS_ACTIVITY_LEGEND: ActivityLegendItem[] = [
   { key: "agendada", label: "Agendada", dotClass: "bg-blue-600" },
   { key: "execucao", label: "Em execução", dotClass: "bg-orange-500" },
+  { key: "pausada", label: "Pausada", dotClass: "bg-amber-500" },
   { key: "concluida", label: "Concluída (apagada)", dotClass: "bg-emerald-300" },
 ];
 

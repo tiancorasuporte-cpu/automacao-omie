@@ -7,6 +7,7 @@ export const APP_MODULES = [
   { id: "terceiros", label: "Terceiros", path: "/terceiros" },
   { id: "uniformes", label: "Uniformes", path: "/uniformes" },
   { id: "estoque", label: "Estoque", path: "/estoque" },
+  { id: "compras", label: "Compras", path: "/compras" },
   { id: "frota", label: "Frota", path: "/frota" },
   { id: "assistencia", label: "Assistência", path: "/assistencia" },
   { id: "equipes", label: "Equipes", path: "/equipes" },

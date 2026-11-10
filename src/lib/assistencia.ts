@@ -9,6 +9,8 @@ import {
   checkOutOs,
   createOs,
   finishVisita,
+  pauseOs,
+  resumeOs,
   getOsById,
   linkOsTicketCom,
   listAssistTeams,
@@ -161,6 +163,39 @@ export const searchAssistClientsFn = createServerFn({ method: "GET" })
     } catch {
       return [];
     }
+  });
+
+/** Busca produtos do catálogo Omie sincronizado (para adicionar item na OS). */
+export const searchAssistProductsFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        omieAppId: z.string().trim().optional().nullable(),
+        query: z.string().trim().min(2),
+        limit: z.coerce.number().int().min(1).max(80).optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    const { listOmieApps, requireOrcamentosOmieApp } = await import("@/server/omie/client");
+    const { listOmieProducts } = await import("@/db/products");
+    let omieAppId = data.omieAppId?.trim() || "";
+    if (!omieAppId) {
+      try {
+        omieAppId = requireOrcamentosOmieApp().id;
+      } catch {
+        omieAppId = listOmieApps()[0]?.id ?? "";
+      }
+    }
+    if (!omieAppId) return [];
+    return listOmieProducts({
+      omieAppId,
+      query: data.query,
+      limit: data.limit ?? 40,
+      activeOnly: true,
+    });
   });
 
 export const listOsFn = createServerFn({ method: "GET" })
@@ -353,6 +388,44 @@ export const checkInOsFn = createServerFn({ method: "POST" })
     });
   });
 
+export const pauseOsFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        motivo: z.string().trim().min(1).max(2000),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return pauseOs({
+      osId: data.osId,
+      motivo: data.motivo,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const resumeOsFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ osId: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return resumeOs({
+      osId: data.osId,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
 const osAnexoSchema = z.object({
   name: z.string().min(1),
   mime: z.string().min(1),
@@ -447,6 +520,7 @@ export const addOsItemFn = createServerFn({ method: "POST" })
         nome: z.string().min(1),
         status: z.string().optional(),
         origem: z.string().optional().nullable(),
+        productId: z.number().int().positive().optional().nullable(),
       })
       .parse(input ?? {}),
   )
@@ -465,6 +539,7 @@ export const addOsItemFn = createServerFn({ method: "POST" })
       nome: data.nome,
       status: data.status as OsItemStatus | undefined,
       origem: data.origem,
+      productId: data.productId,
       quem: user.name,
       userId: user.id,
     });

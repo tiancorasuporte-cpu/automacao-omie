@@ -494,7 +494,22 @@ export const sendOrcamentoToOmieFn = createServerFn({ method: "POST" })
 
 /** Cria OS tipo pedido no Kanban da Assistência a partir do orçamento. */
 export const enviarPedidoAssistenciaFn = createServerFn({ method: "POST" })
-  .validator((input) => z.object({ quoteId: z.number().int().positive() }).parse(input ?? {}))
+  .validator((input) =>
+    z
+      .object({
+        quoteId: z.number().int().positive(),
+        aprovadoPor: z.string().trim().min(1).max(160),
+        aprovacaoAnexo: z
+          .object({
+            name: z.string().trim().min(1).max(240),
+            mime: z.string().trim().max(120).optional().nullable(),
+            data: z.string().min(1).max(6_000_000),
+          })
+          .optional()
+          .nullable(),
+      })
+      .parse(input ?? {}),
+  )
   .handler(async ({ data }) => {
     const { requireModule } = await import("@/lib/require-auth");
     const { user } = await requireModule("orcamentos");
@@ -524,6 +539,14 @@ export const enviarPedidoAssistenciaFn = createServerFn({ method: "POST" })
       return { ok: false as const, error: "Orçamento sem itens para montar o pedido." };
     }
 
+    const anexo = data.aprovacaoAnexo?.name && data.aprovacaoAnexo?.data
+      ? {
+          name: data.aprovacaoAnexo.name.trim(),
+          mime: data.aprovacaoAnexo.mime?.trim() || "application/octet-stream",
+          data: data.aprovacaoAnexo.data,
+        }
+      : null;
+
     const os = await createOs({
       tipo: "pedido",
       clientName: quote.clientName?.trim() || `Cliente ${quote.clientCode}`,
@@ -537,6 +560,8 @@ export const enviarPedidoAssistenciaFn = createServerFn({ method: "POST" })
         qtd: it.quantidade,
         nome: it.descricao.trim() || `Produto ${it.codigoProduto}`,
       })),
+      aprovadoPor: data.aprovadoPor.trim(),
+      aprovacaoAnexo: anexo,
       createdBy: user.id,
       createdByName: user.name,
     });

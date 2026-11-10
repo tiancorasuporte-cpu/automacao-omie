@@ -57,6 +57,10 @@ type StockRow = {
   quantidadeFisica: number;
   estoqueMinimo: number;
   diferenca: number;
+  cmc: number | null;
+  cmcInterno: number | null;
+  cmcEfetivo: number | null;
+  custoTotal: number;
 };
 
 type MoveRow = {
@@ -95,6 +99,11 @@ function formatQty(value: number | null | undefined) {
     minimumFractionDigits: 0,
     maximumFractionDigits: 4,
   });
+}
+
+function formatMoney(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 function formatDateTime(value: string | null | undefined) {
@@ -391,11 +400,25 @@ function EstoquePage() {
   const stats = useMemo(() => {
     let divergent = 0;
     let belowMin = 0;
+    let custoFisico = 0;
+    let custoFiscal = 0;
+    let comCmc = 0;
     for (const item of items) {
       if (item.diferenca !== 0) divergent += 1;
       if (item.estoqueMinimo > 0 && item.quantidadeFisica <= item.estoqueMinimo) belowMin += 1;
+      if (item.cmcEfetivo != null && Number.isFinite(item.cmcEfetivo)) {
+        comCmc += 1;
+        custoFisico += item.custoTotal ?? item.quantidadeFisica * item.cmcEfetivo;
+        custoFiscal += item.estoqueFiscal * item.cmcEfetivo;
+      }
     }
-    return { divergent, belowMin };
+    return {
+      divergent,
+      belowMin,
+      comCmc,
+      custoFisico: Math.round(custoFisico * 100) / 100,
+      custoFiscal: Math.round(custoFiscal * 100) / 100,
+    };
   }, [items]);
 
   async function handleSync() {
@@ -914,10 +937,48 @@ function EstoquePage() {
 
         {tab === "empresa" ? (
           <>
-        <div className="flex flex-wrap items-center gap-sm">
-          <div className="rounded-xl border border-outline-variant bg-surface-container-low px-md py-sm text-body-md text-on-surface">
-            {bootstrap.apps[0]?.name ?? "Belfer"} · {total} item(ns)
+        <div className="grid gap-sm sm:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-outline-variant bg-surface-container-low px-md py-sm">
+            <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
+              Itens listados
+            </div>
+            <div className="text-title-md font-bold text-on-surface">
+              {bootstrap.apps[0]?.name ?? "Belfer"} · {total}
+            </div>
           </div>
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-md py-sm">
+            <div className="text-label-sm uppercase tracking-wide text-amber-900/70">
+              Custo total (físico)
+            </div>
+            <div className="text-title-md font-bold text-amber-950">
+              {formatMoney(stats.custoFisico)}
+            </div>
+            <div className="text-label-sm text-amber-900/70">
+              qtd física × CMC Omie · {stats.comCmc} com CMC
+            </div>
+          </div>
+          <div className="rounded-xl border border-outline-variant bg-surface px-md py-sm">
+            <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
+              Custo fiscal Omie
+            </div>
+            <div className="text-title-md font-bold text-on-surface">
+              {formatMoney(stats.custoFiscal)}
+            </div>
+            <div className="text-label-sm text-on-surface-variant">
+              saldo fiscal × CMC
+            </div>
+          </div>
+          <div className="rounded-xl border border-outline-variant bg-surface px-md py-sm text-body-md text-on-surface">
+            <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
+              Alertas
+            </div>
+            <div className="mt-2xs font-semibold">
+              {stats.divergent} divergente(s) · {stats.belowMin} abaixo do mín.
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-sm">
           <input
             value={localQuery}
             onChange={(event) => setLocalQuery(event.target.value)}
@@ -957,8 +1018,10 @@ function EstoquePage() {
               <thead className="text-label-md font-semibold uppercase tracking-wide text-on-surface-variant">
                 <tr>
                   <th className="px-sm py-xs">Produto</th>
+                  <th className="px-sm py-xs">CMC Omie</th>
                   <th className="px-sm py-xs">Fiscal Omie</th>
                   <th className="px-sm py-xs">Físico</th>
+                  <th className="px-sm py-xs">Custo (físico)</th>
                   <th className="px-sm py-xs">Diferença</th>
                   <th className="px-sm py-xs">Mínimo</th>
                   <th className="px-sm py-xs">Ações</th>
@@ -979,6 +1042,22 @@ function EstoquePage() {
                           {item.unidade ? ` · ${item.unidade}` : ""}
                         </p>
                       </td>
+                      <td className="px-sm py-sm whitespace-nowrap">
+                        <div className="font-medium text-on-surface">
+                          {formatMoney(item.cmcEfetivo)}
+                        </div>
+                        {item.cmcInterno != null ? (
+                          <div className="text-label-sm text-on-surface-variant">
+                            Omie {formatMoney(item.cmc)} · interno
+                          </div>
+                        ) : item.cmc != null ? (
+                          <div className="text-label-sm text-on-surface-variant">Omie</div>
+                        ) : (
+                          <div className="text-label-sm text-on-surface-variant">
+                            Sem CMC — sync Omie
+                          </div>
+                        )}
+                      </td>
                       <td className="px-sm py-sm whitespace-nowrap">{formatQty(item.estoqueFiscal)}</td>
                       <td
                         className={cn(
@@ -987,6 +1066,9 @@ function EstoquePage() {
                         )}
                       >
                         {formatQty(item.quantidadeFisica)}
+                      </td>
+                      <td className="px-sm py-sm whitespace-nowrap font-semibold text-on-surface">
+                        {item.cmcEfetivo != null ? formatMoney(item.custoTotal) : "—"}
                       </td>
                       <td
                         className={cn(
@@ -1046,6 +1128,20 @@ function EstoquePage() {
                   );
                 })}
               </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-outline-variant bg-surface-container-low">
+                  <td className="px-sm py-sm text-label-md font-semibold uppercase tracking-wide text-on-surface-variant">
+                    Total (lista filtrada)
+                  </td>
+                  <td className="px-sm py-sm" />
+                  <td className="px-sm py-sm" />
+                  <td className="px-sm py-sm" />
+                  <td className="px-sm py-sm whitespace-nowrap text-title-md font-bold text-on-surface">
+                    {formatMoney(stats.custoFisico)}
+                  </td>
+                  <td className="px-sm py-sm" colSpan={3} />
+                </tr>
+              </tfoot>
             </table>
           </div>
         )}
