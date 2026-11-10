@@ -456,6 +456,8 @@ export const checkOutOsFn = createServerFn({ method: "POST" })
         resolucao: z.string().min(1),
         fotos: z.array(z.string().min(16)).optional(),
         anexos: z.array(osAnexoSchema).optional(),
+        assinatura: z.string().min(16).nullable().optional(),
+        finalizar: z.boolean().optional(),
       })
       .parse(input ?? {}),
   )
@@ -468,6 +470,8 @@ export const checkOutOsFn = createServerFn({ method: "POST" })
       resolucao: data.resolucao,
       fotos: data.fotos,
       anexos: data.anexos,
+      assinatura: data.assinatura,
+      finalizar: data.finalizar,
       quem: user.name,
       userId: user.id,
       isAdmin: roles.isAdmin,
@@ -483,6 +487,7 @@ export const saveOsResolucaoFn = createServerFn({ method: "POST" })
         resolucao: z.string(),
         fotos: z.array(z.string().min(16)).optional(),
         anexos: z.array(osAnexoSchema).optional(),
+        assinatura: z.string().min(16).nullable().optional(),
       })
       .parse(input ?? {}),
   )
@@ -495,6 +500,7 @@ export const saveOsResolucaoFn = createServerFn({ method: "POST" })
       resolucao: data.resolucao,
       fotos: data.fotos,
       anexos: data.anexos,
+      assinatura: data.assinatura,
       quem: user.name,
       userId: user.id,
       isAdmin: roles.isAdmin,

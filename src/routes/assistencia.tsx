@@ -3043,7 +3043,10 @@ function AssistenciaPage() {
                   </SoftSummaryCard>
                 ) : null}
 
-                {(selected.rel?.fotos?.length || selected.rel?.anexos?.length || selected.resolucao) ? (
+                {(selected.rel?.fotos?.length ||
+                selected.rel?.anexos?.length ||
+                selected.rel?.assinatura ||
+                selected.resolucao) ? (
                   <SoftSummaryCard>
                     <h3 className="mb-sm text-label-md font-semibold text-on-surface">
                       Resolução e anexos
@@ -3073,7 +3076,7 @@ function AssistenciaPage() {
                       </div>
                     ) : null}
                     {selected.rel?.anexos?.length ? (
-                      <ul className="space-y-xs text-label-md">
+                      <ul className="mb-sm space-y-xs text-label-md">
                         {selected.rel.anexos.map((a, i) => (
                           <li key={`${a.name}-${i}`}>
                             <a
@@ -3086,6 +3089,18 @@ function AssistenciaPage() {
                           </li>
                         ))}
                       </ul>
+                    ) : null}
+                    {selected.rel?.assinatura ? (
+                      <div>
+                        <p className="mb-xs text-label-md text-on-surface-variant">
+                          Assinatura do cliente
+                        </p>
+                        <img
+                          src={selected.rel.assinatura}
+                          alt="Assinatura do cliente"
+                          className="max-h-40 w-full rounded-lg border border-outline-variant bg-white object-contain"
+                        />
+                      </div>
                     ) : null}
                   </SoftSummaryCard>
                 ) : null}

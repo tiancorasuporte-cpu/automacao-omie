@@ -45,13 +45,16 @@ function publicUser(user: AppUser) {
   };
 }
 
-function serializeOs(os: Awaited<ReturnType<typeof assertOsOwnedByTecnico>> extends {
-  ok: true;
-  os: infer O;
-}
-  ? O
-  : never) {
-  return {
+function serializeOs(
+  os: Awaited<ReturnType<typeof assertOsOwnedByTecnico>> extends {
+    ok: true;
+    os: infer O;
+  }
+    ? O
+    : never,
+  options: { includeRel?: boolean } = {},
+) {
+  const base = {
     id: os.id,
     num: os.num,
     tipo: os.tipo,
@@ -72,6 +75,9 @@ function serializeOs(os: Awaited<ReturnType<typeof assertOsOwnedByTecnico>> exte
     pausedAt: os.pausedAt,
     pauseMotivo: os.pauseMotivo,
     resolucao: os.resolucao,
+    fotosCount: os.rel?.fotos.length ?? 0,
+    anexosCount: os.rel?.anexos.length ?? 0,
+    hasAssinatura: Boolean(os.rel?.assinatura),
     items: os.items.map((i) => ({
       id: i.id,
       qtd: i.qtd,
@@ -85,6 +91,18 @@ function serializeOs(os: Awaited<ReturnType<typeof assertOsOwnedByTecnico>> exte
       quando: e.quando,
     })),
     updatedAt: os.updatedAt,
+  };
+  if (!options.includeRel) return base;
+  return {
+    ...base,
+    rel: os.rel
+      ? {
+          texto: os.rel.texto,
+          fotos: os.rel.fotos,
+          anexos: os.rel.anexos,
+          assinatura: os.rel.assinatura,
+        }
+      : null,
   };
 }
 
@@ -178,7 +196,7 @@ export async function handleMobileGetOs(request: Request, osId: number) {
   if (!auth.ok) return auth.response;
   const owned = await assertOsOwnedByTecnico(osId, auth.user);
   if (!owned.ok) return jsonError(owned.error, 404);
-  return jsonOk({ ok: true, os: serializeOs(owned.os) });
+  return jsonOk({ ok: true, os: serializeOs(owned.os, { includeRel: true }) });
 }
 
 async function withOwnedOs(
@@ -267,6 +285,8 @@ export async function handleMobileCheckOutOs(request: Request, osId: number) {
       resolucao?: string;
       fotos?: string[];
       anexos?: Array<{ name: string; mime: string; data: string }>;
+      assinatura?: string | null;
+      finalizar?: boolean;
       clientActionId?: string;
     }>(request);
     const roles = mobileOsRoles(user);
@@ -275,6 +295,8 @@ export async function handleMobileCheckOutOs(request: Request, osId: number) {
       resolucao: body?.resolucao ?? "",
       fotos: body?.fotos,
       anexos: body?.anexos,
+      assinatura: body?.assinatura,
+      finalizar: body?.finalizar !== false,
       quem: user.name,
       userId: user.id,
       isAdmin: roles.isAdmin,
@@ -282,7 +304,7 @@ export async function handleMobileCheckOutOs(request: Request, osId: number) {
     });
     return jsonOk({
       ok: true,
-      os: serializeOs(os!),
+      os: serializeOs(os!, { includeRel: true }),
       clientActionId: body?.clientActionId ?? null,
     });
   });
@@ -558,11 +580,15 @@ async function applySyncAction(
           anexos: Array.isArray(payload.anexos)
             ? (payload.anexos as Array<{ name: string; mime: string; data: string }>)
             : undefined,
+          assinatura:
+            payload.assinatura == null ? null : String(payload.assinatura),
+          finalizar: payload.finalizar !== false,
           quem: user.name,
           userId: user.id,
           isAdmin: roles.isAdmin,
           canRole: roles.canRole,
         }))!,
+        { includeRel: true },
       );
     }
     throw new Error(`Ação O.S. desconhecida: ${action.type}`);

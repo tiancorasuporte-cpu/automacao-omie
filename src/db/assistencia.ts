@@ -132,6 +132,8 @@ export type AssistOs = {
     texto: string;
     fotos: string[];
     anexos: Array<{ name: string; mime: string; data: string }>;
+    /** Assinatura do cliente (data URL). */
+    assinatura: string | null;
   } | null;
   fromCompras: boolean;
   fromTecnico: boolean;
@@ -250,8 +252,13 @@ function mapOs(row: Record<string, unknown>, items: AssistOsItem[] = []): Assist
         texto?: string;
         fotos?: string[];
         anexos?: Array<{ name?: string; mime?: string; data?: string }>;
+        assinatura?: string | null;
       }>(row["rel_json"]);
       if (!raw) return null;
+      const assinatura =
+        typeof raw.assinatura === "string" && raw.assinatura.trim().length > 16
+          ? raw.assinatura.trim()
+          : null;
       return {
         texto: str(raw.texto),
         fotos: Array.isArray(raw.fotos) ? raw.fotos.filter((f) => typeof f === "string") : [],
@@ -264,6 +271,7 @@ function mapOs(row: Record<string, unknown>, items: AssistOsItem[] = []): Assist
               }))
               .filter((a) => a.name && a.data)
           : [],
+        assinatura,
       };
     })(),
     fromCompras: Boolean(row["from_compras"]),
@@ -965,11 +973,36 @@ export async function resumeOs(input: {
   return getOsById(os.id);
 }
 
+function buildOsRel(input: {
+  texto: string;
+  fotos?: string[] | undefined;
+  anexos?: Array<{ name: string; mime: string; data: string }> | undefined;
+  assinatura?: string | null | undefined;
+  fallback?: AssistOs["rel"];
+}) {
+  const fotos = (input.fotos ?? input.fallback?.fotos ?? []).filter(Boolean).slice(0, 12);
+  const anexos = (input.anexos ?? input.fallback?.anexos ?? [])
+    .filter((a) => a.name && a.data)
+    .slice(0, 10);
+  const assinaturaRaw =
+    input.assinatura === undefined
+      ? input.fallback?.assinatura ?? null
+      : input.assinatura;
+  const assinatura =
+    typeof assinaturaRaw === "string" && assinaturaRaw.trim().length > 16
+      ? assinaturaRaw.trim()
+      : null;
+  return { texto: input.texto.trim(), fotos, anexos, assinatura };
+}
+
 export async function checkOutOs(input: {
   osId: number;
   resolucao: string;
   fotos?: string[] | undefined;
   anexos?: Array<{ name: string; mime: string; data: string }> | undefined;
+  assinatura?: string | null | undefined;
+  /** Quando true, tenta marcar Executado após o check-out (app do técnico). */
+  finalizar?: boolean | undefined;
   quem: string;
   userId?: number | null;
   isAdmin: boolean;
@@ -982,11 +1015,13 @@ export async function checkOutOs(input: {
   if (!os.ciAt) throw new Error("Faça check-in antes.");
   if (os.pausedAt) throw new Error("OS pausada. Retome a execução antes do check-out.");
   if (!input.resolucao.trim()) throw new Error("Informe a resolução.");
-  const fotos = (input.fotos ?? os.rel?.fotos ?? []).filter(Boolean).slice(0, 12);
-  const anexos = (input.anexos ?? os.rel?.anexos ?? [])
-    .filter((a) => a.name && a.data)
-    .slice(0, 10);
-  const rel = { texto: input.resolucao.trim(), fotos, anexos };
+  const rel = buildOsRel({
+    texto: input.resolucao,
+    fotos: input.fotos,
+    anexos: input.anexos,
+    assinatura: input.assinatura,
+    fallback: os.rel,
+  });
   const db = await getDb();
   await db`
     update assist_os
@@ -996,13 +1031,44 @@ export async function checkOutOs(input: {
         updated_at = now()
     where id = ${os.id}
   `;
+  const extras = [
+    rel.fotos.length ? `${rel.fotos.length} foto(s)` : null,
+    rel.anexos.length ? `${rel.anexos.length} anexo(s)` : null,
+    rel.assinatura ? "assinatura" : null,
+  ].filter(Boolean);
   await addOsEvent({
     osId: os.id,
     quem: input.quem,
     userId: input.userId,
-    acao: `Check-out${fotos.length || anexos.length ? ` · ${fotos.length} foto(s), ${anexos.length} anexo(s)` : ""}`,
+    acao: `Check-out${extras.length ? ` · ${extras.join(", ")}` : ""}`,
   });
-  return getOsById(os.id);
+
+  if (!input.finalizar) return getOsById(os.id);
+
+  try {
+    if (os.tipo === "visita") {
+      const current = await getOsById(os.id);
+      if (current?.lev) {
+        return finishVisita({
+          osId: os.id,
+          quem: input.quem,
+          userId: input.userId,
+          isAdmin: input.isAdmin,
+          canRole: input.canRole,
+        });
+      }
+    }
+    return await markExecutedManual({
+      osId: os.id,
+      quem: input.quem,
+      userId: input.userId,
+      isAdmin: input.isAdmin,
+      canRole: input.canRole,
+    });
+  } catch {
+    // Check-out ok; material em campo ou visita sem levantamento fica para conferência.
+    return getOsById(os.id);
+  }
 }
 
 /** Salva rascunho de resolução/anexos em execução (antes do check-out). */
@@ -1011,6 +1077,7 @@ export async function saveOsResolucao(input: {
   resolucao: string;
   fotos?: string[] | undefined;
   anexos?: Array<{ name: string; mime: string; data: string }> | undefined;
+  assinatura?: string | null | undefined;
   quem: string;
   userId?: number | null;
   isAdmin: boolean;
@@ -1020,11 +1087,12 @@ export async function saveOsResolucao(input: {
   if (!os) throw new Error("OS não encontrada.");
   if (os.stage !== 5) throw new Error("Resolução só em execução.");
   assertCanMoveStage(5, input.canRole, input.isAdmin);
-  const fotos = (input.fotos ?? []).filter(Boolean).slice(0, 12);
-  const anexos = (input.anexos ?? [])
-    .filter((a) => a.name && a.data)
-    .slice(0, 10);
-  const rel = { texto: input.resolucao.trim(), fotos, anexos };
+  const rel = buildOsRel({
+    texto: input.resolucao,
+    fotos: input.fotos,
+    anexos: input.anexos,
+    assinatura: input.assinatura,
+  });
   const db = await getDb();
   await db`
     update assist_os
