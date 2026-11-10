@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
-import { PageTitle } from "@/components/PageChrome";
+import { btnOnPrimaryOutline, btnPrimary, PageTitle } from "@/components/PageChrome";
 import { paginateList, TablePager } from "@/components/TablePager";
 import {
   getNotificationSettingsFn,
@@ -13,6 +13,7 @@ import {
   listDueItemsFn,
   sendDueItemNotificationFn,
   sendSelectedDueItemsFn,
+  syncDueItemsFn,
   updateDueItemClientPhoneFn,
 } from "@/lib/omie";
 import { requireModule } from "@/lib/require-auth";
@@ -188,8 +189,13 @@ function VencimentosPage() {
   const [phoneDraft, setPhoneDraft] = useState("");
   const [savingPhoneId, setSavingPhoneId] = useState<number | null>(null);
   const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const busy =
-    sendingId !== null || bulkSending || viewingId !== null || savingPhoneId !== null;
+    sendingId !== null ||
+    bulkSending ||
+    viewingId !== null ||
+    savingPhoneId !== null ||
+    syncing;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -436,8 +442,43 @@ function VencimentosPage() {
           >
             <button
               type="button"
+              disabled={busy}
+              onClick={async () => {
+                setSyncing(true);
+                setFeedback(null);
+                try {
+                  const result = await syncDueItemsFn();
+                  if (!result.ok) {
+                    setFeedback({ type: "error", text: result.error });
+                    return;
+                  }
+                  const total = result.results.reduce(
+                    (sum, item) => sum + (item.itemsFound ?? 0),
+                    0,
+                  );
+                  setFeedback({
+                    type: "ok",
+                    text: `Sincronização concluída: ${total} boleto(s)/nota(s).`,
+                  });
+                  await router.invalidate();
+                } catch (error) {
+                  setFeedback({
+                    type: "error",
+                    text: error instanceof Error ? error.message : "Falha ao sincronizar Omie.",
+                  });
+                } finally {
+                  setSyncing(false);
+                }
+              }}
+              className={btnPrimary}
+            >
+              <Icon name="sync" className="text-[16px]" />
+              {syncing ? "Sincronizando..." : "Sincronizar boletos e notas"}
+            </button>
+            <button
+              type="button"
               onClick={() => setFiltersOpen((value) => !value)}
-              className="inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10"
+              className={btnOnPrimaryOutline}
             >
               <Icon name="tune" className="text-[16px]" />
               {filtersOpen ? "Ocultar filtros" : "Filtros"}

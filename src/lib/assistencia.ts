@@ -321,13 +321,29 @@ export const scheduleOsFn = createServerFn({ method: "POST" })
     const { user } = await auth();
     await boot();
     const roles = roleFns(user);
-    return scheduleOs({
+    const os = await scheduleOs({
       ...data,
       quem: user.name,
       userId: user.id,
       isAdmin: roles.isAdmin,
       canRole: roles.canRole,
     });
+    if (os && data.tecnicoNome?.trim()) {
+      try {
+        const { notifyTecnicoOsAssigned } = await import("@/server/mobile-push");
+        await notifyTecnicoOsAssigned({
+          tecnicoNome: data.tecnicoNome,
+          osId: os.id,
+          osNum: os.num,
+          clientName: os.clientName,
+          agDate: os.agDate,
+          periodo: os.periodo,
+        });
+      } catch (error) {
+        console.error("[scheduleOs] push falhou", error);
+      }
+    }
+    return os;
   });
 
 export const startExecOsFn = createServerFn({ method: "POST" })

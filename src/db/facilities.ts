@@ -2,6 +2,7 @@ import "@tanstack/react-start/server-only";
 
 import { getDb } from "@/db/schema";
 import {
+  countInclusiveDays,
   currentMonthKey,
   defaultHoursForEscala,
   FACILITIES_MOTIVOS_SEM_HORAS,
@@ -66,6 +67,28 @@ export type FacilitiesSubstitution = {
   valorAlmoco: number;
   foraDoPostoBase: boolean;
   pagaHoras: boolean;
+  createdBy: number | null;
+  createdByName: string | null;
+  createdAt: string;
+};
+
+export type FacilitiesVacation = {
+  id: number;
+  colaboradorId: number;
+  colaboradorNome: string;
+  colaboradorEmpresa: string;
+  coberturaId: number;
+  coberturaNome: string;
+  coberturaEmpresa: string;
+  coberturaEscala: string;
+  postoId: number;
+  postoNome: string;
+  dataInicio: string;
+  dataFim: string;
+  dias: number;
+  horas: number;
+  coberturaPropria: boolean;
+  observacao: string | null;
   createdBy: number | null;
   createdByName: string | null;
   createdAt: string;
@@ -457,6 +480,127 @@ export async function deleteFacilitiesSubstitution(id: number) {
   await db`delete from facilities_substitutions where id = ${id}`;
 }
 
+function mapVacation(row: Record<string, unknown>): FacilitiesVacation {
+  const colaboradorId = toNumber(row["colaborador_id"]);
+  const coberturaId = toNumber(row["cobertura_id"]);
+  return {
+    id: toNumber(row["id"]),
+    colaboradorId,
+    colaboradorNome: String(row["colaborador_nome"] ?? ""),
+    colaboradorEmpresa: facilitiesEmpresaLabel(String(row["colaborador_empresa"] ?? "")),
+    coberturaId,
+    coberturaNome: String(row["cobertura_nome"] ?? ""),
+    coberturaEmpresa: facilitiesEmpresaLabel(String(row["cobertura_empresa"] ?? "")),
+    coberturaEscala: facilitiesEscalaLabel(String(row["cobertura_escala"] ?? "")),
+    postoId: toNumber(row["posto_id"]),
+    postoNome: String(row["posto_nome"] ?? ""),
+    dataInicio: toDateOnly(row["data_inicio"]),
+    dataFim: toDateOnly(row["data_fim"]),
+    dias: Math.max(1, toNumber(row["dias"])),
+    horas: toNumber(row["horas"]),
+    coberturaPropria: colaboradorId === coberturaId,
+    observacao: row["observacao"] == null ? null : String(row["observacao"]),
+    createdBy: row["created_by"] == null ? null : toNumber(row["created_by"]),
+    createdByName: (() => {
+      const name = row["created_by_name"] == null ? "" : String(row["created_by_name"]).trim();
+      return name || null;
+    })(),
+    createdAt: toIso(row["created_at"] as string | Date),
+  };
+}
+
+export async function listFacilitiesVacations(input: { monthKey: string }) {
+  const db = await getDb();
+  const { start, end } = monthRange(input.monthKey);
+  const rows = (await db`
+    select
+      v.*,
+      p.nome as posto_nome,
+      c.nome as colaborador_nome,
+      c.empresa as colaborador_empresa,
+      cob.nome as cobertura_nome,
+      cob.empresa as cobertura_empresa,
+      cob.escala as cobertura_escala,
+      coalesce(nullif(trim(u.name), ''), u.username) as created_by_name
+    from facilities_vacations v
+    join facilities_posts p on p.id = v.posto_id
+    join facilities_collaborators c on c.id = v.colaborador_id
+    join facilities_collaborators cob on cob.id = v.cobertura_id
+    left join users u on u.id = v.created_by
+    where v.data_inicio <= ${end}::date
+      and v.data_fim >= ${start}::date
+    order by v.data_inicio desc, v.id desc
+  `) as Array<Record<string, unknown>>;
+  return rows.map(mapVacation);
+}
+
+export async function createFacilitiesVacation(input: {
+  colaboradorId: number;
+  coberturaId: number;
+  postoId: number;
+  dataInicio: string;
+  dataFim: string;
+  dias?: number;
+  horas: number;
+  observacao?: string | null;
+  createdBy?: number | null;
+}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dataInicio) || !/^\d{4}-\d{2}-\d{2}$/.test(input.dataFim)) {
+    throw new Error("Informe o período de férias com datas válidas.");
+  }
+  if (input.dataFim < input.dataInicio) {
+    throw new Error("A data final precisa ser igual ou posterior à data inicial.");
+  }
+  const dias = Math.max(
+    1,
+    Math.trunc(input.dias ?? countInclusiveDays(input.dataInicio, input.dataFim)),
+  );
+  if (!(dias > 0)) throw new Error("Período de férias inválido.");
+  if (!Number.isFinite(input.horas) || input.horas < 0) {
+    throw new Error("Informe as horas do período.");
+  }
+  const db = await getDb();
+  const rows = (await db`
+    insert into facilities_vacations (
+      colaborador_id, cobertura_id, posto_id,
+      data_inicio, data_fim, dias, horas, observacao,
+      created_by, created_at, updated_at
+    ) values (
+      ${input.colaboradorId}, ${input.coberturaId}, ${input.postoId},
+      ${input.dataInicio}::date, ${input.dataFim}::date, ${dias}, ${input.horas},
+      ${input.observacao?.trim() || null},
+      ${input.createdBy ?? null}, now(), now()
+    )
+    returning id
+  `) as Array<{ id: number }>;
+  const id = Number(rows[0]?.id);
+  if (!id) throw new Error("Não foi possível lançar as férias.");
+  const loaded = (await db`
+    select
+      v.*,
+      p.nome as posto_nome,
+      c.nome as colaborador_nome,
+      c.empresa as colaborador_empresa,
+      cob.nome as cobertura_nome,
+      cob.empresa as cobertura_empresa,
+      cob.escala as cobertura_escala,
+      coalesce(nullif(trim(u.name), ''), u.username) as created_by_name
+    from facilities_vacations v
+    join facilities_posts p on p.id = v.posto_id
+    join facilities_collaborators c on c.id = v.colaborador_id
+    join facilities_collaborators cob on cob.id = v.cobertura_id
+    left join users u on u.id = v.created_by
+    where v.id = ${id}
+    limit 1
+  `) as Array<Record<string, unknown>>;
+  return mapVacation(loaded[0]!);
+}
+
+export async function deleteFacilitiesVacation(id: number) {
+  const db = await getDb();
+  await db`delete from facilities_vacations where id = ${id}`;
+}
+
 export async function updateFacilitiesSubstitutionAlmoco(input: {
   id: number;
   pagaAlmoco: boolean;
@@ -603,6 +747,51 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       and c.posto_base_id <> s.posto_id
   `) as Array<{ total: number }>;
 
+  const feriasTotals = (await db`
+    select
+      count(*)::int as ferias,
+      coalesce(sum(dias), 0)::int as dias,
+      coalesce(sum(horas), 0)::float as horas,
+      count(*) filter (where colaborador_id = cobertura_id)::int as cobertura_propria,
+      count(*) filter (where colaborador_id <> cobertura_id)::int as com_cobertura
+    from facilities_vacations
+    where data_inicio <= ${end}::date
+      and data_fim >= ${start}::date
+  `) as Array<{
+    ferias: number;
+    dias: number;
+    horas: number;
+    cobertura_propria: number;
+    com_cobertura: number;
+  }>;
+
+  const byCoberturaFerias = (await db`
+    select
+      c.id,
+      c.nome,
+      c.empresa,
+      c.escala,
+      count(*)::int as ferias,
+      coalesce(sum(v.dias), 0)::int as dias,
+      coalesce(sum(v.horas), 0)::float as horas,
+      count(*) filter (where v.colaborador_id = v.cobertura_id)::int as propria
+    from facilities_vacations v
+    join facilities_collaborators c on c.id = v.cobertura_id
+    where v.data_inicio <= ${end}::date
+      and v.data_fim >= ${start}::date
+    group by c.id, c.nome, c.empresa, c.escala
+    order by horas desc, dias desc, c.nome asc
+  `) as Array<{
+    id: number;
+    nome: string;
+    empresa: string;
+    escala: string;
+    ferias: number;
+    dias: number;
+    horas: number;
+    propria: number;
+  }>;
+
   return {
     monthKey,
     start,
@@ -614,6 +803,11 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
     foraDoPostoBase: Number(foraBase[0]?.total ?? 0),
     postosAtivos: Number(counts[0]?.postos ?? 0),
     colaboradoresAtivos: Number(counts[0]?.colaboradores ?? 0),
+    ferias: Number(feriasTotals[0]?.ferias ?? 0),
+    feriasDias: Number(feriasTotals[0]?.dias ?? 0),
+    feriasHoras: Number(feriasTotals[0]?.horas ?? 0),
+    feriasCoberturaPropria: Number(feriasTotals[0]?.cobertura_propria ?? 0),
+    feriasComCobertura: Number(feriasTotals[0]?.com_cobertura ?? 0),
     byPosto: byPosto.map((row) => ({
       id: row.id,
       nome: row.nome,
@@ -638,6 +832,16 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       pagaHoras: facilitiesMotivoPagaHoras(row.motivo),
       trocas: Number(row.trocas),
       horas: Number(row.horas),
+    })),
+    byCoberturaFerias: byCoberturaFerias.map((row) => ({
+      id: row.id,
+      nome: row.nome,
+      empresa: facilitiesEmpresaLabel(row.empresa),
+      escala: facilitiesEscalaLabel(row.escala),
+      ferias: Number(row.ferias),
+      dias: Number(row.dias),
+      horas: Number(row.horas),
+      propria: Number(row.propria),
     })),
   };
 }

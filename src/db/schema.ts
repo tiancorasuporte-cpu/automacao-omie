@@ -640,6 +640,32 @@ export async function ensureSchema() {
     );
   }
 
+  if (!(await tableExists("facilities_vacations"))) {
+    await sql`
+      create table facilities_vacations (
+        id serial primary key,
+        colaborador_id integer not null references facilities_collaborators(id),
+        cobertura_id integer not null references facilities_collaborators(id),
+        posto_id integer not null references facilities_posts(id),
+        data_inicio date not null,
+        data_fim date not null,
+        dias integer not null default 1,
+        horas numeric(10, 4) not null default 0,
+        observacao text,
+        created_by integer references users(id) on delete set null,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        check (data_fim >= data_inicio),
+        check (dias >= 1)
+      )
+    `;
+  }
+  if (!(await indexExists("facilities_vacations_periodo_idx"))) {
+    await sql.unsafe(
+      "create index facilities_vacations_periodo_idx on facilities_vacations (data_inicio, data_fim)",
+    );
+  }
+
   if (!(await tableExists("uniform_collaborators"))) {
     await sql`
       create table uniform_collaborators (
@@ -1623,6 +1649,48 @@ export async function ensureSchema() {
   `;
   if (Number(teamCount[0]?.c ?? 0) === 0) {
     await sql`insert into assist_teams (name) values ('Equipe 01'), ('Equipe 02'), ('Equipe 03')`;
+  }
+
+  if (!(await tableExists("mobile_sessions"))) {
+    await sql`
+      create table mobile_sessions (
+        id serial primary key,
+        user_id integer not null references users(id) on delete cascade,
+        token_hash varchar(128) not null unique,
+        expires_at timestamptz not null,
+        created_at timestamptz not null default now(),
+        last_seen_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("mobile_sessions_user_idx"))) {
+    await sql.unsafe(
+      "create index mobile_sessions_user_idx on mobile_sessions (user_id)",
+    );
+  }
+  if (!(await indexExists("mobile_sessions_expires_idx"))) {
+    await sql.unsafe(
+      "create index mobile_sessions_expires_idx on mobile_sessions (expires_at)",
+    );
+  }
+
+  if (!(await tableExists("mobile_device_tokens"))) {
+    await sql`
+      create table mobile_device_tokens (
+        id serial primary key,
+        user_id integer not null references users(id) on delete cascade,
+        expo_push_token text not null,
+        platform varchar(32) not null default 'android',
+        updated_at timestamptz not null default now(),
+        created_at timestamptz not null default now(),
+        unique (user_id, expo_push_token)
+      )
+    `;
+  }
+  if (!(await indexExists("mobile_device_tokens_user_idx"))) {
+    await sql.unsafe(
+      "create index mobile_device_tokens_user_idx on mobile_device_tokens (user_id)",
+    );
   }
 
   const superUsername = process.env["APP_SUPERADMIN_USERNAME"] ?? "superadmin";

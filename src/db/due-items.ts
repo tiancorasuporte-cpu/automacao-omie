@@ -29,6 +29,17 @@ function toIsoDate(value: unknown) {
   return text;
 }
 
+function toIsoDateTime(value: unknown) {
+  if (value == null) return "";
+  if (value instanceof Date) return value.toISOString();
+  const text = String(value).trim();
+  if (!text) return "";
+  const normalized = text.includes("T") ? text : text.replace(" ", "T");
+  const parsed = new Date(normalized);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+  return text;
+}
+
 function toDueItem(row: DueItemRow): DueItem {
   return {
     id: row.id,
@@ -347,7 +358,7 @@ function toNotificationLogEntry(row: NotificationLogRow): NotificationLogEntry {
     message: row.message,
     success: row.success,
     error: row.error,
-    sentAt: toIsoDate(row.sent_at),
+    sentAt: toIsoDateTime(row.sent_at),
     kind: row.kind === "overdue" ? "overdue" : "pre_due",
     clientName: row.client_name,
     omieAppName: row.omie_app_name,
@@ -357,13 +368,57 @@ function toNotificationLogEntry(row: NotificationLogRow): NotificationLogEntry {
   };
 }
 
-export async function listNotificationLogsPaginated(page = 1, pageSize = 15) {
+export type NotificationLogFilters = {
+  page?: number;
+  pageSize?: number;
+  client?: string | null;
+  appId?: string | null;
+  itemType?: DueItemType | "all" | null;
+  kind?: NotificationKind | "all" | null;
+  status?: "all" | "ok" | "fail" | null;
+  sentFrom?: string | null;
+  sentTo?: string | null;
+  phone?: string | null;
+};
+
+export async function listNotificationLogsPaginated(filters: NotificationLogFilters = {}) {
   const db = await getDb();
-  const safePage = Math.max(1, page);
+  const pageSize = Math.max(1, Math.min(100, filters.pageSize ?? 15));
+  const safePage = Math.max(1, filters.page ?? 1);
   const offset = (safePage - 1) * pageSize;
 
+  const client = filters.client?.trim() || null;
+  const clientLike = client ? `%${client}%` : null;
+  const appId = filters.appId?.trim() || null;
+  const itemType =
+    filters.itemType && filters.itemType !== "all" ? filters.itemType : null;
+  const kind = filters.kind && filters.kind !== "all" ? filters.kind : null;
+  const status = filters.status && filters.status !== "all" ? filters.status : null;
+  const sentFrom = filters.sentFrom?.trim() || null;
+  const sentTo = filters.sentTo?.trim() || null;
+  const phoneDigits = filters.phone?.replace(/\D/g, "") || null;
+  const phoneLike = phoneDigits ? `%${phoneDigits}%` : null;
+
+  const whereSql = db`
+    from notification_log nl
+    join due_items di on di.id = nl.due_item_id
+    where (${clientLike}::text is null or coalesce(di.client_name, '') ilike ${clientLike})
+      and (${appId}::text is null or di.omie_app_id = ${appId})
+      and (${itemType}::text is null or di.item_type = ${itemType})
+      and (${kind}::text is null or coalesce(nl.kind, 'pre_due') = ${kind})
+      and (
+        ${status}::text is null
+        or (${status} = 'ok' and nl.success = true)
+        or (${status} = 'fail' and nl.success = false)
+      )
+      and (${sentFrom}::date is null or nl.sent_at::date >= ${sentFrom}::date)
+      and (${sentTo}::date is null or nl.sent_at::date <= ${sentTo}::date)
+      and (${phoneLike}::text is null or regexp_replace(nl.phone, '\\D', '', 'g') like ${phoneLike})
+  `;
+
   const countRows = await db<{ total: number }[]>`
-    select count(*)::int as total from notification_log
+    select count(*)::int as total
+    ${whereSql}
   `;
   const totalItems = countRows[0]?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
@@ -383,8 +438,7 @@ export async function listNotificationLogsPaginated(page = 1, pageSize = 15) {
       di.document_number,
       di.due_date,
       di.item_type
-    from notification_log nl
-    join due_items di on di.id = nl.due_item_id
+    ${whereSql}
     order by nl.sent_at desc
     limit ${pageSize} offset ${offset}
   `;

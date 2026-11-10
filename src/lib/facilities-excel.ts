@@ -24,6 +24,9 @@ export type FacilitiesFechamentoExcelInput = {
   trocas: number;
   permutas: number;
   almoco?: number;
+  ferias?: number;
+  feriasDias?: number;
+  feriasHoras?: number;
   bySubstituto: Array<{
     nome: string;
     empresa: string;
@@ -38,6 +41,15 @@ export type FacilitiesFechamentoExcelInput = {
     horas: number;
     almoco?: number;
   }>;
+  byCoberturaFerias?: Array<{
+    nome: string;
+    empresa: string;
+    escala: string;
+    ferias: number;
+    dias: number;
+    horas: number;
+    propria: number;
+  }>;
   lancamentos: Array<{
     data: string;
     postoNome: string;
@@ -50,6 +62,20 @@ export type FacilitiesFechamentoExcelInput = {
     pagaHoras: boolean;
     pagaAlmoco?: boolean;
     valorAlmoco?: number;
+    observacao: string | null;
+    registradoPor: string | null;
+  }>;
+  feriasLancamentos?: Array<{
+    dataInicio: string;
+    dataFim: string;
+    dias: number;
+    postoNome: string;
+    colaboradorNome: string;
+    colaboradorEmpresa: string;
+    coberturaNome: string;
+    coberturaEmpresa: string;
+    horas: number;
+    coberturaPropria: boolean;
     observacao: string | null;
     registradoPor: string | null;
   }>;
@@ -100,6 +126,14 @@ export function buildFacilitiesFechamentoExcelXml(input: FacilitiesFechamentoExc
         cellNumber(input.permutas) +
         cellString("Almoço") +
         cellNumber(input.almoco ?? 0, "Money"),
+    ),
+    row(
+      cellString("Férias (períodos)") +
+        cellNumber(input.ferias ?? 0) +
+        cellString("Férias (dias)") +
+        cellNumber(input.feriasDias ?? 0) +
+        cellString("Férias (horas)") +
+        cellNumber(input.feriasHoras ?? 0, "Money"),
     ),
     row(""),
     row(
@@ -207,6 +241,65 @@ export function buildFacilitiesFechamentoExcelXml(input: FacilitiesFechamentoExc
       : []),
   ].join("\n");
 
+  const feriasRows = [
+    row(cellString(`Férias — ${input.monthLabel}`, "Title")),
+    row(
+      cellString("Períodos") +
+        cellNumber(input.ferias ?? 0) +
+        cellString("Dias") +
+        cellNumber(input.feriasDias ?? 0) +
+        cellString("Horas") +
+        cellNumber(input.feriasHoras ?? 0, "Money"),
+    ),
+    row(""),
+    row(
+      cellString("Cobertura", "Header") +
+        cellString("Empresa", "Header") +
+        cellString("Períodos", "Header") +
+        cellString("Dias", "Header") +
+        cellString("Horas", "Header") +
+        cellString("Próprias", "Header"),
+    ),
+    ...(input.byCoberturaFerias ?? []).map((item) =>
+      row(
+        cellString(item.nome) +
+          cellString(item.empresa) +
+          cellNumber(item.ferias) +
+          cellNumber(item.dias) +
+          cellNumber(item.horas, "Money") +
+          cellNumber(item.propria),
+      ),
+    ),
+    ...((input.byCoberturaFerias ?? []).length === 0
+      ? [row(cellString("Sem férias neste mês."))]
+      : []),
+    row(""),
+    row(
+      cellString("Início", "Header") +
+        cellString("Fim", "Header") +
+        cellString("Dias", "Header") +
+        cellString("Em férias", "Header") +
+        cellString("Cobertura", "Header") +
+        cellString("Posto", "Header") +
+        cellString("Horas", "Header") +
+        cellString("Própria", "Header") +
+        cellString("Observação", "Header"),
+    ),
+    ...(input.feriasLancamentos ?? []).map((item) =>
+      row(
+        cellString(item.dataInicio) +
+          cellString(item.dataFim) +
+          cellNumber(item.dias) +
+          cellString(item.colaboradorNome) +
+          cellString(item.coberturaNome) +
+          cellString(item.postoNome) +
+          cellNumber(item.horas, "Money") +
+          cellString(item.coberturaPropria ? "Sim" : "Não") +
+          cellString(item.observacao ?? ""),
+      ),
+    ),
+  ].join("\n");
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
@@ -218,6 +311,7 @@ export function buildFacilitiesFechamentoExcelXml(input: FacilitiesFechamentoExc
   ${buildWorksheet("Por colaborador", resumoRows, 6)}
   ${buildWorksheet("Por posto", postoRows, 3)}
   ${buildWorksheet("Lancamentos", lancRows, 11)}
+  ${buildWorksheet("Ferias", feriasRows, 9)}
 </Workbook>`;
 }
 

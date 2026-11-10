@@ -54,12 +54,16 @@ export const getFacilitiesBootstrapFn = createServerFn({ method: "GET" })
       listFacilitiesPosts,
       listFacilitiesCollaborators,
       listFacilitiesSubstitutions,
+      listFacilitiesVacations,
       getFacilitiesMonthSummary,
     } = await import("@/db/facilities");
-    const [posts, collaborators, substitutions, summary] = await Promise.all([
+    const [posts, collaborators, substitutions, vacations, summary] = await Promise.all([
       listFacilitiesPosts(false),
       listFacilitiesCollaborators(false),
       listFacilitiesSubstitutions({
+        monthKey: data.monthKey,
+      }),
+      listFacilitiesVacations({
         monthKey: data.monthKey,
       }),
       getFacilitiesMonthSummary(data.monthKey),
@@ -69,6 +73,7 @@ export const getFacilitiesBootstrapFn = createServerFn({ method: "GET" })
       posts,
       collaborators,
       substitutions,
+      vacations,
       summary,
       catalogs: {
         empresas: [...FACILITIES_EMPRESAS],
@@ -308,6 +313,63 @@ export const deleteFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
       return {
         ok: false as const,
         error: error instanceof Error ? error.message : "Falha ao excluir lançamento.",
+      };
+    }
+  });
+
+export const createFacilitiesVacationFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        colaboradorId: z.number().int().positive(),
+        coberturaId: z.number().int().positive(),
+        postoId: z.number().int().positive(),
+        dataInicio: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        dataFim: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        dias: z.number().int().positive().optional(),
+        horas: z.number().nonnegative("Informe as horas do período."),
+        observacao: z.string().trim().nullable().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    const { user } = await requireModule("facilities");
+    const { createFacilitiesVacation } = await import("@/db/facilities");
+    try {
+      const vacation = await createFacilitiesVacation({
+        colaboradorId: data.colaboradorId,
+        coberturaId: data.coberturaId,
+        postoId: data.postoId,
+        dataInicio: data.dataInicio,
+        dataFim: data.dataFim,
+        ...(data.dias != null ? { dias: data.dias } : {}),
+        horas: data.horas,
+        observacao: data.observacao ?? null,
+        createdBy: user.id,
+      });
+      return { ok: true as const, vacation };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao lançar férias.",
+      };
+    }
+  });
+
+export const deleteFacilitiesVacationFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ id: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("facilities");
+    const { deleteFacilitiesVacation } = await import("@/db/facilities");
+    try {
+      await deleteFacilitiesVacation(data.id);
+      return { ok: true as const };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao excluir férias.",
       };
     }
   });

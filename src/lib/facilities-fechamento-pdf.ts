@@ -65,6 +65,9 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
     `Horas a pagar: ${formatDurationHours(input.horasPagar)} · ${input.trocas} lançamento(s) · ${input.permutas} permuta(s)` +
       ((input.almoco ?? 0) > 0
         ? ` · almoço R$ ${Number(input.almoco ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : "") +
+      ((input.ferias ?? 0) > 0
+        ? ` · férias ${input.feriasDias ?? 0}d / ${formatDurationHours(input.feriasHoras ?? 0)}`
         : ""),
     W - M,
     21,
@@ -189,6 +192,72 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
             clean(row.registradoPor || "—"),
           ])
         : [["—", "Nenhum lançamento neste mês.", "", "", "", "", "", "", "", ""]],
+  });
+
+  doc.addPage();
+  y = 16;
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...NAVY);
+  doc.text("Férias — dias e horas", M, y);
+  y += 2;
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: M, right: M },
+    theme: "striped",
+    headStyles: { fillColor: NAVY, textColor: 255, fontSize: 8 },
+    styles: { fontSize: 8, cellPadding: 1.4, textColor: [20, 32, 44] },
+    head: [["Cobertura", "Empresa", "Períodos", "Dias", "Horas", "Próprias"]],
+    body:
+      (input.byCoberturaFerias ?? []).length > 0
+        ? (input.byCoberturaFerias ?? []).map((row) => [
+            clean(row.nome),
+            clean(row.empresa),
+            String(row.ferias),
+            String(row.dias),
+            formatDurationHours(row.horas),
+            String(row.propria),
+          ])
+        : [["—", "Sem férias neste mês.", "", "", "", ""]],
+  });
+  y =
+    (doc as InstanceType<typeof jsPDF> & { lastAutoTable: { finalY: number } }).lastAutoTable
+      .finalY + 8;
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: M, right: M },
+    theme: "striped",
+    headStyles: { fillColor: NAVY, textColor: 255, fontSize: 7 },
+    styles: { fontSize: 7, cellPadding: 1.2, textColor: [20, 32, 44], overflow: "linebreak" },
+    head: [
+      [
+        "Início",
+        "Fim",
+        "Dias",
+        "Em férias",
+        "Cobertura",
+        "Posto",
+        "Horas",
+        "Própria",
+        "Observação",
+      ],
+    ],
+    body:
+      (input.feriasLancamentos ?? []).length > 0
+        ? (input.feriasLancamentos ?? []).map((row) => [
+            formatDateBr(row.dataInicio),
+            formatDateBr(row.dataFim),
+            String(row.dias),
+            clean(row.colaboradorNome),
+            clean(row.coberturaNome),
+            clean(row.postoNome),
+            formatDurationHours(row.horas),
+            row.coberturaPropria ? "Sim" : "Não",
+            clean(row.observacao?.trim() || "—"),
+          ])
+        : [["—", "Sem períodos de férias.", "", "", "", "", "", "", ""]],
   });
 
   const pageCount = doc.getNumberOfPages();

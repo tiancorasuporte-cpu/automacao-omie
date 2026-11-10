@@ -100,6 +100,10 @@ export const filterControlClass =
 export const btnOutline =
   "inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50";
 
+/** Outline claro — ações secundárias no PageTitle (faixa preta). */
+export const btnOnPrimaryOutline =
+  "inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10 disabled:opacity-50";
+
 /** Botão preto sólido — Salvar / ação principal escura (como Orçamentos). */
 export const btnDark =
   "inline-flex items-center gap-xs rounded-lg bg-primary px-sm py-xs text-label-md font-semibold text-on-primary disabled:opacity-50";

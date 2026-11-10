@@ -34,7 +34,23 @@ import { Route as VencimentosRouteImport } from './routes/vencimentos'
 import { Route as DTokenRouteImport } from './routes/d.$token'
 import { Route as TerceirosTerceiroIdRouteImport } from './routes/terceiros_.$terceiroId'
 import { Route as ApiInteggriWebhookRouteImport } from './routes/api/integgri/webhook'
+import { Route as ApiMobileDeviceTokenRouteImport } from './routes/api/mobile/device-token'
+import { Route as ApiMobileLoginRouteImport } from './routes/api/mobile/login'
+import { Route as ApiMobileLogoutRouteImport } from './routes/api/mobile/logout'
+import { Route as ApiMobileMeRouteImport } from './routes/api/mobile/me'
+import { Route as ApiMobileSyncRouteImport } from './routes/api/mobile/sync'
 import { Route as ApiWahaWebhookRouteImport } from './routes/api/waha/webhook'
+import { Route as ApiMobileFrotaAbastecimentoRouteImport } from './routes/api/mobile/frota/abastecimento'
+import { Route as ApiMobileFrotaKmRouteImport } from './routes/api/mobile/frota/km'
+import { Route as ApiMobileFrotaServicoRouteImport } from './routes/api/mobile/frota/servico'
+import { Route as ApiMobileFrotaVeiculoRouteImport } from './routes/api/mobile/frota/veiculo'
+import { Route as ApiMobileOsIndexRouteImport } from './routes/api/mobile/os/index'
+import { Route as ApiMobileOsIdIndexRouteImport } from './routes/api/mobile/os/$id/index'
+import { Route as ApiMobileOsIdCheckInRouteImport } from './routes/api/mobile/os/$id/check-in'
+import { Route as ApiMobileOsIdCheckOutRouteImport } from './routes/api/mobile/os/$id/check-out'
+import { Route as ApiMobileOsIdPauseRouteImport } from './routes/api/mobile/os/$id/pause'
+import { Route as ApiMobileOsIdResumeRouteImport } from './routes/api/mobile/os/$id/resume'
+import { Route as ApiMobileOsIdStartRouteImport } from './routes/api/mobile/os/$id/start'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -161,9 +177,90 @@ const ApiInteggriWebhookRoute = ApiInteggriWebhookRouteImport.update({
   path: '/api/integgri/webhook',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMobileDeviceTokenRoute = ApiMobileDeviceTokenRouteImport.update({
+  id: '/api/mobile/device-token',
+  path: '/api/mobile/device-token',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileLoginRoute = ApiMobileLoginRouteImport.update({
+  id: '/api/mobile/login',
+  path: '/api/mobile/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileLogoutRoute = ApiMobileLogoutRouteImport.update({
+  id: '/api/mobile/logout',
+  path: '/api/mobile/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileMeRoute = ApiMobileMeRouteImport.update({
+  id: '/api/mobile/me',
+  path: '/api/mobile/me',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileSyncRoute = ApiMobileSyncRouteImport.update({
+  id: '/api/mobile/sync',
+  path: '/api/mobile/sync',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiWahaWebhookRoute = ApiWahaWebhookRouteImport.update({
   id: '/api/waha/webhook',
   path: '/api/waha/webhook',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileFrotaAbastecimentoRoute =
+  ApiMobileFrotaAbastecimentoRouteImport.update({
+    id: '/api/mobile/frota/abastecimento',
+    path: '/api/mobile/frota/abastecimento',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiMobileFrotaKmRoute = ApiMobileFrotaKmRouteImport.update({
+  id: '/api/mobile/frota/km',
+  path: '/api/mobile/frota/km',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileFrotaServicoRoute = ApiMobileFrotaServicoRouteImport.update({
+  id: '/api/mobile/frota/servico',
+  path: '/api/mobile/frota/servico',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileFrotaVeiculoRoute = ApiMobileFrotaVeiculoRouteImport.update({
+  id: '/api/mobile/frota/veiculo',
+  path: '/api/mobile/frota/veiculo',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileOsIndexRoute = ApiMobileOsIndexRouteImport.update({
+  id: '/api/mobile/os/',
+  path: '/api/mobile/os/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileOsIdIndexRoute = ApiMobileOsIdIndexRouteImport.update({
+  id: '/api/mobile/os/$id/',
+  path: '/api/mobile/os/$id/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileOsIdCheckInRoute = ApiMobileOsIdCheckInRouteImport.update({
+  id: '/api/mobile/os/$id/check-in',
+  path: '/api/mobile/os/$id/check-in',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileOsIdCheckOutRoute = ApiMobileOsIdCheckOutRouteImport.update({
+  id: '/api/mobile/os/$id/check-out',
+  path: '/api/mobile/os/$id/check-out',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileOsIdPauseRoute = ApiMobileOsIdPauseRouteImport.update({
+  id: '/api/mobile/os/$id/pause',
+  path: '/api/mobile/os/$id/pause',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileOsIdResumeRoute = ApiMobileOsIdResumeRouteImport.update({
+  id: '/api/mobile/os/$id/resume',
+  path: '/api/mobile/os/$id/resume',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileOsIdStartRoute = ApiMobileOsIdStartRouteImport.update({
+  id: '/api/mobile/os/$id/start',
+  path: '/api/mobile/os/$id/start',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -193,7 +290,23 @@ export interface FileRoutesByFullPath {
   '/d/$token': typeof DTokenRoute
   '/terceiros/$terceiroId': typeof TerceirosTerceiroIdRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
+  '/api/mobile/device-token': typeof ApiMobileDeviceTokenRoute
+  '/api/mobile/login': typeof ApiMobileLoginRoute
+  '/api/mobile/logout': typeof ApiMobileLogoutRoute
+  '/api/mobile/me': typeof ApiMobileMeRoute
+  '/api/mobile/sync': typeof ApiMobileSyncRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
+  '/api/mobile/frota/abastecimento': typeof ApiMobileFrotaAbastecimentoRoute
+  '/api/mobile/frota/km': typeof ApiMobileFrotaKmRoute
+  '/api/mobile/frota/servico': typeof ApiMobileFrotaServicoRoute
+  '/api/mobile/frota/veiculo': typeof ApiMobileFrotaVeiculoRoute
+  '/api/mobile/os/': typeof ApiMobileOsIndexRoute
+  '/api/mobile/os/$id/check-in': typeof ApiMobileOsIdCheckInRoute
+  '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
+  '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
+  '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
+  '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
+  '/api/mobile/os/$id/': typeof ApiMobileOsIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -221,7 +334,23 @@ export interface FileRoutesByTo {
   '/d/$token': typeof DTokenRoute
   '/terceiros/$terceiroId': typeof TerceirosTerceiroIdRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
+  '/api/mobile/device-token': typeof ApiMobileDeviceTokenRoute
+  '/api/mobile/login': typeof ApiMobileLoginRoute
+  '/api/mobile/logout': typeof ApiMobileLogoutRoute
+  '/api/mobile/me': typeof ApiMobileMeRoute
+  '/api/mobile/sync': typeof ApiMobileSyncRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
+  '/api/mobile/frota/abastecimento': typeof ApiMobileFrotaAbastecimentoRoute
+  '/api/mobile/frota/km': typeof ApiMobileFrotaKmRoute
+  '/api/mobile/frota/servico': typeof ApiMobileFrotaServicoRoute
+  '/api/mobile/frota/veiculo': typeof ApiMobileFrotaVeiculoRoute
+  '/api/mobile/os': typeof ApiMobileOsIndexRoute
+  '/api/mobile/os/$id/check-in': typeof ApiMobileOsIdCheckInRoute
+  '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
+  '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
+  '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
+  '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
+  '/api/mobile/os/$id': typeof ApiMobileOsIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -250,7 +379,23 @@ export interface FileRoutesById {
   '/d/$token': typeof DTokenRoute
   '/terceiros_/$terceiroId': typeof TerceirosTerceiroIdRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
+  '/api/mobile/device-token': typeof ApiMobileDeviceTokenRoute
+  '/api/mobile/login': typeof ApiMobileLoginRoute
+  '/api/mobile/logout': typeof ApiMobileLogoutRoute
+  '/api/mobile/me': typeof ApiMobileMeRoute
+  '/api/mobile/sync': typeof ApiMobileSyncRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
+  '/api/mobile/frota/abastecimento': typeof ApiMobileFrotaAbastecimentoRoute
+  '/api/mobile/frota/km': typeof ApiMobileFrotaKmRoute
+  '/api/mobile/frota/servico': typeof ApiMobileFrotaServicoRoute
+  '/api/mobile/frota/veiculo': typeof ApiMobileFrotaVeiculoRoute
+  '/api/mobile/os/': typeof ApiMobileOsIndexRoute
+  '/api/mobile/os/$id/check-in': typeof ApiMobileOsIdCheckInRoute
+  '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
+  '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
+  '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
+  '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
+  '/api/mobile/os/$id/': typeof ApiMobileOsIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -280,7 +425,23 @@ export interface FileRouteTypes {
     | '/d/$token'
     | '/terceiros/$terceiroId'
     | '/api/integgri/webhook'
+    | '/api/mobile/device-token'
+    | '/api/mobile/login'
+    | '/api/mobile/logout'
+    | '/api/mobile/me'
+    | '/api/mobile/sync'
     | '/api/waha/webhook'
+    | '/api/mobile/frota/abastecimento'
+    | '/api/mobile/frota/km'
+    | '/api/mobile/frota/servico'
+    | '/api/mobile/frota/veiculo'
+    | '/api/mobile/os/'
+    | '/api/mobile/os/$id/check-in'
+    | '/api/mobile/os/$id/check-out'
+    | '/api/mobile/os/$id/pause'
+    | '/api/mobile/os/$id/resume'
+    | '/api/mobile/os/$id/start'
+    | '/api/mobile/os/$id/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -308,7 +469,23 @@ export interface FileRouteTypes {
     | '/d/$token'
     | '/terceiros/$terceiroId'
     | '/api/integgri/webhook'
+    | '/api/mobile/device-token'
+    | '/api/mobile/login'
+    | '/api/mobile/logout'
+    | '/api/mobile/me'
+    | '/api/mobile/sync'
     | '/api/waha/webhook'
+    | '/api/mobile/frota/abastecimento'
+    | '/api/mobile/frota/km'
+    | '/api/mobile/frota/servico'
+    | '/api/mobile/frota/veiculo'
+    | '/api/mobile/os'
+    | '/api/mobile/os/$id/check-in'
+    | '/api/mobile/os/$id/check-out'
+    | '/api/mobile/os/$id/pause'
+    | '/api/mobile/os/$id/resume'
+    | '/api/mobile/os/$id/start'
+    | '/api/mobile/os/$id'
   id:
     | '__root__'
     | '/'
@@ -336,7 +513,23 @@ export interface FileRouteTypes {
     | '/d/$token'
     | '/terceiros_/$terceiroId'
     | '/api/integgri/webhook'
+    | '/api/mobile/device-token'
+    | '/api/mobile/login'
+    | '/api/mobile/logout'
+    | '/api/mobile/me'
+    | '/api/mobile/sync'
     | '/api/waha/webhook'
+    | '/api/mobile/frota/abastecimento'
+    | '/api/mobile/frota/km'
+    | '/api/mobile/frota/servico'
+    | '/api/mobile/frota/veiculo'
+    | '/api/mobile/os/'
+    | '/api/mobile/os/$id/check-in'
+    | '/api/mobile/os/$id/check-out'
+    | '/api/mobile/os/$id/pause'
+    | '/api/mobile/os/$id/resume'
+    | '/api/mobile/os/$id/start'
+    | '/api/mobile/os/$id/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -365,7 +558,23 @@ export interface RootRouteChildren {
   DTokenRoute: typeof DTokenRoute
   TerceirosTerceiroIdRoute: typeof TerceirosTerceiroIdRoute
   ApiInteggriWebhookRoute: typeof ApiInteggriWebhookRoute
+  ApiMobileDeviceTokenRoute: typeof ApiMobileDeviceTokenRoute
+  ApiMobileLoginRoute: typeof ApiMobileLoginRoute
+  ApiMobileLogoutRoute: typeof ApiMobileLogoutRoute
+  ApiMobileMeRoute: typeof ApiMobileMeRoute
+  ApiMobileSyncRoute: typeof ApiMobileSyncRoute
   ApiWahaWebhookRoute: typeof ApiWahaWebhookRoute
+  ApiMobileFrotaAbastecimentoRoute: typeof ApiMobileFrotaAbastecimentoRoute
+  ApiMobileFrotaKmRoute: typeof ApiMobileFrotaKmRoute
+  ApiMobileFrotaServicoRoute: typeof ApiMobileFrotaServicoRoute
+  ApiMobileFrotaVeiculoRoute: typeof ApiMobileFrotaVeiculoRoute
+  ApiMobileOsIndexRoute: typeof ApiMobileOsIndexRoute
+  ApiMobileOsIdCheckInRoute: typeof ApiMobileOsIdCheckInRoute
+  ApiMobileOsIdCheckOutRoute: typeof ApiMobileOsIdCheckOutRoute
+  ApiMobileOsIdPauseRoute: typeof ApiMobileOsIdPauseRoute
+  ApiMobileOsIdResumeRoute: typeof ApiMobileOsIdResumeRoute
+  ApiMobileOsIdStartRoute: typeof ApiMobileOsIdStartRoute
+  ApiMobileOsIdIndexRoute: typeof ApiMobileOsIdIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -545,11 +754,123 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiInteggriWebhookRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mobile/device-token': {
+      id: '/api/mobile/device-token'
+      path: '/api/mobile/device-token'
+      fullPath: '/api/mobile/device-token'
+      preLoaderRoute: typeof ApiMobileDeviceTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/login': {
+      id: '/api/mobile/login'
+      path: '/api/mobile/login'
+      fullPath: '/api/mobile/login'
+      preLoaderRoute: typeof ApiMobileLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/logout': {
+      id: '/api/mobile/logout'
+      path: '/api/mobile/logout'
+      fullPath: '/api/mobile/logout'
+      preLoaderRoute: typeof ApiMobileLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/me': {
+      id: '/api/mobile/me'
+      path: '/api/mobile/me'
+      fullPath: '/api/mobile/me'
+      preLoaderRoute: typeof ApiMobileMeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/sync': {
+      id: '/api/mobile/sync'
+      path: '/api/mobile/sync'
+      fullPath: '/api/mobile/sync'
+      preLoaderRoute: typeof ApiMobileSyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/waha/webhook': {
       id: '/api/waha/webhook'
       path: '/api/waha/webhook'
       fullPath: '/api/waha/webhook'
       preLoaderRoute: typeof ApiWahaWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/frota/abastecimento': {
+      id: '/api/mobile/frota/abastecimento'
+      path: '/api/mobile/frota/abastecimento'
+      fullPath: '/api/mobile/frota/abastecimento'
+      preLoaderRoute: typeof ApiMobileFrotaAbastecimentoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/frota/km': {
+      id: '/api/mobile/frota/km'
+      path: '/api/mobile/frota/km'
+      fullPath: '/api/mobile/frota/km'
+      preLoaderRoute: typeof ApiMobileFrotaKmRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/frota/servico': {
+      id: '/api/mobile/frota/servico'
+      path: '/api/mobile/frota/servico'
+      fullPath: '/api/mobile/frota/servico'
+      preLoaderRoute: typeof ApiMobileFrotaServicoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/frota/veiculo': {
+      id: '/api/mobile/frota/veiculo'
+      path: '/api/mobile/frota/veiculo'
+      fullPath: '/api/mobile/frota/veiculo'
+      preLoaderRoute: typeof ApiMobileFrotaVeiculoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/os/': {
+      id: '/api/mobile/os/'
+      path: '/api/mobile/os'
+      fullPath: '/api/mobile/os/'
+      preLoaderRoute: typeof ApiMobileOsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/os/$id/': {
+      id: '/api/mobile/os/$id/'
+      path: '/api/mobile/os/$id'
+      fullPath: '/api/mobile/os/$id/'
+      preLoaderRoute: typeof ApiMobileOsIdIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/os/$id/check-in': {
+      id: '/api/mobile/os/$id/check-in'
+      path: '/api/mobile/os/$id/check-in'
+      fullPath: '/api/mobile/os/$id/check-in'
+      preLoaderRoute: typeof ApiMobileOsIdCheckInRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/os/$id/check-out': {
+      id: '/api/mobile/os/$id/check-out'
+      path: '/api/mobile/os/$id/check-out'
+      fullPath: '/api/mobile/os/$id/check-out'
+      preLoaderRoute: typeof ApiMobileOsIdCheckOutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/os/$id/pause': {
+      id: '/api/mobile/os/$id/pause'
+      path: '/api/mobile/os/$id/pause'
+      fullPath: '/api/mobile/os/$id/pause'
+      preLoaderRoute: typeof ApiMobileOsIdPauseRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/os/$id/resume': {
+      id: '/api/mobile/os/$id/resume'
+      path: '/api/mobile/os/$id/resume'
+      fullPath: '/api/mobile/os/$id/resume'
+      preLoaderRoute: typeof ApiMobileOsIdResumeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/os/$id/start': {
+      id: '/api/mobile/os/$id/start'
+      path: '/api/mobile/os/$id/start'
+      fullPath: '/api/mobile/os/$id/start'
+      preLoaderRoute: typeof ApiMobileOsIdStartRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -581,7 +902,23 @@ const rootRouteChildren: RootRouteChildren = {
   DTokenRoute: DTokenRoute,
   TerceirosTerceiroIdRoute: TerceirosTerceiroIdRoute,
   ApiInteggriWebhookRoute: ApiInteggriWebhookRoute,
+  ApiMobileDeviceTokenRoute: ApiMobileDeviceTokenRoute,
+  ApiMobileLoginRoute: ApiMobileLoginRoute,
+  ApiMobileLogoutRoute: ApiMobileLogoutRoute,
+  ApiMobileMeRoute: ApiMobileMeRoute,
+  ApiMobileSyncRoute: ApiMobileSyncRoute,
   ApiWahaWebhookRoute: ApiWahaWebhookRoute,
+  ApiMobileFrotaAbastecimentoRoute: ApiMobileFrotaAbastecimentoRoute,
+  ApiMobileFrotaKmRoute: ApiMobileFrotaKmRoute,
+  ApiMobileFrotaServicoRoute: ApiMobileFrotaServicoRoute,
+  ApiMobileFrotaVeiculoRoute: ApiMobileFrotaVeiculoRoute,
+  ApiMobileOsIndexRoute: ApiMobileOsIndexRoute,
+  ApiMobileOsIdCheckInRoute: ApiMobileOsIdCheckInRoute,
+  ApiMobileOsIdCheckOutRoute: ApiMobileOsIdCheckOutRoute,
+  ApiMobileOsIdPauseRoute: ApiMobileOsIdPauseRoute,
+  ApiMobileOsIdResumeRoute: ApiMobileOsIdResumeRoute,
+  ApiMobileOsIdStartRoute: ApiMobileOsIdStartRoute,
+  ApiMobileOsIdIndexRoute: ApiMobileOsIdIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

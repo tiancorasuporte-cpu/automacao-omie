@@ -136,6 +136,17 @@ export function isFacilitiesMotivoId(value: string): value is FacilitiesMotivoId
   return FACILITIES_MOTIVOS.some((e) => e.id === value);
 }
 
+/** Dias corridos inclusivos entre duas datas ISO (YYYY-MM-DD). */
+export function countInclusiveDays(dataInicio: string, dataFim: string) {
+  const start = /^\d{4}-\d{2}-\d{2}/.exec(dataInicio.trim())?.[0];
+  const end = /^\d{4}-\d{2}-\d{2}/.exec(dataFim.trim())?.[0];
+  if (!start || !end) return 0;
+  const a = Date.parse(`${start}T12:00:00Z`);
+  const b = Date.parse(`${end}T12:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return 0;
+  return Math.floor((b - a) / 86_400_000) + 1;
+}
+
 export function currentMonthKey(date = new Date()) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");

@@ -19,9 +19,11 @@ import {
   createFacilitiesCollaboratorFn,
   createFacilitiesPostFn,
   createFacilitiesSubstitutionFn,
+  createFacilitiesVacationFn,
   deactivateFacilitiesCollaboratorFn,
   deactivateFacilitiesPostFn,
   deleteFacilitiesSubstitutionFn,
+  deleteFacilitiesVacationFn,
   getFacilitiesBootstrapFn,
   importFacilitiesCollaboratorsFn,
   importFacilitiesPostsFn,
@@ -31,6 +33,7 @@ import {
 } from "@/lib/facilities";
 import {
   combineHoursAndMinutes,
+  countInclusiveDays,
   currentMonthKey,
   defaultHoursForEscala,
   facilitiesMotivoHint,
@@ -61,7 +64,7 @@ const searchSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}$/)
     .catch(currentMonthKey()),
-  tab: z.enum(["painel", "lancar", "cadastros", "fechamento"]).catch("painel"),
+  tab: z.enum(["painel", "lancar", "ferias", "cadastros", "fechamento"]).catch("painel"),
   postoId: z.coerce.number().int().positive().optional().catch(undefined),
   collaboratorId: z.coerce.number().int().positive().optional().catch(undefined),
   dataDe: z
@@ -122,6 +125,7 @@ function PageSizeSelect({
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   { id: "painel", label: "Painel", icon: "dashboard" },
   { id: "lancar", label: "Lançar", icon: "swap_horiz" },
+  { id: "ferias", label: "Férias", icon: "beach_access" },
   { id: "cadastros", label: "Cadastros", icon: "badge" },
   { id: "fechamento", label: "Fechamento", icon: "payments" },
 ];
@@ -531,6 +535,21 @@ function FacilitiesPage() {
     valorAlmoco: "",
   });
 
+  const [vacForm, setVacForm] = useState({
+    colaboradorId: "",
+    coberturaId: "",
+    postoId: "",
+    dataInicio: todayIso(),
+    dataFim: todayIso(),
+    horasHoras: "12",
+    horasMinutos: "0",
+    horasPorDia: true,
+    observacao: "",
+  });
+  const [feriasPage, setFeriasPage] = useState(1);
+  const [feriasPageSize, setFeriasPageSize] = useState<PageSize>(10);
+  const [fechFeriasPage, setFechFeriasPage] = useState(1);
+
   const [postDialog, setPostDialog] = useState(false);
   const [postForm, setPostForm] = useState({
     id: 0,
@@ -572,6 +591,9 @@ function FacilitiesPage() {
   const [fechColPage, setFechColPage] = useState(1);
   const [fechPostoPage, setFechPostoPage] = useState(1);
   const [fechLancPage, setFechLancPage] = useState(1);
+  const [fechPanel, setFechPanel] = useState<"pagamento" | "lancamentos" | "ferias">(
+    "pagamento",
+  );
   const [copied, setCopied] = useState(false);
   const [obsDialog, setObsDialog] = useState<(typeof data.substitutions)[number] | null>(null);
   const [almocoDialog, setAlmocoDialog] = useState<(typeof data.substitutions)[number] | null>(
@@ -591,6 +613,42 @@ function FacilitiesPage() {
     (c) => String(c.id) === subForm.substitutoId,
   );
   const selectedPostoId = Number(subForm.postoId) || 0;
+
+  const selectedVacColaborador = activeCollaborators.find(
+    (c) => String(c.id) === vacForm.colaboradorId,
+  );
+  const selectedVacCobertura = activeCollaborators.find(
+    (c) => String(c.id) === vacForm.coberturaId,
+  );
+  const vacDias = useMemo(
+    () => countInclusiveDays(vacForm.dataInicio, vacForm.dataFim),
+    [vacForm.dataInicio, vacForm.dataFim],
+  );
+  const vacHorasDia = useMemo(
+    () =>
+      combineHoursAndMinutes(
+        Number.parseInt(vacForm.horasHoras || "0", 10),
+        Number.parseInt(vacForm.horasMinutos || "0", 10),
+      ),
+    [vacForm.horasHoras, vacForm.horasMinutos],
+  );
+  const vacHorasTotal = useMemo(() => {
+    if (vacForm.horasPorDia) {
+      return Math.round(vacHorasDia * Math.max(vacDias, 0) * 10000) / 10000;
+    }
+    return vacHorasDia;
+  }, [vacForm.horasPorDia, vacHorasDia, vacDias]);
+  const vacCoberturaPropria =
+    Boolean(vacForm.colaboradorId) && vacForm.colaboradorId === vacForm.coberturaId;
+
+  const pagedFerias = useMemo(
+    () => paginateList(data.vacations ?? [], feriasPage, feriasPageSize),
+    [data.vacations, feriasPage, feriasPageSize],
+  );
+  const pagedFechFerias = useMemo(
+    () => paginateList(data.summary.byCoberturaFerias ?? [], fechFeriasPage, fechPageSize),
+    [data.summary.byCoberturaFerias, fechFeriasPage, fechPageSize],
+  );
   const substitutoForaBase =
     selectedSubstituto?.postoBaseId != null &&
     selectedPostoId > 0 &&
@@ -723,6 +781,7 @@ function FacilitiesPage() {
     setFechColPage(1);
     setFechPostoPage(1);
     setFechLancPage(1);
+    setFechFeriasPage(1);
   }, [search.month, fechPageSize]);
 
   const pagedSubstitutions = useMemo(
@@ -835,8 +894,12 @@ function FacilitiesPage() {
     trocas: data.summary.trocas,
     permutas: data.summary.permutas,
     almoco: data.summary.almoco ?? 0,
+    ferias: data.summary.ferias ?? 0,
+    feriasDias: data.summary.feriasDias ?? 0,
+    feriasHoras: data.summary.feriasHoras ?? 0,
     bySubstituto: data.summary.bySubstituto,
     byPosto: data.summary.byPosto,
+    byCoberturaFerias: data.summary.byCoberturaFerias ?? [],
     lancamentos: data.substitutions.map((row) => ({
       data: row.data,
       postoNome: row.postoNome,
@@ -849,6 +912,20 @@ function FacilitiesPage() {
       pagaHoras: row.pagaHoras,
       pagaAlmoco: row.pagaAlmoco,
       valorAlmoco: row.valorAlmoco,
+      observacao: row.observacao,
+      registradoPor: row.createdByName,
+    })),
+    feriasLancamentos: (data.vacations ?? []).map((row) => ({
+      dataInicio: row.dataInicio,
+      dataFim: row.dataFim,
+      dias: row.dias,
+      postoNome: row.postoNome,
+      colaboradorNome: row.colaboradorNome,
+      colaboradorEmpresa: row.colaboradorEmpresa,
+      coberturaNome: row.coberturaNome,
+      coberturaEmpresa: row.coberturaEmpresa,
+      horas: row.horas,
+      coberturaPropria: row.coberturaPropria,
       observacao: row.observacao,
       registradoPor: row.createdByName,
     })),
@@ -964,6 +1041,73 @@ function FacilitiesPage() {
     }
   };
 
+  const submitVacation = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!vacForm.colaboradorId || !vacForm.coberturaId || !vacForm.postoId) {
+      flash(null, "Selecione colaborador, cobertura e posto.");
+      return;
+    }
+    if (vacDias <= 0) {
+      flash(null, "Informe um período válido de férias.");
+      return;
+    }
+    if (!(vacHorasTotal >= 0)) {
+      flash(null, "Informe as horas do período.");
+      return;
+    }
+    setPending(true);
+    flash(null);
+    try {
+      const result = await createFacilitiesVacationFn({
+        data: {
+          colaboradorId: Number(vacForm.colaboradorId),
+          coberturaId: Number(vacForm.coberturaId),
+          postoId: Number(vacForm.postoId),
+          dataInicio: vacForm.dataInicio,
+          dataFim: vacForm.dataFim,
+          dias: vacDias,
+          horas: vacHorasTotal,
+          observacao: vacForm.observacao.trim() || null,
+        },
+      });
+      if (!result.ok) {
+        flash(null, result.error);
+        return;
+      }
+      flash(
+        result.vacation.coberturaPropria
+          ? `Férias lançadas: ${result.vacation.colaboradorNome} · ${result.vacation.dias} dia(s) · ${formatHours(result.vacation.horas)} (cobertura própria).`
+          : `Férias lançadas: ${result.vacation.colaboradorNome} coberto por ${result.vacation.coberturaNome} · ${result.vacation.dias} dia(s) · ${formatHours(result.vacation.horas)}.`,
+      );
+      setVacForm((prev) => ({
+        ...prev,
+        colaboradorId: "",
+        coberturaId: "",
+        observacao: "",
+      }));
+      await router.invalidate();
+      navigate({ search: (prev) => ({ ...prev, tab: "ferias" }) });
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const deleteVacation = async (id: number) => {
+    setPending(true);
+    flash(null);
+    try {
+      const result = await deleteFacilitiesVacationFn({ data: { id } });
+      if (!result.ok) {
+        flash(null, result.error);
+        return;
+      }
+      flash("Período de férias excluído.");
+      await router.invalidate();
+    } finally {
+      setPending(false);
+    }
+  };
+
   const paymentText = useMemo(() => {
     const lines = [
       `Facilities — fechamento ${monthLabel(data.monthKey)}`,
@@ -971,6 +1115,7 @@ function FacilitiesPage() {
         (data.summary.permutas > 0
           ? ` · ${data.summary.permutas} solicitação(ões) de troca (sem pagamento)`
           : ""),
+      `Férias: ${data.summary.ferias ?? 0} período(s) · ${data.summary.feriasDias ?? 0} dia(s) · ${formatHours(data.summary.feriasHoras ?? 0)}`,
       "",
       "Por colaborador (substituto — horas a pagar):",
       ...data.summary.bySubstituto.map(
@@ -981,6 +1126,13 @@ function FacilitiesPage() {
       "Por posto (horas a pagar):",
       ...data.summary.byPosto.map(
         (row) => `- ${row.nome} · ${row.trocas} lançamento(s) · ${formatHours(row.horas)}`,
+      ),
+      "",
+      "Férias — cobertura (dias e horas):",
+      ...(data.summary.byCoberturaFerias ?? []).map(
+        (row) =>
+          `- ${row.nome} (${row.empresa}) · ${row.ferias} período(s) · ${row.dias} dia(s) · ${formatHours(row.horas)}` +
+          (row.propria > 0 ? ` · ${row.propria} própria(s)` : ""),
       ),
     ];
     return lines.join("\n");
@@ -1282,9 +1434,9 @@ function FacilitiesPage() {
                     icon: "schedule",
                   },
                   {
-                    label: "Solicitações de troca",
-                    value: data.summary.permutas,
-                    icon: "sync_alt",
+                    label: "Férias (dias)",
+                    value: `${data.summary.feriasDias ?? 0}d · ${formatHours(data.summary.feriasHoras ?? 0)}`,
+                    icon: "beach_access",
                   },
                   {
                     label: "Postos / equipe",
@@ -1892,6 +2044,270 @@ function FacilitiesPage() {
             </section>
           )}
 
+          {search.tab === "ferias" && (
+            <section className="space-y-lg">
+              <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md md:p-lg">
+                <h3 className="text-title-lg text-primary">Lançar férias</h3>
+                <p className="mt-xs text-body-md text-on-surface-variant">
+                  Informe o período (dias) e as horas. A cobertura pode ser outra pessoa ou a própria
+                  pessoa em férias.
+                </p>
+                <form onSubmit={(e) => void submitVacation(e)} className="mt-md space-y-md">
+                  <div className="grid gap-md sm:grid-cols-2">
+                    <DateInputBr
+                      label="Início"
+                      valueIso={vacForm.dataInicio}
+                      onChangeIso={(value) =>
+                        setVacForm((p) => ({
+                          ...p,
+                          dataInicio: value,
+                          dataFim: p.dataFim < value ? value : p.dataFim,
+                        }))
+                      }
+                    />
+                    <DateInputBr
+                      label="Fim"
+                      valueIso={vacForm.dataFim}
+                      onChangeIso={(value) =>
+                        setVacForm((p) => ({
+                          ...p,
+                          dataFim: value,
+                          dataInicio: p.dataInicio > value ? value : p.dataInicio,
+                        }))
+                      }
+                    />
+                  </div>
+                  <p className="rounded-lg bg-secondary-container/40 px-sm py-xs text-label-md text-primary">
+                    {vacDias > 0
+                      ? `${vacDias} dia(s) · ${formatHours(vacHorasTotal)} no período`
+                      : "Informe o período para calcular os dias."}
+                    {vacCoberturaPropria ? " · cobertura própria" : ""}
+                  </p>
+                  <SearchablePick
+                    label="Quem sai de férias"
+                    value={vacForm.colaboradorId}
+                    options={ausenteOptions}
+                    placeholder="Buscar colaborador..."
+                    onChange={(id) => {
+                      const person = activeCollaborators.find((c) => String(c.id) === id);
+                      setVacForm((prev) => ({
+                        ...prev,
+                        colaboradorId: id,
+                        postoId:
+                          prev.postoId ||
+                          (person?.postoBaseId != null ? String(person.postoBaseId) : ""),
+                        coberturaId: prev.coberturaId || id,
+                        ...(person && !prev.coberturaId
+                          ? durationPartsFromHours(person.defaultHours)
+                          : {}),
+                      }));
+                    }}
+                  />
+                  <SearchablePick
+                    label="Posto da cobertura"
+                    value={vacForm.postoId}
+                    options={postoOptions}
+                    placeholder="Buscar posto..."
+                    onChange={(id) => setVacForm((p) => ({ ...p, postoId: id }))}
+                  />
+                  <SearchablePick
+                    label="Quem cobre as férias"
+                    value={vacForm.coberturaId}
+                    options={ausenteOptions}
+                    placeholder="Pode ser a própria pessoa..."
+                    onChange={(id) => {
+                      const person = activeCollaborators.find((c) => String(c.id) === id);
+                      setVacForm((prev) => ({
+                        ...prev,
+                        coberturaId: id,
+                        ...(person ? durationPartsFromHours(person.defaultHours) : {}),
+                      }));
+                    }}
+                  />
+                  {vacCoberturaPropria ? (
+                    <p className="rounded-lg border border-sky-200 bg-sky-50 px-sm py-xs text-label-md text-sky-900">
+                      Cobertura própria: o mesmo colaborador fica registrado no período de férias.
+                    </p>
+                  ) : selectedVacCobertura && selectedVacColaborador ? (
+                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-sm py-xs text-label-md text-amber-950">
+                      {selectedVacCobertura.nome} cobre as férias de {selectedVacColaborador.nome}.
+                    </p>
+                  ) : null}
+                  <div className="grid gap-md sm:grid-cols-2">
+                    <label className="flex items-center gap-sm rounded-lg border border-outline-variant bg-surface px-md py-sm text-body-md">
+                      <input
+                        type="checkbox"
+                        checked={vacForm.horasPorDia}
+                        onChange={(e) =>
+                          setVacForm((p) => ({ ...p, horasPorDia: e.target.checked }))
+                        }
+                      />
+                      <span className="text-primary">Horas por dia × dias do período</span>
+                    </label>
+                    <div className="grid grid-cols-2 gap-sm">
+                      <label className="block space-y-xs">
+                        <span className="text-label-md text-primary">
+                          {vacForm.horasPorDia ? "Horas/dia" : "Horas totais"}
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={vacForm.horasHoras}
+                          onChange={(e) =>
+                            setVacForm((p) => ({ ...p, horasHoras: e.target.value }))
+                          }
+                          className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                        />
+                      </label>
+                      <label className="block space-y-xs">
+                        <span className="text-label-md text-primary">Minutos</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={59}
+                          value={vacForm.horasMinutos}
+                          onChange={(e) =>
+                            setVacForm((p) => ({ ...p, horasMinutos: e.target.value }))
+                          }
+                          className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <label className="block space-y-xs">
+                    <span className="text-label-md text-primary">Observação</span>
+                    <input
+                      value={vacForm.observacao}
+                      onChange={(e) => setVacForm((p) => ({ ...p, observacao: e.target.value }))}
+                      placeholder="Opcional"
+                      className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    disabled={pending}
+                    className="inline-flex w-full items-center justify-center gap-xs rounded-lg bg-secondary-container px-md py-md text-label-md font-semibold text-primary disabled:opacity-60 sm:w-auto sm:py-sm"
+                  >
+                    <Icon name="beach_access" className="text-[18px]" />
+                    {pending ? "Salvando..." : "Registrar férias"}
+                  </button>
+                </form>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
+                <div className="flex flex-wrap items-end justify-between gap-sm border-b border-outline-variant px-md py-sm">
+                  <div>
+                    <h4 className="text-title-md text-primary">Férias no mês</h4>
+                    <p className="text-label-md text-on-surface-variant">
+                      {(data.vacations ?? []).length} período(s) · {data.summary.feriasDias ?? 0}{" "}
+                      dia(s) · {formatHours(data.summary.feriasHoras ?? 0)}
+                    </p>
+                  </div>
+                  <PageSizeSelect value={feriasPageSize} onChange={setFeriasPageSize} />
+                </div>
+                <div className="space-y-sm p-md md:hidden">
+                  {pagedFerias.totalItems === 0 ? (
+                    <p className="py-lg text-center text-body-md text-on-surface-variant">
+                      Nenhuma férias neste mês.
+                    </p>
+                  ) : (
+                    pagedFerias.items.map((row) => (
+                      <article
+                        key={row.id}
+                        className="rounded-xl border border-outline-variant bg-surface p-md"
+                      >
+                        <div className="flex items-start justify-between gap-sm">
+                          <div className="min-w-0">
+                            <p className="font-medium text-primary">{row.colaboradorNome}</p>
+                            <p className="text-label-md text-on-surface-variant">
+                              {formatDateBr(row.dataInicio)} → {formatDateBr(row.dataFim)} ·{" "}
+                              {row.dias} dia(s) · {formatHours(row.horas)}
+                            </p>
+                            <p className="mt-2xs text-label-md text-on-surface-variant">
+                              Cobertura: {row.coberturaNome}
+                              {row.coberturaPropria ? " (própria)" : ""} · {row.postoNome}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={pending}
+                            className="text-label-md text-red-700 disabled:opacity-50"
+                            onClick={() => void deleteVacation(row.id)}
+                          >
+                            Excluir
+                          </button>
+                        </div>
+                      </article>
+                    ))
+                  )}
+                </div>
+                <div className="hidden overflow-x-auto md:block">
+                  <table className="min-w-full text-left text-body-md">
+                    <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
+                      <tr>
+                        <th className="px-md py-sm">Período</th>
+                        <th className="px-md py-sm">Em férias</th>
+                        <th className="px-md py-sm">Cobertura</th>
+                        <th className="px-md py-sm">Posto</th>
+                        <th className="px-md py-sm">Dias</th>
+                        <th className="px-md py-sm">Horas</th>
+                        <th className="px-md py-sm">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedFerias.totalItems === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-md py-xl text-center text-on-surface-variant">
+                            Nenhuma férias neste mês.
+                          </td>
+                        </tr>
+                      ) : (
+                        pagedFerias.items.map((row) => (
+                          <tr key={row.id} className="border-t border-outline-variant/60">
+                            <td className="px-md py-sm whitespace-nowrap">
+                              {formatDateBr(row.dataInicio)} → {formatDateBr(row.dataFim)}
+                            </td>
+                            <td className="px-md py-sm font-medium text-primary">
+                              {row.colaboradorNome}
+                            </td>
+                            <td className="px-md py-sm">
+                              {row.coberturaNome}
+                              {row.coberturaPropria ? (
+                                <span className="ml-xs rounded-full bg-sky-100 px-xs py-2xs text-[10px] font-bold uppercase text-sky-900">
+                                  Própria
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="px-md py-sm">{row.postoNome}</td>
+                            <td className="px-md py-sm">{row.dias}</td>
+                            <td className="px-md py-sm font-semibold">{formatHours(row.horas)}</td>
+                            <td className="px-md py-sm">
+                              <button
+                                type="button"
+                                disabled={pending}
+                                className="text-label-md text-red-700 disabled:opacity-50"
+                                onClick={() => void deleteVacation(row.id)}
+                              >
+                                Excluir
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <TablePager
+                  page={pagedFerias.page}
+                  totalPages={pagedFerias.totalPages}
+                  totalItems={pagedFerias.totalItems}
+                  pageSize={feriasPageSize}
+                  onPageChange={setFeriasPage}
+                />
+              </div>
+            </section>
+          )}
+
           {search.tab === "cadastros" && (
             <section className="space-y-md">
               <div className="flex flex-wrap gap-sm">
@@ -2490,32 +2906,13 @@ function FacilitiesPage() {
           )}
 
           {search.tab === "fechamento" && (
-            <section className="space-y-lg">
-              <div className="rounded-xl border border-outline-variant bg-gradient-to-br from-secondary-container/50 to-surface-container-lowest p-md md:p-lg">
-                <div className="flex flex-col gap-md md:flex-row md:items-end md:justify-between">
-                  <div>
-                    <h3 className="text-title-lg text-primary">
-                      Fechamento — {monthLabel(data.monthKey)}
-                    </h3>
-                    <p className="mt-xs text-body-md text-on-surface-variant">
-                      Resumo das horas a pagar (faltas, atestados e folgas). Solicitações de troca
-                      entre colegas ficam de fora.
-                    </p>
-                    <p className="mt-md text-headline-md font-semibold text-primary">
-                      {formatHours(data.summary.horas)} a pagar
-                      {data.summary.permutas > 0 ? (
-                        <span className="ml-sm text-title-md font-normal text-on-surface-variant">
-                          · {data.summary.permutas} permuta(s)
-                        </span>
-                      ) : null}
-                      {(data.summary.almoco ?? 0) > 0 ? (
-                        <span className="ml-sm text-title-md font-normal text-secondary">
-                          · almoço {formatMoneyBr(data.summary.almoco)}
-                        </span>
-                      ) : null}
-                    </p>
-                  </div>
-                  <div className="flex w-full flex-col gap-sm sm:w-auto sm:flex-row sm:flex-wrap">
+            <section className="space-y-md">
+              <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md md:p-lg">
+                <div className="flex flex-col gap-sm sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="text-title-lg text-primary">
+                    Fechamento — {monthLabel(data.monthKey)}
+                  </h3>
+                  <div className="flex flex-wrap gap-sm">
                     <button
                       type="button"
                       onClick={() => {
@@ -2529,10 +2926,10 @@ function FacilitiesPage() {
                           );
                         }
                       }}
-                      className="inline-flex w-full items-center justify-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary sm:w-auto"
+                      className="inline-flex items-center justify-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary"
                     >
                       <Icon name="download" className="text-[18px]" />
-                      Exportar Excel
+                      Excel
                     </button>
                     <button
                       type="button"
@@ -2553,325 +2950,547 @@ function FacilitiesPage() {
                           }
                         })();
                       }}
-                      className="inline-flex w-full items-center justify-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold text-primary disabled:opacity-60 sm:w-auto"
+                      className="inline-flex items-center justify-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold text-primary disabled:opacity-60"
                     >
                       <Icon name="picture_as_pdf" className="text-[18px]" />
-                      {pending ? "Gerando PDF..." : "Exportar PDF"}
+                      {pending ? "PDF..." : "PDF"}
                     </button>
                     <button
                       type="button"
                       onClick={() => void copyPayment()}
-                      className="inline-flex w-full items-center justify-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container sm:w-auto"
+                      className="inline-flex items-center justify-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold text-primary"
                     >
                       <Icon name="content_copy" className="text-[18px]" />
-                      {copied ? "Copiado!" : "Copiar resumo"}
+                      {copied ? "Copiado!" : "Copiar"}
                     </button>
                   </div>
                 </div>
+                <p className="mt-sm text-body-md text-on-surface-variant">
+                  Use as abas abaixo: pagamento (horas), lançamentos do dia e férias do mês.
+                </p>
+
+                <div className="mt-md grid grid-cols-2 gap-sm lg:grid-cols-4">
+                  {[
+                    {
+                      label: "Horas a pagar",
+                      value: formatHours(data.summary.horas),
+                      hint: `${Math.max(0, data.summary.trocas - data.summary.permutas)} cobertura(s)`,
+                      tone: "bg-amber-50 text-amber-950 border-amber-200",
+                    },
+                    {
+                      label: "Almoço",
+                      value: formatMoneyBr(data.summary.almoco ?? 0),
+                      hint: (data.summary.almoco ?? 0) > 0 ? "somado no mês" : "sem almoço",
+                      tone: "bg-surface border-outline-variant text-on-surface",
+                    },
+                    {
+                      label: "Permutas",
+                      value: String(data.summary.permutas),
+                      hint: "sem horas a pagar",
+                      tone: "bg-surface border-outline-variant text-on-surface",
+                    },
+                    {
+                      label: "Férias",
+                      value: `${data.summary.feriasDias ?? 0}d`,
+                      hint: formatHours(data.summary.feriasHoras ?? 0),
+                      tone: "bg-sky-50 text-sky-950 border-sky-200",
+                    },
+                  ].map((card) => (
+                    <div
+                      key={card.label}
+                      className={cn("rounded-xl border px-md py-sm", card.tone)}
+                    >
+                      <p className="text-label-sm uppercase tracking-wide opacity-80">{card.label}</p>
+                      <p className="mt-xs text-title-lg font-semibold">{card.value}</p>
+                      <p className="mt-2xs text-label-md opacity-80">{card.hint}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-end justify-between gap-sm">
-                <p className="text-body-md text-on-surface-variant">
-                  Listas do fechamento com datas e paginação.
-                </p>
+              <div className="flex flex-wrap items-center justify-between gap-sm">
+                <div className="flex flex-wrap gap-xs rounded-xl border border-outline-variant bg-surface p-xs">
+                  {(
+                    [
+                      {
+                        id: "pagamento" as const,
+                        label: "Pagamento",
+                        icon: "payments",
+                        count: data.summary.bySubstituto.length,
+                      },
+                      {
+                        id: "lancamentos" as const,
+                        label: "Lançamentos",
+                        icon: "list_alt",
+                        count: data.substitutions.length,
+                      },
+                      {
+                        id: "ferias" as const,
+                        label: "Férias",
+                        icon: "beach_access",
+                        count: data.summary.ferias ?? 0,
+                      },
+                    ] as const
+                  ).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setFechPanel(item.id)}
+                      className={cn(
+                        "inline-flex items-center gap-xs rounded-lg px-sm py-xs text-label-md font-semibold transition-colors",
+                        fechPanel === item.id
+                          ? "bg-neutral-900 text-white"
+                          : "text-on-surface-variant hover:bg-surface-container",
+                      )}
+                    >
+                      <Icon name={item.icon} className="text-[16px]" />
+                      {item.label}
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[0.65rem] font-bold",
+                          fechPanel === item.id
+                            ? "bg-white/20 text-white"
+                            : "bg-surface-container-high text-on-surface",
+                        )}
+                      >
+                        {item.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
                 <PageSizeSelect value={fechPageSize} onChange={setFechPageSize} />
               </div>
 
-              <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
-                <div className="border-b border-outline-variant px-md py-sm">
-                  <h4 className="text-title-md text-primary">Pagamento por colaborador</h4>
-                </div>
-                <div className="space-y-sm p-md md:hidden">
-                  {pagedFechColaboradores.totalItems === 0 ? (
-                    <p className="py-lg text-center text-body-md text-on-surface-variant">
-                      Sem horas a pagar neste mês.
-                    </p>
-                  ) : (
-                    pagedFechColaboradores.items.map((row, index) => (
-                      <article
-                        key={row.id}
-                        className="flex items-center justify-between gap-sm rounded-xl border border-outline-variant bg-surface p-md"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-label-md text-on-surface-variant">
-                            #{(pagedFechColaboradores.page - 1) * fechPageSize + index + 1}
-                          </p>
-                          <p className="font-medium text-primary">{row.nome}</p>
-                          <p className="text-label-md text-on-surface-variant">
-                            {row.empresa} · {row.trocas} cobertura(s)
-                          </p>
-                        </div>
-                        <p className="shrink-0 text-title-md font-semibold text-primary">
-                          {formatHours(row.horas)}
-                        </p>
-                      </article>
-                    ))
-                  )}
-                </div>
-                <div className="hidden overflow-x-auto md:block">
-                  <table className="min-w-full text-left text-body-md">
-                    <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
-                      <tr>
-                        <th className="px-md py-sm">#</th>
-                        <th className="px-md py-sm">Colaborador</th>
-                        <th className="px-md py-sm">Empresa</th>
-                        <th className="px-md py-sm">Escala</th>
-                        <th className="px-md py-sm">Trocas</th>
-                        <th className="px-md py-sm">Horas a pagar</th>
-                      </tr>
-                    </thead>
-                    <tbody>
+              {fechPanel === "pagamento" ? (
+                <div className="grid gap-md lg:grid-cols-5">
+                  <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest lg:col-span-3">
+                    <div className="border-b border-outline-variant px-md py-sm">
+                      <h4 className="text-title-md text-primary">Quem recebe horas</h4>
+                      <p className="text-label-md text-on-surface-variant">
+                        Somente coberturas com pagamento (faltas, atestados, folgas…).
+                      </p>
+                    </div>
+                    <div className="space-y-sm p-md md:hidden">
                       {pagedFechColaboradores.totalItems === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="px-md py-xl text-center text-on-surface-variant">
-                            Sem horas a pagar neste mês.
-                          </td>
-                        </tr>
+                        <p className="py-lg text-center text-body-md text-on-surface-variant">
+                          Sem horas a pagar neste mês.
+                        </p>
                       ) : (
                         pagedFechColaboradores.items.map((row, index) => (
-                          <tr key={row.id} className="border-t border-outline-variant/60">
-                            <td className="px-md py-sm text-on-surface-variant">
-                              {(pagedFechColaboradores.page - 1) * fechPageSize + index + 1}
-                            </td>
-                            <td className="px-md py-sm font-medium text-primary">{row.nome}</td>
-                            <td className="px-md py-sm">{row.empresa}</td>
-                            <td className="px-md py-sm text-on-surface-variant">{row.escala}</td>
-                            <td className="px-md py-sm">{row.trocas}</td>
-                            <td className="px-md py-sm text-title-md font-semibold text-primary">
+                          <article
+                            key={row.id}
+                            className="flex items-center justify-between gap-sm rounded-xl border border-outline-variant bg-surface p-md"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-label-md text-on-surface-variant">
+                                #{(pagedFechColaboradores.page - 1) * fechPageSize + index + 1}
+                              </p>
+                              <p className="font-medium text-primary">{row.nome}</p>
+                              <p className="text-label-md text-on-surface-variant">
+                                {row.empresa} · {row.trocas} cobertura(s)
+                              </p>
+                            </div>
+                            <p className="shrink-0 text-title-md font-semibold text-primary">
                               {formatHours(row.horas)}
-                            </td>
-                          </tr>
+                            </p>
+                          </article>
                         ))
                       )}
-                    </tbody>
-                  </table>
-                </div>
-                <TablePager
-                  page={pagedFechColaboradores.page}
-                  totalPages={pagedFechColaboradores.totalPages}
-                  totalItems={pagedFechColaboradores.totalItems}
-                  pageSize={fechPageSize}
-                  onPageChange={setFechColPage}
-                />
-              </div>
+                    </div>
+                    <div className="hidden overflow-x-auto md:block">
+                      <table className="min-w-full text-left text-body-md">
+                        <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
+                          <tr>
+                            <th className="px-md py-sm">#</th>
+                            <th className="px-md py-sm">Colaborador</th>
+                            <th className="px-md py-sm">Empresa</th>
+                            <th className="px-md py-sm">Escala</th>
+                            <th className="px-md py-sm">Coberturas</th>
+                            <th className="px-md py-sm">Horas</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pagedFechColaboradores.totalItems === 0 ? (
+                            <tr>
+                              <td
+                                colSpan={6}
+                                className="px-md py-xl text-center text-on-surface-variant"
+                              >
+                                Sem horas a pagar neste mês.
+                              </td>
+                            </tr>
+                          ) : (
+                            pagedFechColaboradores.items.map((row, index) => (
+                              <tr key={row.id} className="border-t border-outline-variant/60">
+                                <td className="px-md py-sm text-on-surface-variant">
+                                  {(pagedFechColaboradores.page - 1) * fechPageSize + index + 1}
+                                </td>
+                                <td className="px-md py-sm font-medium text-primary">{row.nome}</td>
+                                <td className="px-md py-sm">{row.empresa}</td>
+                                <td className="px-md py-sm text-on-surface-variant">{row.escala}</td>
+                                <td className="px-md py-sm">{row.trocas}</td>
+                                <td className="px-md py-sm text-title-md font-semibold text-primary">
+                                  {formatHours(row.horas)}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <TablePager
+                      page={pagedFechColaboradores.page}
+                      totalPages={pagedFechColaboradores.totalPages}
+                      totalItems={pagedFechColaboradores.totalItems}
+                      pageSize={fechPageSize}
+                      onPageChange={setFechColPage}
+                    />
+                  </div>
 
-              <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
-                <div className="border-b border-outline-variant px-md py-sm">
-                  <h4 className="text-title-md text-primary">Por posto de serviço</h4>
-                </div>
-                <div className="space-y-sm p-md md:hidden">
-                  {pagedFechPostos.totalItems === 0 ? (
-                    <p className="py-lg text-center text-body-md text-on-surface-variant">
-                      Sem lançamentos neste mês.
-                    </p>
-                  ) : (
-                    pagedFechPostos.items.map((row) => (
-                      <article
-                        key={row.id}
-                        className="flex items-center justify-between gap-sm rounded-xl border border-outline-variant bg-surface p-md"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-medium text-primary">{row.nome}</p>
-                          <p className="text-label-md text-on-surface-variant">
-                            {row.trocas} lançamento(s)
-                          </p>
-                        </div>
-                        <p className="shrink-0 text-title-md font-semibold text-primary">
-                          {formatHours(row.horas)}
+                  <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest lg:col-span-2">
+                    <div className="border-b border-outline-variant px-md py-sm">
+                      <h4 className="text-title-md text-primary">Por posto</h4>
+                      <p className="text-label-md text-on-surface-variant">
+                        Horas pagáveis agrupadas no posto.
+                      </p>
+                    </div>
+                    <div className="space-y-sm p-md">
+                      {pagedFechPostos.totalItems === 0 ? (
+                        <p className="py-lg text-center text-body-md text-on-surface-variant">
+                          Sem lançamentos neste mês.
                         </p>
-                      </article>
-                    ))
-                  )}
+                      ) : (
+                        pagedFechPostos.items.map((row) => (
+                          <article
+                            key={row.id}
+                            className="flex items-center justify-between gap-sm rounded-xl border border-outline-variant bg-surface px-md py-sm"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-medium text-primary">{row.nome}</p>
+                              <p className="text-label-md text-on-surface-variant">
+                                {row.trocas} lançamento(s)
+                              </p>
+                            </div>
+                            <p className="shrink-0 text-title-md font-semibold text-primary">
+                              {formatHours(row.horas)}
+                            </p>
+                          </article>
+                        ))
+                      )}
+                    </div>
+                    <TablePager
+                      page={pagedFechPostos.page}
+                      totalPages={pagedFechPostos.totalPages}
+                      totalItems={pagedFechPostos.totalItems}
+                      pageSize={fechPageSize}
+                      onPageChange={setFechPostoPage}
+                    />
+                  </div>
                 </div>
-                <div className="hidden overflow-x-auto md:block">
-                  <table className="min-w-full text-left text-body-md">
-                    <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
-                      <tr>
-                        <th className="px-md py-sm">Posto</th>
-                        <th className="px-md py-sm">Trocas</th>
-                        <th className="px-md py-sm">Horas</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pagedFechPostos.items.map((row) => (
-                        <tr key={row.id} className="border-t border-outline-variant/60">
-                          <td className="px-md py-sm text-primary">{row.nome}</td>
-                          <td className="px-md py-sm">{row.trocas}</td>
-                          <td className="px-md py-sm font-semibold">{formatHours(row.horas)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <TablePager
-                  page={pagedFechPostos.page}
-                  totalPages={pagedFechPostos.totalPages}
-                  totalItems={pagedFechPostos.totalItems}
-                  pageSize={fechPageSize}
-                  onPageChange={setFechPostoPage}
-                />
-              </div>
+              ) : null}
 
-              <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
-                <div className="border-b border-outline-variant px-md py-sm">
-                  <h4 className="text-title-md text-primary">Lançamentos com data</h4>
-                  <p className="text-body-md text-on-surface-variant">
-                    Detalhe do mês — inclui permutas (sem pagamento).
-                  </p>
-                </div>
-                <div className="space-y-sm p-md md:hidden">
-                  {pagedFechLancamentos.totalItems === 0 ? (
-                    <p className="py-lg text-center text-body-md text-on-surface-variant">
-                      Nenhum lançamento neste mês.
+              {fechPanel === "lancamentos" ? (
+                <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
+                  <div className="border-b border-outline-variant px-md py-sm">
+                    <h4 className="text-title-md text-primary">Lançamentos do mês</h4>
+                    <p className="text-label-md text-on-surface-variant">
+                      Todas as trocas do mês, inclusive permutas sem pagamento.
                     </p>
-                  ) : (
-                    pagedFechLancamentos.items.map((row) => (
-                      <article
-                        key={row.id}
-                        className="rounded-xl border border-outline-variant bg-surface p-md"
-                      >
-                        <div className="flex items-start justify-between gap-sm">
-                          <div>
-                            <p className="text-label-md text-on-surface-variant">
-                              {formatDateBr(row.data)} · {row.motivoLabel}
-                            </p>
-                            <p className="mt-xs text-title-md text-primary">{row.postoNome}</p>
-                          </div>
-                          <div className="text-right">
-                            {row.pagaHoras ? (
-                              <p className="text-title-md font-semibold text-primary">
-                                {formatHours(row.horas)}
+                  </div>
+                  <div className="space-y-sm p-md md:hidden">
+                    {pagedFechLancamentos.totalItems === 0 ? (
+                      <p className="py-lg text-center text-body-md text-on-surface-variant">
+                        Nenhum lançamento neste mês.
+                      </p>
+                    ) : (
+                      pagedFechLancamentos.items.map((row) => (
+                        <article
+                          key={row.id}
+                          className="rounded-xl border border-outline-variant bg-surface p-md"
+                        >
+                          <div className="flex items-start justify-between gap-sm">
+                            <div>
+                              <p className="text-label-md text-on-surface-variant">
+                                {formatDateBr(row.data)} · {row.postoNome}
                               </p>
-                            ) : (
-                              <p className="text-label-md font-semibold text-on-surface-variant">
-                                Sem pgto
+                              <p className="mt-xs text-title-md text-primary">
+                                {row.substitutoNome}{" "}
+                                <span className="font-normal text-on-surface-variant">cobriu</span>{" "}
+                                {row.ausenteNome}
                               </p>
-                            )}
-                            {almocoLabel(row) ? (
-                              <p className="text-label-md text-secondary">{almocoLabel(row)}</p>
-                            ) : null}
+                            </div>
+                            <div className="text-right">
+                              <span
+                                className={cn(
+                                  "inline-flex rounded-full px-sm py-2xs text-[10px] font-bold uppercase tracking-wide",
+                                  row.pagaHoras
+                                    ? "bg-amber-100 text-amber-950"
+                                    : "bg-neutral-200 text-neutral-700",
+                                )}
+                              >
+                                {row.pagaHoras ? formatHours(row.horas) : "Sem pgto"}
+                              </span>
+                              <p className="mt-xs text-label-md text-on-surface-variant">
+                                {row.motivoLabel}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                        <div className="mt-sm grid gap-xs text-body-md">
-                          <p>
-                            <span className="text-on-surface-variant">Ausente: </span>
-                            {row.ausenteNome}
-                          </p>
-                          <p>
-                            <span className="text-on-surface-variant">Cobriu: </span>
-                            {row.substitutoNome}
-                          </p>
-                          {row.createdByName ? (
-                            <p>
-                              <span className="text-on-surface-variant">Registrado por: </span>
-                              {row.createdByName}
-                            </p>
+                          {almocoLabel(row) ? (
+                            <p className="mt-sm text-label-md text-secondary">{almocoLabel(row)}</p>
                           ) : null}
                           {hasObservacao(row.observacao) ? (
-                            <p className="text-body-md">
-                              <span className="text-on-surface-variant">Observação: </span>
-                              {row.observacao}
-                            </p>
+                            <button
+                              type="button"
+                              className="mt-sm inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-primary"
+                              onClick={() => setObsDialog(row)}
+                            >
+                              <Icon name="notes" className="text-[16px]" />
+                              Ver observação
+                            </button>
                           ) : null}
-                        </div>
-                        {hasObservacao(row.observacao) ? (
-                          <button
-                            type="button"
-                            className="mt-sm inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-primary"
-                            onClick={() => setObsDialog(row)}
-                          >
-                            <Icon name="notes" className="text-[16px]" />
-                            Ver observação
-                          </button>
-                        ) : null}
-                      </article>
-                    ))
-                  )}
-                </div>
-                <div className="hidden overflow-x-auto md:block">
-                  <table className="min-w-full text-left text-body-md">
-                    <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
-                      <tr>
-                        <th className="px-md py-sm">Data</th>
-                        <th className="px-md py-sm">Posto</th>
-                        <th className="px-md py-sm">Ausente</th>
-                        <th className="px-md py-sm">Substituto</th>
-                        <th className="px-md py-sm">Motivo</th>
-                        <th className="px-md py-sm">Horas</th>
-                        <th className="px-md py-sm">Almoço</th>
-                        <th className="px-md py-sm">Observação</th>
-                        <th className="px-md py-sm">Registrado por</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pagedFechLancamentos.totalItems === 0 ? (
+                        </article>
+                      ))
+                    )}
+                  </div>
+                  <div className="hidden overflow-x-auto md:block">
+                    <table className="min-w-full text-left text-body-md">
+                      <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                         <tr>
-                          <td colSpan={9} className="px-md py-xl text-center text-on-surface-variant">
-                            Nenhum lançamento neste mês.
-                          </td>
+                          <th className="px-md py-sm">Data</th>
+                          <th className="px-md py-sm">Posto</th>
+                          <th className="px-md py-sm">Ausente</th>
+                          <th className="px-md py-sm">Substituto</th>
+                          <th className="px-md py-sm">Motivo</th>
+                          <th className="px-md py-sm">Status</th>
+                          <th className="px-md py-sm">Almoço</th>
+                          <th className="px-md py-sm">Obs.</th>
                         </tr>
-                      ) : (
-                        pagedFechLancamentos.items.map((row) => (
-                          <tr key={row.id} className="border-t border-outline-variant/60">
-                            <td className="px-md py-sm whitespace-nowrap">{formatDateBr(row.data)}</td>
-                            <td className="px-md py-sm text-primary">{row.postoNome}</td>
-                            <td className="px-md py-sm">
-                              <div>{row.ausenteNome}</div>
-                              <div className="text-label-md text-on-surface-variant">
-                                {row.ausenteEmpresa}
-                              </div>
-                            </td>
-                            <td className="px-md py-sm">
-                              <div>{row.substitutoNome}</div>
-                              <div className="text-label-md text-on-surface-variant">
-                                {row.substitutoEmpresa}
-                              </div>
-                            </td>
-                            <td className="px-md py-sm">{row.motivoLabel}</td>
-                            <td className="px-md py-sm font-semibold">
-                              {row.pagaHoras ? (
-                                `${formatHours(row.horas)}`
-                              ) : (
-                                <span className="text-label-md text-on-surface-variant">
-                                  Sem pagamento
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-md py-sm text-secondary">
-                              {almocoLabel(row) ?? "—"}
-                            </td>
-                            <td className="px-md py-sm">
-                              {hasObservacao(row.observacao) ? (
-                                <button
-                                  type="button"
-                                  className="inline-flex max-w-[14rem] items-center gap-xs text-left text-label-md font-semibold text-primary hover:underline"
-                                  onClick={() => setObsDialog(row)}
-                                  title={row.observacao ?? undefined}
-                                >
-                                  <Icon name="notes" className="shrink-0 text-[16px]" />
-                                  <span className="truncate">{row.observacao}</span>
-                                </button>
-                              ) : (
-                                <span className="text-on-surface-variant">—</span>
-                              )}
-                            </td>
-                            <td className="px-md py-sm text-on-surface-variant">
-                              {row.createdByName ?? "—"}
+                      </thead>
+                      <tbody>
+                        {pagedFechLancamentos.totalItems === 0 ? (
+                          <tr>
+                            <td
+                              colSpan={8}
+                              className="px-md py-xl text-center text-on-surface-variant"
+                            >
+                              Nenhum lançamento neste mês.
                             </td>
                           </tr>
+                        ) : (
+                          pagedFechLancamentos.items.map((row) => (
+                            <tr key={row.id} className="border-t border-outline-variant/60">
+                              <td className="whitespace-nowrap px-md py-sm">
+                                {formatDateBr(row.data)}
+                              </td>
+                              <td className="px-md py-sm text-primary">{row.postoNome}</td>
+                              <td className="px-md py-sm">
+                                <div className="font-medium">{row.ausenteNome}</div>
+                                <div className="text-label-md text-on-surface-variant">
+                                  {row.ausenteEmpresa}
+                                </div>
+                              </td>
+                              <td className="px-md py-sm">
+                                <div className="font-medium">{row.substitutoNome}</div>
+                                <div className="text-label-md text-on-surface-variant">
+                                  {row.substitutoEmpresa}
+                                </div>
+                              </td>
+                              <td className="px-md py-sm">{row.motivoLabel}</td>
+                              <td className="px-md py-sm">
+                                <span
+                                  className={cn(
+                                    "inline-flex rounded-full px-sm py-2xs text-[10px] font-bold uppercase tracking-wide",
+                                    row.pagaHoras
+                                      ? "bg-amber-100 text-amber-950"
+                                      : "bg-neutral-200 text-neutral-700",
+                                  )}
+                                >
+                                  {row.pagaHoras ? formatHours(row.horas) : "Sem pgto"}
+                                </span>
+                              </td>
+                              <td className="px-md py-sm text-secondary">
+                                {almocoLabel(row) ?? "—"}
+                              </td>
+                              <td className="px-md py-sm">
+                                {hasObservacao(row.observacao) ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-xs text-label-md font-semibold text-primary hover:underline"
+                                    onClick={() => setObsDialog(row)}
+                                    title={row.observacao ?? undefined}
+                                  >
+                                    <Icon name="notes" className="text-[16px]" />
+                                    Ver
+                                  </button>
+                                ) : (
+                                  <span className="text-on-surface-variant">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <TablePager
+                    page={pagedFechLancamentos.page}
+                    totalPages={pagedFechLancamentos.totalPages}
+                    totalItems={pagedFechLancamentos.totalItems}
+                    pageSize={fechPageSize}
+                    onPageChange={setFechLancPage}
+                  />
+                </div>
+              ) : null}
+
+              {fechPanel === "ferias" ? (
+                <div className="space-y-md">
+                  <div className="overflow-hidden rounded-xl border border-sky-200 bg-sky-50/40">
+                    <div className="border-b border-sky-200 px-md py-sm">
+                      <h4 className="text-title-md text-sky-950">Férias no mês</h4>
+                      <p className="text-label-md text-sky-900/80">
+                        {data.summary.ferias ?? 0} período(s) · {data.summary.feriasDias ?? 0} dia(s)
+                        · {formatHours(data.summary.feriasHoras ?? 0)}
+                        {(data.summary.feriasCoberturaPropria ?? 0) > 0
+                          ? ` · ${data.summary.feriasCoberturaPropria} cobertura(s) própria(s)`
+                          : ""}
+                      </p>
+                    </div>
+                    <div className="space-y-sm p-md md:hidden">
+                      {(data.vacations ?? []).length === 0 ? (
+                        <p className="py-lg text-center text-body-md text-on-surface-variant">
+                          Sem férias neste mês.
+                        </p>
+                      ) : (
+                        (data.vacations ?? []).map((row) => (
+                          <article
+                            key={row.id}
+                            className="rounded-xl border border-sky-200 bg-white p-md"
+                          >
+                            <p className="font-medium text-primary">{row.colaboradorNome}</p>
+                            <p className="text-label-md text-on-surface-variant">
+                              {formatDateBr(row.dataInicio)} → {formatDateBr(row.dataFim)} ·{" "}
+                              {row.dias} dia(s) · {formatHours(row.horas)}
+                            </p>
+                            <p className="mt-2xs text-label-md text-on-surface-variant">
+                              Cobertura: {row.coberturaNome}
+                              {row.coberturaPropria ? " (própria)" : ""} · {row.postoNome}
+                            </p>
+                          </article>
                         ))
                       )}
-                    </tbody>
-                  </table>
+                    </div>
+                    <div className="hidden overflow-x-auto md:block">
+                      <table className="min-w-full text-left text-body-md">
+                        <thead className="bg-sky-900 text-label-md font-semibold uppercase tracking-wide text-white">
+                          <tr>
+                            <th className="px-md py-sm">Período</th>
+                            <th className="px-md py-sm">Em férias</th>
+                            <th className="px-md py-sm">Cobertura</th>
+                            <th className="px-md py-sm">Posto</th>
+                            <th className="px-md py-sm">Dias</th>
+                            <th className="px-md py-sm">Horas</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(data.vacations ?? []).length === 0 ? (
+                            <tr>
+                              <td
+                                colSpan={6}
+                                className="px-md py-xl text-center text-on-surface-variant"
+                              >
+                                Sem férias neste mês.
+                              </td>
+                            </tr>
+                          ) : (
+                            (data.vacations ?? []).map((row) => (
+                              <tr key={row.id} className="border-t border-sky-100 bg-white">
+                                <td className="whitespace-nowrap px-md py-sm">
+                                  {formatDateBr(row.dataInicio)} → {formatDateBr(row.dataFim)}
+                                </td>
+                                <td className="px-md py-sm font-medium text-primary">
+                                  {row.colaboradorNome}
+                                </td>
+                                <td className="px-md py-sm">
+                                  {row.coberturaNome}
+                                  {row.coberturaPropria ? (
+                                    <span className="ml-xs rounded-full bg-sky-100 px-xs py-2xs text-[10px] font-bold uppercase text-sky-900">
+                                      Própria
+                                    </span>
+                                  ) : null}
+                                </td>
+                                <td className="px-md py-sm">{row.postoNome}</td>
+                                <td className="px-md py-sm">{row.dias}</td>
+                                <td className="px-md py-sm font-semibold">
+                                  {formatHours(row.horas)}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {(data.summary.byCoberturaFerias ?? []).length > 0 ? (
+                    <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
+                      <div className="border-b border-outline-variant px-md py-sm">
+                        <h4 className="text-title-md text-primary">Resumo por quem cobriu</h4>
+                      </div>
+                      <div className="hidden overflow-x-auto md:block">
+                        <table className="min-w-full text-left text-body-md">
+                          <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
+                            <tr>
+                              <th className="px-md py-sm">Cobertura</th>
+                              <th className="px-md py-sm">Empresa</th>
+                              <th className="px-md py-sm">Períodos</th>
+                              <th className="px-md py-sm">Dias</th>
+                              <th className="px-md py-sm">Horas</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pagedFechFerias.items.map((row) => (
+                              <tr key={row.id} className="border-t border-outline-variant/60">
+                                <td className="px-md py-sm font-medium text-primary">{row.nome}</td>
+                                <td className="px-md py-sm">{row.empresa}</td>
+                                <td className="px-md py-sm">{row.ferias}</td>
+                                <td className="px-md py-sm">{row.dias}</td>
+                                <td className="px-md py-sm font-semibold">
+                                  {formatHours(row.horas)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="space-y-sm p-md md:hidden">
+                        {pagedFechFerias.items.map((row) => (
+                          <article
+                            key={row.id}
+                            className="flex items-center justify-between gap-sm rounded-xl border border-outline-variant bg-surface p-md"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-medium text-primary">{row.nome}</p>
+                              <p className="text-label-md text-on-surface-variant">
+                                {row.empresa} · {row.dias} dia(s)
+                              </p>
+                            </div>
+                            <p className="shrink-0 font-semibold text-primary">
+                              {formatHours(row.horas)}
+                            </p>
+                          </article>
+                        ))}
+                      </div>
+                      <TablePager
+                        page={pagedFechFerias.page}
+                        totalPages={pagedFechFerias.totalPages}
+                        totalItems={pagedFechFerias.totalItems}
+                        pageSize={fechPageSize}
+                        onPageChange={setFechFeriasPage}
+                      />
+                    </div>
+                  ) : null}
                 </div>
-                <TablePager
-                  page={pagedFechLancamentos.page}
-                  totalPages={pagedFechLancamentos.totalPages}
-                  totalItems={pagedFechLancamentos.totalItems}
-                  pageSize={fechPageSize}
-                  onPageChange={setFechLancPage}
-                />
-              </div>
+              ) : null}
             </section>
           )}
         </div>

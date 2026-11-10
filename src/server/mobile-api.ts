@@ -1,0 +1,638 @@
+import { authenticateUser } from "@/db/users";
+import {
+  createMobileSession,
+  revokeMobileSession,
+  upsertMobileDeviceToken,
+} from "@/db/mobile";
+import {
+  assertOsOwnedByTecnico,
+  listOsForTecnico,
+} from "@/db/mobile-os";
+import {
+  checkInOs,
+  checkOutOs,
+  pauseOs,
+  resumeOs,
+  startExecOs,
+} from "@/db/assistencia";
+import {
+  createReading,
+  createRefueling,
+  createService,
+  ensureFleetCatalogDefaults,
+  ensureFleetDriverForUser,
+  getFleetVehicleById,
+  listFleetCatalog,
+  listVehicleHistory,
+} from "@/db/frota";
+import { ensureSchema, type AppUser } from "@/db/schema";
+import {
+  jsonError,
+  jsonOk,
+  mobileOsRoles,
+  readJsonBody,
+  requireMobileTecnico,
+} from "@/server/mobile-auth";
+
+function publicUser(user: AppUser) {
+  return {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    isTecnico: user.isTecnico,
+    defaultVehicleId: user.defaultVehicleId,
+  };
+}
+
+function serializeOs(os: Awaited<ReturnType<typeof assertOsOwnedByTecnico>> extends {
+  ok: true;
+  os: infer O;
+}
+  ? O
+  : never) {
+  return {
+    id: os.id,
+    num: os.num,
+    tipo: os.tipo,
+    subtipo: os.subtipo,
+    stage: os.stage,
+    clientName: os.clientName,
+    clientCity: os.clientCity,
+    clientAddress: os.clientAddress,
+    servico: os.servico,
+    teamId: os.teamId,
+    teamName: os.teamName ?? null,
+    tecnicoNome: os.tecnicoNome,
+    agDate: os.agDate,
+    periodo: os.periodo,
+    hora: os.hora,
+    ciAt: os.ciAt,
+    coAt: os.coAt,
+    pausedAt: os.pausedAt,
+    pauseMotivo: os.pauseMotivo,
+    resolucao: os.resolucao,
+    items: os.items.map((i) => ({
+      id: i.id,
+      qtd: i.qtd,
+      nome: i.nome,
+      status: i.status,
+    })),
+    events: (os.events ?? []).map((e) => ({
+      id: e.id,
+      quem: e.quem,
+      acao: e.acao,
+      quando: e.quando,
+    })),
+    updatedAt: os.updatedAt,
+  };
+}
+
+export async function handleMobileLogin(request: Request) {
+  await ensureSchema();
+  const body = await readJsonBody<{ username?: string; password?: string }>(request);
+  const username = body?.username?.trim() ?? "";
+  const password = body?.password ?? "";
+  if (!username || !password) {
+    return jsonError("Informe usuário e senha.");
+  }
+  const user = await authenticateUser(username, password);
+  if (!user) return jsonError("Usuário ou senha inválidos.", 401);
+  if (!user.isTecnico) {
+    return jsonError("Acesso restrito a técnicos.", 403);
+  }
+  const session = await createMobileSession(user.id);
+  return jsonOk({
+    ok: true,
+    token: session.token,
+    expiresAt: session.expiresAt,
+    user: publicUser(user),
+  });
+}
+
+export async function handleMobileLogout(request: Request) {
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) {
+    // ainda assim tenta limpar se houver bearer inválido
+    return jsonOk({ ok: true });
+  }
+  await revokeMobileSession(auth.token);
+  return jsonOk({ ok: true });
+}
+
+export async function handleMobileMe(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  let vehicle = null;
+  if (auth.user.defaultVehicleId) {
+    vehicle = await getFleetVehicleById(auth.user.defaultVehicleId);
+  }
+  return jsonOk({
+    ok: true,
+    user: publicUser(auth.user),
+    vehicle,
+  });
+}
+
+export async function handleMobileDeviceToken(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const body = await readJsonBody<{
+    expoPushToken?: string;
+    platform?: string;
+  }>(request);
+  if (!body?.expoPushToken?.trim()) {
+    return jsonError("expoPushToken obrigatório.");
+  }
+  await upsertMobileDeviceToken({
+    userId: auth.user.id,
+    expoPushToken: body.expoPushToken,
+    platform: body.platform,
+  });
+  return jsonOk({ ok: true });
+}
+
+export async function handleMobileListOs(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const url = new URL(request.url);
+  const stageRaw = url.searchParams.get("stage");
+  const stage = stageRaw ? Number(stageRaw) : null;
+  const list = await listOsForTecnico({
+    userId: auth.user.id,
+    userName: auth.user.name,
+    stage: Number.isFinite(stage as number) ? stage : null,
+  });
+  return jsonOk({
+    ok: true,
+    items: list.map((os) => serializeOs(os)),
+  });
+}
+
+export async function handleMobileGetOs(request: Request, osId: number) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const owned = await assertOsOwnedByTecnico(osId, auth.user);
+  if (!owned.ok) return jsonError(owned.error, 404);
+  return jsonOk({ ok: true, os: serializeOs(owned.os) });
+}
+
+async function withOwnedOs(
+  request: Request,
+  osId: number,
+  run: (
+    user: AppUser,
+    os: NonNullable<Awaited<ReturnType<typeof assertOsOwnedByTecnico>> extends { ok: true; os: infer O } ? O : never>,
+  ) => Promise<Response>,
+) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const owned = await assertOsOwnedByTecnico(osId, auth.user);
+  if (!owned.ok) return jsonError(owned.error, 404);
+  try {
+    return await run(auth.user, owned.os);
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Falha na operação.");
+  }
+}
+
+export async function handleMobileStartOs(request: Request, osId: number) {
+  return withOwnedOs(request, osId, async (user) => {
+    const body = await readJsonBody<{ materialOk?: boolean }>(request);
+    const roles = mobileOsRoles(user);
+    const os = await startExecOs({
+      osId,
+      materialOk: body?.materialOk ?? true,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+    return jsonOk({ ok: true, os: serializeOs(os!) });
+  });
+}
+
+export async function handleMobileCheckInOs(request: Request, osId: number) {
+  return withOwnedOs(request, osId, async (user) => {
+    const roles = mobileOsRoles(user);
+    const os = await checkInOs({
+      osId,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+    return jsonOk({ ok: true, os: serializeOs(os!) });
+  });
+}
+
+export async function handleMobilePauseOs(request: Request, osId: number) {
+  return withOwnedOs(request, osId, async (user) => {
+    const body = await readJsonBody<{ motivo?: string }>(request);
+    const roles = mobileOsRoles(user);
+    const os = await pauseOs({
+      osId,
+      motivo: body?.motivo ?? "",
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+    return jsonOk({ ok: true, os: serializeOs(os!) });
+  });
+}
+
+export async function handleMobileResumeOs(request: Request, osId: number) {
+  return withOwnedOs(request, osId, async (user) => {
+    const roles = mobileOsRoles(user);
+    const os = await resumeOs({
+      osId,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+    return jsonOk({ ok: true, os: serializeOs(os!) });
+  });
+}
+
+export async function handleMobileCheckOutOs(request: Request, osId: number) {
+  return withOwnedOs(request, osId, async (user) => {
+    const body = await readJsonBody<{
+      resolucao?: string;
+      fotos?: string[];
+      anexos?: Array<{ name: string; mime: string; data: string }>;
+      clientActionId?: string;
+    }>(request);
+    const roles = mobileOsRoles(user);
+    const os = await checkOutOs({
+      osId,
+      resolucao: body?.resolucao ?? "",
+      fotos: body?.fotos,
+      anexos: body?.anexos,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+    return jsonOk({
+      ok: true,
+      os: serializeOs(os!),
+      clientActionId: body?.clientActionId ?? null,
+    });
+  });
+}
+
+export async function handleMobileFrotaVeiculo(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  if (!auth.user.defaultVehicleId) {
+    return jsonOk({ ok: true, vehicle: null, catalog: null, history: [] });
+  }
+  await ensureFleetCatalogDefaults();
+  const vehicle = await getFleetVehicleById(auth.user.defaultVehicleId);
+  const [fuel, service, payment] = await Promise.all([
+    listFleetCatalog("fuel"),
+    listFleetCatalog("service"),
+    listFleetCatalog("payment"),
+  ]);
+  const history = vehicle
+    ? await listVehicleHistory(vehicle.id, 40)
+    : [];
+  return jsonOk({
+    ok: true,
+    vehicle,
+    catalog: { fuel, service, payment },
+    history,
+  });
+}
+
+async function requireDefaultVehicle(user: AppUser) {
+  if (!user.defaultVehicleId) {
+    throw new Error("Nenhum veículo setado na frota para o seu usuário.");
+  }
+  const vehicle = await getFleetVehicleById(user.defaultVehicleId);
+  if (!vehicle || !vehicle.active) {
+    throw new Error("Veículo da frota indisponível.");
+  }
+  return vehicle;
+}
+
+export async function handleMobileFrotaKm(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  try {
+    const body = await readJsonBody<{
+      odometer?: number;
+      occurredAt?: string;
+      reason?: string;
+      notes?: string;
+      clientActionId?: string;
+    }>(request);
+    const vehicle = await requireDefaultVehicle(auth.user);
+    const driver = await ensureFleetDriverForUser(auth.user);
+    const id = await createReading({
+      vehicleId: vehicle.id,
+      driverId: driver.id,
+      occurredAt: body?.occurredAt || new Date().toISOString(),
+      odometer: Number(body?.odometer),
+      kind: "daily_km",
+      reason: body?.reason?.trim() || "Lançamento app técnico",
+      notes: body?.notes ?? null,
+      createdBy: auth.user.id,
+    });
+    return jsonOk({ ok: true, id, clientActionId: body?.clientActionId ?? null });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Falha ao lançar KM.");
+  }
+}
+
+export async function handleMobileFrotaAbastecimento(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  try {
+    const body = await readJsonBody<{
+      odometer?: number;
+      occurredAt?: string;
+      fuelType?: string;
+      pricePerLiter?: number;
+      totalAmount?: number;
+      liters?: number;
+      fullTank?: boolean;
+      station?: string;
+      paymentMethod?: string;
+      notes?: string;
+      clientActionId?: string;
+    }>(request);
+    const vehicle = await requireDefaultVehicle(auth.user);
+    const driver = await ensureFleetDriverForUser(auth.user);
+    const liters = Number(body?.liters);
+    const totalAmount = Number(body?.totalAmount);
+    const pricePerLiter =
+      body?.pricePerLiter != null
+        ? Number(body.pricePerLiter)
+        : liters > 0
+          ? totalAmount / liters
+          : 0;
+    const id = await createRefueling({
+      vehicleId: vehicle.id,
+      driverId: driver.id,
+      occurredAt: body?.occurredAt || new Date().toISOString(),
+      odometer: Number(body?.odometer),
+      fuelType: body?.fuelType?.trim() || "Gas. Comum",
+      pricePerLiter,
+      totalAmount,
+      liters,
+      fullTank: body?.fullTank ?? false,
+      station: body?.station ?? null,
+      reason: null,
+      paymentMethod: body?.paymentMethod ?? null,
+      discount: 0,
+      previousMissing: false,
+      notes: body?.notes ?? null,
+      photos: [],
+      createdBy: auth.user.id,
+    });
+    return jsonOk({ ok: true, id, clientActionId: body?.clientActionId ?? null });
+  } catch (error) {
+    return jsonError(
+      error instanceof Error ? error.message : "Falha ao lançar abastecimento.",
+    );
+  }
+}
+
+export async function handleMobileFrotaServico(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  try {
+    const body = await readJsonBody<{
+      odometer?: number | null;
+      occurredAt?: string;
+      title?: string;
+      serviceType?: string;
+      amount?: number;
+      location?: string;
+      paymentMethod?: string;
+      notes?: string;
+      clientActionId?: string;
+    }>(request);
+    const vehicle = await requireDefaultVehicle(auth.user);
+    const driver = await ensureFleetDriverForUser(auth.user);
+    const id = await createService({
+      vehicleId: vehicle.id,
+      driverId: driver.id,
+      occurredAt: body?.occurredAt || new Date().toISOString(),
+      odometer: body?.odometer == null ? null : Number(body.odometer),
+      title: body?.title ?? null,
+      serviceType: body?.serviceType?.trim() || "Outros",
+      amount: Number(body?.amount ?? 0),
+      discount: 0,
+      installments: null,
+      location: body?.location ?? null,
+      paymentMethod: body?.paymentMethod ?? null,
+      notes: body?.notes ?? null,
+      createdBy: auth.user.id,
+    });
+    return jsonOk({ ok: true, id, clientActionId: body?.clientActionId ?? null });
+  } catch (error) {
+    return jsonError(error instanceof Error ? error.message : "Falha ao lançar serviço.");
+  }
+}
+
+export async function handleMobileSyncBatch(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const body = await readJsonBody<{
+    actions?: Array<{
+      id: string;
+      type: string;
+      osId?: number;
+      payload?: Record<string, unknown>;
+      createdAt?: string;
+    }>;
+  }>(request);
+  const actions = body?.actions ?? [];
+  const results: Array<{
+    id: string;
+    ok: boolean;
+    error?: string;
+    data?: unknown;
+  }> = [];
+
+  for (const action of actions) {
+    try {
+      const res = await applySyncAction(auth.user, action);
+      results.push({ id: action.id, ok: true, data: res });
+    } catch (error) {
+      results.push({
+        id: action.id,
+        ok: false,
+        error: error instanceof Error ? error.message : "Falha",
+      });
+    }
+  }
+  return jsonOk({ ok: true, results });
+}
+
+async function applySyncAction(
+  user: AppUser,
+  action: {
+    id: string;
+    type: string;
+    osId?: number;
+    payload?: Record<string, unknown>;
+  },
+) {
+  const roles = mobileOsRoles(user);
+  const payload = action.payload ?? {};
+
+  if (action.type.startsWith("os_")) {
+    if (!action.osId) throw new Error("osId obrigatório.");
+    const owned = await assertOsOwnedByTecnico(action.osId, user);
+    if (!owned.ok) throw new Error(owned.error);
+
+    if (action.type === "os_start") {
+      return serializeOs(
+        (await startExecOs({
+          osId: action.osId,
+          materialOk: Boolean(payload.materialOk ?? true),
+          quem: user.name,
+          userId: user.id,
+          isAdmin: roles.isAdmin,
+          canRole: roles.canRole,
+        }))!,
+      );
+    }
+    if (action.type === "os_check_in") {
+      return serializeOs(
+        (await checkInOs({
+          osId: action.osId,
+          quem: user.name,
+          userId: user.id,
+          isAdmin: roles.isAdmin,
+          canRole: roles.canRole,
+        }))!,
+      );
+    }
+    if (action.type === "os_pause") {
+      return serializeOs(
+        (await pauseOs({
+          osId: action.osId,
+          motivo: String(payload.motivo ?? ""),
+          quem: user.name,
+          userId: user.id,
+          isAdmin: roles.isAdmin,
+          canRole: roles.canRole,
+        }))!,
+      );
+    }
+    if (action.type === "os_resume") {
+      return serializeOs(
+        (await resumeOs({
+          osId: action.osId,
+          quem: user.name,
+          userId: user.id,
+          isAdmin: roles.isAdmin,
+          canRole: roles.canRole,
+        }))!,
+      );
+    }
+    if (action.type === "os_check_out") {
+      return serializeOs(
+        (await checkOutOs({
+          osId: action.osId,
+          resolucao: String(payload.resolucao ?? ""),
+          fotos: Array.isArray(payload.fotos)
+            ? (payload.fotos as string[])
+            : undefined,
+          anexos: Array.isArray(payload.anexos)
+            ? (payload.anexos as Array<{ name: string; mime: string; data: string }>)
+            : undefined,
+          quem: user.name,
+          userId: user.id,
+          isAdmin: roles.isAdmin,
+          canRole: roles.canRole,
+        }))!,
+      );
+    }
+    throw new Error(`Ação O.S. desconhecida: ${action.type}`);
+  }
+
+  if (action.type === "frota_km" || action.type === "frota_abastecimento" || action.type === "frota_servico") {
+    const vehicle = await requireDefaultVehicle(user);
+    const driver = await ensureFleetDriverForUser(user);
+    if (action.type === "frota_km") {
+      const id = await createReading({
+        vehicleId: vehicle.id,
+        driverId: driver.id,
+        occurredAt: String(payload.occurredAt || new Date().toISOString()),
+        odometer: Number(payload.odometer),
+        kind: "daily_km",
+        reason: String(payload.reason || "Lançamento offline app técnico"),
+        notes: payload.notes == null ? null : String(payload.notes),
+        createdBy: user.id,
+      });
+      return { id };
+    }
+    if (action.type === "frota_abastecimento") {
+      const liters = Number(payload.liters);
+      const totalAmount = Number(payload.totalAmount);
+      const pricePerLiter =
+        payload.pricePerLiter != null
+          ? Number(payload.pricePerLiter)
+          : liters > 0
+            ? totalAmount / liters
+            : 0;
+      const id = await createRefueling({
+        vehicleId: vehicle.id,
+        driverId: driver.id,
+        occurredAt: String(payload.occurredAt || new Date().toISOString()),
+        odometer: Number(payload.odometer),
+        fuelType: String(payload.fuelType || "Gas. Comum"),
+        pricePerLiter,
+        totalAmount,
+        liters,
+        fullTank: Boolean(payload.fullTank),
+        station: payload.station == null ? null : String(payload.station),
+        reason: null,
+        paymentMethod:
+          payload.paymentMethod == null ? null : String(payload.paymentMethod),
+        discount: 0,
+        previousMissing: false,
+        notes: payload.notes == null ? null : String(payload.notes),
+        photos: [],
+        createdBy: user.id,
+      });
+      return { id };
+    }
+    const id = await createService({
+      vehicleId: vehicle.id,
+      driverId: driver.id,
+      occurredAt: String(payload.occurredAt || new Date().toISOString()),
+      odometer: payload.odometer == null ? null : Number(payload.odometer),
+      title: payload.title == null ? null : String(payload.title),
+      serviceType: String(payload.serviceType || "Outros"),
+      amount: Number(payload.amount ?? 0),
+      discount: 0,
+      installments: null,
+      location: payload.location == null ? null : String(payload.location),
+      paymentMethod:
+        payload.paymentMethod == null ? null : String(payload.paymentMethod),
+      notes: payload.notes == null ? null : String(payload.notes),
+      createdBy: user.id,
+    });
+    return { id };
+  }
+
+  throw new Error(`Ação desconhecida: ${action.type}`);
+}

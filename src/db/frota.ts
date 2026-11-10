@@ -213,6 +213,14 @@ export async function listFleetVehicles(activeOnly = true) {
   return rows.map(mapVehicle);
 }
 
+export async function getFleetVehicleById(id: number) {
+  const db = await getDb();
+  const [row] = (await db`
+    select * from fleet_vehicles where id = ${id} limit 1
+  `) as Array<Record<string, unknown>>;
+  return row ? mapVehicle(row) : null;
+}
+
 export async function listFleetDrivers(activeOnly = true) {
   const db = await getDb();
   const rows = (await db`

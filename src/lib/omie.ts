@@ -35,12 +35,14 @@ export const getOmieAppsFn = createServerFn({ method: "GET" }).handler(async () 
 export const getDashboardFn = createServerFn({ method: "GET" }).handler(async () => {
   const { requireModule } = await import("@/lib/require-auth");
   await requireModule("dashboard");
-  const [stats, syncLogs, apps] = await Promise.all([
+  const { getOpsDashboardData } = await import("@/db/dashboard-ops");
+  const [stats, syncLogs, apps, ops] = await Promise.all([
     getDashboardStats(),
     getLastSyncLogs(5),
     Promise.resolve(listOmieApps()),
+    getOpsDashboardData(),
   ]);
-  return { stats, syncLogs, appsConfigured: apps.length };
+  return { stats, syncLogs, appsConfigured: apps.length, ops };
 });
 
 export const listDueItemsFn = createServerFn({ method: "GET" }).handler(async () => {
@@ -51,16 +53,48 @@ export const listDueItemsFn = createServerFn({ method: "GET" }).handler(async ()
 });
 
 export const listNotificationLogsFn = createServerFn({ method: "GET" })
-  .validator((input) => z.object({ page: z.coerce.number().int().min(1).optional() }).parse(input ?? {}))
+  .validator((input) =>
+    z
+      .object({
+        page: z.coerce.number().int().min(1).optional(),
+        client: z.string().trim().max(120).optional().nullable(),
+        appId: z.string().trim().max(80).optional().nullable(),
+        itemType: z.enum(["all", "boleto", "nfe", "nfse"]).optional().nullable(),
+        kind: z.enum(["all", "pre_due", "overdue"]).optional().nullable(),
+        status: z.enum(["all", "ok", "fail"]).optional().nullable(),
+        sentFrom: z.string().trim().max(10).optional().nullable(),
+        sentTo: z.string().trim().max(10).optional().nullable(),
+        phone: z.string().trim().max(30).optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
   .handler(async ({ data }) => {
     const { requireModule } = await import("@/lib/require-auth");
     await requireModule("notificacoes");
-    return listNotificationLogsPaginated(data.page ?? 1, 15);
+    return listNotificationLogsPaginated({
+      page: data.page ?? 1,
+      pageSize: 15,
+      client: data.client ?? null,
+      appId: data.appId ?? null,
+      itemType: data.itemType ?? "all",
+      kind: data.kind ?? "all",
+      status: data.status ?? "all",
+      sentFrom: data.sentFrom ?? null,
+      sentTo: data.sentTo ?? null,
+      phone: data.phone ?? null,
+    });
   });
 
 export const syncOmieFn = createServerFn({ method: "POST" }).handler(async () => {
   const { requireAdmin } = await import("@/lib/require-auth");
   await requireAdmin();
+  return runManualSync();
+});
+
+/** Sync de boletos/notas — disponível para quem usa Vencimentos (faturamento). */
+export const syncDueItemsFn = createServerFn({ method: "POST" }).handler(async () => {
+  const { requireModule } = await import("@/lib/require-auth");
+  await requireModule("vencimentos");
   return runManualSync();
 });
 
