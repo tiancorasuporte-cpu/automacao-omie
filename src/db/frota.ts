@@ -888,7 +888,11 @@ export async function listVehicleHistory(vehicleId: number, limit = 200): Promis
     union all
     (
       select r.id, 'reading', r.vehicle_id, r.occurred_at::text,
-             'KM do dia',
+             case
+               when lower(coalesce(r.kind, '')) = 'entrada' then 'KM · Entrada'
+               when lower(coalesce(r.kind, '')) in ('saida', 'saída') then 'KM · Saída'
+               else 'KM do dia'
+             end,
              trim(both ' · ' from concat_ws(' · ',
                case
                  when r.prev_odo is null then 'Primeira leitura'

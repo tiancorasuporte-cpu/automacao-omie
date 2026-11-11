@@ -860,13 +860,26 @@ async function applySyncAction(
     const vehicle = await requireDefaultVehicle(user);
     const driver = await ensureFleetDriverForUser(user);
     if (action.type === "frota_km") {
+      const kindRaw = String(payload.kind ?? "daily_km").trim().toLowerCase();
+      const kind =
+        kindRaw === "entrada" || kindRaw === "saida" || kindRaw === "saída"
+          ? kindRaw === "saída"
+            ? "saida"
+            : kindRaw
+          : "daily_km";
+      const defaultReason =
+        kind === "entrada"
+          ? "Entrada"
+          : kind === "saida"
+            ? "Saída"
+            : "Lançamento offline app técnico";
       const id = await createReading({
         vehicleId: vehicle.id,
         driverId: driver.id,
         occurredAt: String(payload.occurredAt || new Date().toISOString()),
         odometer: Number(payload.odometer),
-        kind: "daily_km",
-        reason: String(payload.reason || "Lançamento offline app técnico"),
+        kind,
+        reason: String(payload.reason || defaultReason),
         notes: payload.notes == null ? null : String(payload.notes),
         createdBy: user.id,
       });
