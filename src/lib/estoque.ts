@@ -32,9 +32,15 @@ export const listEstoqueFn = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     const { requireModule } = await import("@/lib/require-auth");
     await requireModule("estoque");
-    const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
+    const { listOrcamentosOmieApps, requireOrcamentosOmieApp } = await import(
+      "@/server/omie/client"
+    );
     const { listProductStock, countProductStock } = await import("@/db/stock");
-    const app = requireOrcamentosOmieApp();
+    const apps = listOrcamentosOmieApps();
+    const requestedAppId = data.omieAppId?.trim() || "";
+    const app =
+      (requestedAppId ? apps.find((a) => a.id === requestedAppId) : null) ??
+      requireOrcamentosOmieApp();
     const filters = {
       omieAppId: app.id,
       ...(data.query ? { query: data.query } : {}),
@@ -247,6 +253,24 @@ export const emitMatSaidaFn = createServerFn({ method: "POST" })
       itens: data.itens,
       userId: user.id,
       userName: user.name,
+    });
+  });
+
+export const confirmMatSaidaFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z.object({ saidaId: z.number().int().positive() }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    const { user } = await requireModule("estoque");
+    const { ensureSchema } = await import("@/db/schema");
+    await ensureSchema();
+    const { confirmMatSaida } = await import("@/db/mat-saidas");
+    return confirmMatSaida({
+      saidaId: data.saidaId,
+      userId: user.id,
+      userName: user.name,
+      allowAnyTeam: true,
     });
   });
 

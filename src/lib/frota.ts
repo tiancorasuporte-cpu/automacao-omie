@@ -10,6 +10,8 @@ import {
   createRefueling,
   createRoute,
   createService,
+  deleteFleetVehicle,
+  deleteReading,
   ensureFleetCatalogDefaults,
   ensureFleetDriverForUser,
   getFleetReportTotals,
@@ -23,6 +25,7 @@ import {
   saveFleetDriver,
   saveFleetVehicle,
   saveReminder,
+  updateReading,
 } from "@/db/frota";
 import { requireModule } from "@/lib/require-auth";
 
@@ -150,6 +153,50 @@ export const saveFleetVehicleFn = createServerFn({ method: "POST" })
       active: data.active ?? true,
     });
     return { ok: true as const, id };
+  });
+
+export const deleteFleetVehicleFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z.object({ id: z.number().int().positive() }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    return deleteFleetVehicle(data.id);
+  });
+
+export const updateReadingFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive(),
+        odometer: z.number(),
+        occurredAt: z.string().optional().nullable(),
+        reason: z.string().trim().min(1, "Informe o motivo da atualização."),
+        notes: z.string().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    return updateReading({
+      id: data.id,
+      odometer: data.odometer,
+      occurredAt: data.occurredAt ?? null,
+      reason: data.reason,
+      notes: data.notes ?? null,
+    });
+  });
+
+export const deleteReadingFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z.object({ id: z.number().int().positive() }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    return deleteReading(data.id);
   });
 
 export const saveFleetDriverFn = createServerFn({ method: "POST" })

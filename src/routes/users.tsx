@@ -63,6 +63,9 @@ function sanitizeOperatorModules(next: AppModuleId[]): AppModuleId[] {
   if (!out.includes("terceiros") && out.includes("terceiros_checar")) {
     out = out.filter((id) => id !== "terceiros_checar");
   }
+  if (!out.includes("assistencia") && out.includes("os_excluir")) {
+    out = out.filter((id) => id !== "os_excluir");
+  }
   return out;
 }
 
@@ -158,7 +161,8 @@ function ModulesPicker({
               const needsParent =
                 ((p.id === "orcamentos_excluir" || p.id === "orcamentos_servicos_mensais") &&
                   !value.includes("orcamentos")) ||
-                (p.id === "terceiros_checar" && !value.includes("terceiros"));
+                (p.id === "terceiros_checar" && !value.includes("terceiros")) ||
+                (p.id === "os_excluir" && !value.includes("assistencia"));
               return (
                 <Chip
                   key={p.id}

@@ -31,6 +31,8 @@ import {
   createRefuelingFn,
   createRouteFn,
   createServiceFn,
+  deleteFleetVehicleFn,
+  deleteReadingFn,
   getFrotaBootstrapFn,
   getFrotaDailyKmFn,
   getFrotaHistoryFn,
@@ -39,6 +41,7 @@ import {
   saveFleetDriverFn,
   saveFleetReminderFn,
   saveFleetVehicleFn,
+  updateReadingFn,
 } from "@/lib/frota";
 import {
   FLEET_ENTRY_LABELS,
@@ -132,7 +135,8 @@ function FrotaPage() {
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [formType, setFormType] = useState<FleetEntryType | null>(null);
-  const [vehicleFormOpen, setVehicleFormOpen] = useState(false);
+  const [editingVehicle, setEditingVehicle] = useState<Vehicle | null | "new">(null);
+  const [editingReading, setEditingReading] = useState<DailyKmItem | null>(null);
   const [driverFormOpen, setDriverFormOpen] = useState(false);
   const [kmFilterVehicleId, setKmFilterVehicleId] = useState<number | "">("");
   const [kmFilterDriverId, setKmFilterDriverId] = useState<number | "">("");
@@ -360,6 +364,23 @@ function FrotaPage() {
               onFilterFrom={setKmFilterFrom}
               onFilterTo={setKmFilterTo}
               onAdd={() => setFormType("reading")}
+              onEdit={(row) => setEditingReading(row)}
+              onDelete={async (row) => {
+                if (
+                  !window.confirm(
+                    `Excluir lançamento de KM do veículo ${row.vehicleName} (${formatKm(row.odometer)})?`,
+                  )
+                ) {
+                  return;
+                }
+                try {
+                  await deleteReadingFn({ data: { id: row.id } });
+                  await reloadBoot();
+                  await reloadDailyKm();
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Falha ao excluir KM.");
+                }
+              }}
               onExportExcel={() => {
                 downloadFrotaKmExcel({
                   title: "Frota — KM do dia",
@@ -395,7 +416,24 @@ function FrotaPage() {
           {tab === "veiculos" ? (
             <VehiclesPanel
               vehicles={vehicles}
-              onNew={() => setVehicleFormOpen(true)}
+              onNew={() => setEditingVehicle("new")}
+              onEdit={(v) => setEditingVehicle(v)}
+              onDelete={async (v) => {
+                if (
+                  !window.confirm(
+                    `Excluir o veículo "${v.name}"? Todos os lançamentos vinculados serão removidos.`,
+                  )
+                ) {
+                  return;
+                }
+                try {
+                  await deleteFleetVehicleFn({ data: { id: v.id } });
+                  if (vehicleId === v.id) setVehicleId(null);
+                  await reloadBoot();
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Falha ao excluir veículo.");
+                }
+              }}
               onRefresh={reloadBoot}
             />
           ) : null}
@@ -469,12 +507,25 @@ function FrotaPage() {
         />
       ) : null}
 
-      {vehicleFormOpen ? (
+      {editingVehicle ? (
         <VehicleFormDialog
-          onClose={() => setVehicleFormOpen(false)}
+          vehicle={editingVehicle === "new" ? null : editingVehicle}
+          onClose={() => setEditingVehicle(null)}
           onSaved={async () => {
-            setVehicleFormOpen(false);
+            setEditingVehicle(null);
             await reloadBoot();
+          }}
+        />
+      ) : null}
+
+      {editingReading ? (
+        <EditReadingDialog
+          reading={editingReading}
+          onClose={() => setEditingReading(null)}
+          onSaved={async () => {
+            setEditingReading(null);
+            await reloadBoot();
+            await reloadDailyKm();
           }}
         />
       ) : null}
@@ -506,6 +557,8 @@ function DailyKmPanel({
   onFilterFrom,
   onFilterTo,
   onAdd,
+  onEdit,
+  onDelete,
   onExportExcel,
   onExportPdf,
 }: {
@@ -522,6 +575,8 @@ function DailyKmPanel({
   onFilterFrom: (v: string) => void;
   onFilterTo: (v: string) => void;
   onAdd: () => void;
+  onEdit: (row: DailyKmItem) => void;
+  onDelete: (row: DailyKmItem) => void | Promise<void>;
   onExportExcel: () => void;
   onExportPdf: () => Promise<void>;
 }) {
@@ -687,6 +742,24 @@ function DailyKmPanel({
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
+                  <div className="mt-sm flex gap-xs">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2xs rounded-lg border border-outline-variant px-sm py-2xs text-label-sm font-semibold text-primary"
+                      onClick={() => onEdit(row)}
+                    >
+                      <Icon name="edit" className="text-[16px]" />
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2xs rounded-lg border border-error/30 px-sm py-2xs text-label-sm font-semibold text-error"
+                      onClick={() => void onDelete(row)}
+                    >
+                      <Icon name="delete" className="text-[16px]" />
+                      Excluir
+                    </button>
+                  </div>
                 </div>
               </article>
             ))}
@@ -704,6 +777,7 @@ function DailyKmPanel({
                   <th className="px-md py-sm">Motivo</th>
                   <th className="px-md py-sm">Motorista</th>
                   <th className="px-md py-sm">Lançado por</th>
+                  <th className="px-md py-sm">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -731,6 +805,28 @@ function DailyKmPanel({
                     <td className="px-md py-sm text-on-surface-variant">{row.driverName || "—"}</td>
                     <td className="px-md py-sm text-on-surface-variant">
                       {row.createdByName || "—"}
+                    </td>
+                    <td className="px-md py-sm">
+                      <div className="flex flex-wrap gap-xs">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-2xs rounded-lg border border-outline-variant px-sm py-2xs text-label-sm font-semibold text-primary"
+                          onClick={() => onEdit(row)}
+                          title="Editar KM"
+                        >
+                          <Icon name="edit" className="text-[16px]" />
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-2xs rounded-lg border border-error/30 px-sm py-2xs text-label-sm font-semibold text-error"
+                          onClick={() => void onDelete(row)}
+                          title="Excluir KM"
+                        >
+                          <Icon name="delete" className="text-[16px]" />
+                          Excluir
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1291,10 +1387,14 @@ function RemindersPanel({
 function VehiclesPanel({
   vehicles,
   onNew,
+  onEdit,
+  onDelete,
   onRefresh,
 }: {
   vehicles: Vehicle[];
   onNew: () => void;
+  onEdit: (v: Vehicle) => void;
+  onDelete: (v: Vehicle) => void | Promise<void>;
   onRefresh: () => Promise<void>;
 }) {
   return (
@@ -1328,7 +1428,7 @@ function VehiclesPanel({
             >
               <div className="flex items-start gap-md">
                 <FleetBrandMark brand={v.brand} size="md" />
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="font-semibold text-on-surface">{v.name}</div>
                   <div className="mt-2xs text-body-sm text-on-surface-variant">
                     {[v.brand, v.model].filter(Boolean).join(" · ") || "Sem marca/modelo"}
@@ -1337,6 +1437,24 @@ function VehiclesPanel({
                     {v.plate ? `${v.plate} · ` : ""}
                     {formatKm(v.currentOdometer)}
                     {!v.active ? " · inativo" : ""}
+                  </div>
+                  <div className="mt-sm flex flex-wrap gap-xs">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2xs rounded-lg border border-outline-variant px-sm py-2xs text-label-sm font-semibold text-primary"
+                      onClick={() => onEdit(v)}
+                    >
+                      <Icon name="edit" className="text-[16px]" />
+                      Editar / KM
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2xs rounded-lg border border-error/30 px-sm py-2xs text-label-sm font-semibold text-error"
+                      onClick={() => void onDelete(v)}
+                    >
+                      <Icon name="delete" className="text-[16px]" />
+                      Excluir
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2005,19 +2123,23 @@ function EntryFormDialog({
 }
 
 function VehicleFormDialog({
+  vehicle,
   onClose,
   onSaved,
 }: {
+  vehicle: Vehicle | null;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const editing = Boolean(vehicle);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [brand, setBrand] = useState("");
-  const [model, setModel] = useState("");
-  const [plate, setPlate] = useState("");
-  const [odometer, setOdometer] = useState("0");
+  const [name, setName] = useState(vehicle?.name ?? "");
+  const [brand, setBrand] = useState(vehicle?.brand ?? "");
+  const [model, setModel] = useState(vehicle?.model ?? "");
+  const [plate, setPlate] = useState(vehicle?.plate ?? "");
+  const [odometer, setOdometer] = useState(String(vehicle?.currentOdometer ?? 0));
+  const [active, setActive] = useState(vehicle?.active ?? true);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -2026,11 +2148,13 @@ function VehicleFormDialog({
     try {
       await saveFleetVehicleFn({
         data: {
+          id: vehicle?.id ?? null,
           name,
           brand: brand || null,
           model: model || null,
           plate: plate || null,
           currentOdometer: Number(odometer) || 0,
+          active,
         },
       });
       await onSaved();
@@ -2045,7 +2169,7 @@ function VehicleFormDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="p-lg" style={{ width: "min(28rem, 100%)" }}>
         <DialogHeader>
-          <DialogTitle>Novo veículo</DialogTitle>
+          <DialogTitle>{editing ? "Editar veículo" : "Novo veículo"}</DialogTitle>
         </DialogHeader>
         <form className="grid gap-md" onSubmit={onSubmit}>
           <Field label="Nome / código">
@@ -2073,14 +2197,27 @@ function VehicleFormDialog({
             <Field label="Placa">
               <input className={inputClass} value={plate} onChange={(e) => setPlate(e.target.value)} />
             </Field>
-            <Field label="Odômetro inicial">
+            <Field label={editing ? "Odômetro atual (km)" : "Odômetro inicial"}>
               <input
                 className={inputClass}
+                type="number"
+                min={0}
+                step="0.1"
                 value={odometer}
                 onChange={(e) => setOdometer(e.target.value)}
               />
             </Field>
           </div>
+          {editing ? (
+            <label className="inline-flex items-center gap-sm text-body-md text-on-surface">
+              <input
+                type="checkbox"
+                checked={active}
+                onChange={(e) => setActive(e.target.checked)}
+              />
+              Veículo ativo
+            </label>
+          ) : null}
           {err ? <p className="text-body-sm text-error">{err}</p> : null}
           <DialogFooter>
             <button type="button" onClick={onClose} className="rounded-lg px-md py-sm">
@@ -2091,7 +2228,120 @@ function VehicleFormDialog({
               disabled={busy}
               className="rounded-lg bg-secondary-container px-md py-sm font-semibold text-on-secondary-container"
             >
-              Salvar
+              {busy ? "Salvando…" : "Salvar"}
+            </button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function EditReadingDialog({
+  reading,
+  onClose,
+  onSaved,
+}: {
+  reading: DailyKmItem;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const occurredLocal = useMemo(() => {
+    const d = new Date(reading.occurredAt);
+    if (Number.isNaN(d.getTime())) return "";
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }, [reading.occurredAt]);
+  const [occurredAt, setOccurredAt] = useState(occurredLocal);
+  const [odometer, setOdometer] = useState(String(reading.odometer));
+  const [reason, setReason] = useState(reading.reason ?? "");
+  const [notes, setNotes] = useState(reading.notes ?? "");
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setErr(null);
+    try {
+      const km = Number(odometer);
+      if (!Number.isFinite(km) || km < 0) {
+        throw new Error("Informe um odômetro válido.");
+      }
+      await updateReadingFn({
+        data: {
+          id: reading.id,
+          odometer: km,
+          occurredAt: occurredAt ? new Date(occurredAt).toISOString() : null,
+          reason: reason.trim(),
+          notes: notes.trim() || null,
+        },
+      });
+      await onSaved();
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "Falha ao salvar KM.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="p-lg" style={{ width: "min(28rem, 100%)" }}>
+        <DialogHeader>
+          <DialogTitle>Editar lançamento de KM</DialogTitle>
+          <p className="text-body-sm text-on-surface-variant">
+            {reading.vehicleName}
+            {reading.vehiclePlate ? ` · ${reading.vehiclePlate}` : ""}
+          </p>
+        </DialogHeader>
+        <form className="grid gap-md" onSubmit={onSubmit}>
+          <Field label="Data/hora">
+            <input
+              className={inputClass}
+              type="datetime-local"
+              value={occurredAt}
+              onChange={(e) => setOccurredAt(e.target.value)}
+            />
+          </Field>
+          <Field label="Odômetro (km)">
+            <input
+              className={inputClass}
+              type="number"
+              min={0}
+              step="0.1"
+              value={odometer}
+              onChange={(e) => setOdometer(e.target.value)}
+              required
+            />
+          </Field>
+          <Field label="Motivo">
+            <input
+              className={inputClass}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              required
+            />
+          </Field>
+          <Field label="Observação">
+            <textarea
+              className={inputClass}
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </Field>
+          {err ? <p className="text-body-sm text-error">{err}</p> : null}
+          <DialogFooter>
+            <button type="button" onClick={onClose} className="rounded-lg px-md py-sm">
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-lg bg-secondary-container px-md py-sm font-semibold text-on-secondary-container"
+            >
+              {busy ? "Salvando…" : "Salvar KM"}
             </button>
           </DialogFooter>
         </form>

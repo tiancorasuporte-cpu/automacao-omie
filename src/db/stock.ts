@@ -1,7 +1,7 @@
 import "@tanstack/react-start/server-only";
 
 import { getDb } from "@/db/schema";
-import { effectiveCmc } from "@/lib/product-pricing";
+import { stockCostCmc } from "@/lib/product-pricing";
 
 type Db = Awaited<ReturnType<typeof getDb>>;
 
@@ -25,7 +25,7 @@ export type ProductStockRow = {
   cmc: number | null;
   /** CMC interno (override local). */
   cmcInterno: number | null;
-  /** CMC efetivo usado para custo (interno se houver, senão Omie). */
+  /** CMC usado para custo do estoque (prioridade: interno de Produtos). */
   cmcEfetivo: number | null;
   /** quantidadeFisica × cmcEfetivo */
   custoTotal: number;
@@ -97,7 +97,7 @@ function mapStockRow(row: ListRow): ProductStockRow {
   const cmc = cmcRaw != null && Number.isFinite(cmcRaw) ? cmcRaw : null;
   const cmcInterno =
     cmcInternoRaw != null && Number.isFinite(cmcInternoRaw) ? cmcInternoRaw : null;
-  const cmcEfetivo = effectiveCmc(cmc, cmcInterno);
+  const cmcEfetivo = stockCostCmc(cmc, cmcInterno);
   const custoTotal =
     cmcEfetivo != null && Number.isFinite(cmcEfetivo)
       ? Math.round(quantidadeFisica * cmcEfetivo * 100) / 100

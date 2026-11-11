@@ -498,7 +498,7 @@ export async function createOs(input: {
   quoteId?: number | null | undefined;
   quoteNumero?: string | null | undefined;
   ticketId?: number | null | undefined;
-  items?: Array<{ qtd: number; nome: string }> | undefined;
+  items?: Array<{ qtd: number; nome: string; productId?: number | null }> | undefined;
   aprovadoPor?: string | null | undefined;
   aprovacaoAnexo?: { name: string; mime: string; data: string } | null | undefined;
   createdBy: number | null;
@@ -554,9 +554,13 @@ export async function createOs(input: {
   const items = input.items ?? [];
   for (let i = 0; i < items.length; i++) {
     const it = items[i]!;
+    const productId =
+      it.productId != null && Number.isFinite(it.productId) && it.productId > 0
+        ? Number(it.productId)
+        : null;
     await db`
-      insert into assist_os_items (os_id, qtd, nome, status, sort_order)
-      values (${osId}, ${it.qtd}, ${it.nome.trim()}, 'pendente', ${i})
+      insert into assist_os_items (os_id, qtd, nome, status, product_id, sort_order)
+      values (${osId}, ${it.qtd}, ${it.nome.trim()}, 'pendente', ${productId}, ${i})
     `;
   }
   await addOsEvent({
@@ -574,6 +578,30 @@ export async function createOs(input: {
     });
   }
   return getOsById(osId);
+}
+
+export async function deleteOs(input: {
+  osId: number;
+  quem: string;
+  userId: number | null;
+}) {
+  const db = await getDb();
+  const os = await getOsById(input.osId);
+  if (!os) throw new Error("OS não encontrada.");
+  if (os.stage >= 7) {
+    throw new Error("OS finalizada não pode ser excluída.");
+  }
+  await db`
+    insert into assist_os_events (os_id, quem, user_id, acao)
+    values (
+      ${os.id},
+      ${input.quem},
+      ${input.userId},
+      ${`OS ${os.num} excluída`}
+    )
+  `;
+  await db`delete from assist_os where id = ${os.id}`;
+  return { ok: true as const, id: os.id, num: os.num };
 }
 
 function stageMover(stage: number): OsWorkflowRole | null {
@@ -896,6 +924,45 @@ export async function checkInOs(input: {
   assertCanMoveStage(5, input.canRole, input.isAdmin);
   if (os.ciAt) throw new Error("Check-in já registrado.");
   const db = await getDb();
+
+  // Limite: 1 check-in aberto por técnico/equipe.
+  const techName = (os.tecnicoNome ?? input.quem).trim();
+  const openCheckins = (await db`
+    select id, num, client_name
+    from assist_os
+    where stage = 5
+      and ci_at is not null
+      and co_at is null
+      and id <> ${os.id}
+      and (
+        (
+          tecnico_nome is not null
+          and lower(trim(tecnico_nome)) = lower(${techName})
+        )
+        or (
+          ${os.teamId}::int is not null
+          and team_id = ${os.teamId}
+        )
+        or (
+          ${input.userId ?? null}::int is not null
+          and exists (
+            select 1 from assist_team_members m
+            where m.team_id = assist_os.team_id
+              and m.user_id = ${input.userId}
+              and coalesce(m.active, true) = true
+          )
+        )
+      )
+    order by ci_at desc
+    limit 3
+  `) as Array<{ id: number; num: string; client_name: string }>;
+  if (openCheckins.length) {
+    const other = openCheckins[0]!;
+    throw new Error(
+      `Já existe check-in em andamento na OS ${other.num} (${other.client_name}). Finalize (check-out) antes de iniciar outra.`,
+    );
+  }
+
   await db`
     update assist_os set ci_at = now(), updated_at = now() where id = ${os.id}
   `;
@@ -1520,10 +1587,37 @@ function materialFieldItems(os: AssistOs) {
 }
 
 export function osNeedsMaterialDisposition(os: AssistOs) {
-  if (os.stage !== 5 || !os.coAt) return false;
+  // Após check-out: em execução (5) ou já no kanban Executado (6).
+  if ((os.stage !== 5 && os.stage !== 6) || !os.coAt) return false;
   const items = materialFieldItems(os);
   if (!items.length) return false;
   return items.some((i) => i.usado == null || (i.qtd - (i.usado ?? 0) > 0 && !i.sobraDestino));
+}
+
+/** Stage 1: todos os itens marcados (separado/comprar) — pronto para avançar. */
+export function canAdvanceFromSeparacao(os: AssistOs) {
+  if (os.stage !== 1) {
+    return { ready: false as const, nextStage: null, needBuy: false };
+  }
+  if (os.items.some((i) => i.status === "pendente" || i.status === "recebido")) {
+    return { ready: false as const, nextStage: null, needBuy: false };
+  }
+  const needBuy = os.items.some((i) => i.status === "comprar");
+  return {
+    ready: true as const,
+    nextStage: needBuy ? 2 : 3,
+    needBuy,
+  };
+}
+
+export function osNeedsMaterialConfirm(os: AssistOs) {
+  if (os.stage !== 4) return false;
+  if (!os.items.length) return false;
+  // Escritório já enviou para o técnico confirmar (envio_json preenchido).
+  if (!os.envio) return false;
+  return os.items.some((i) =>
+    ["pendente", "separado", "recebido", "chegou", "comprado", "comprar"].includes(i.status),
+  );
 }
 
 export function osHasPendingBaixa(os: AssistOs) {
@@ -1566,7 +1660,7 @@ export async function saveOsMaterialDisposition(input: {
 }) {
   const os = await getOsById(input.osId);
   if (!os) throw new Error("OS não encontrada.");
-  if (os.stage !== 5 || !os.coAt) {
+  if ((os.stage !== 5 && os.stage !== 6) || !os.coAt) {
     throw new Error("Informe uso/sobra após o check-out.");
   }
   if (!os.teamId) {

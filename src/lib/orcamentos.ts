@@ -539,6 +539,13 @@ export const enviarPedidoAssistenciaFn = createServerFn({ method: "POST" })
       return { ok: false as const, error: "Orçamento sem itens para montar o pedido." };
     }
 
+    const { getOmieProductsByCodes } = await import("@/db/products");
+    const codes = items.map((it) => it.codigoProduto).filter((c) => Number.isFinite(c) && c > 0);
+    const products = quote.omieAppId
+      ? await getOmieProductsByCodes(quote.omieAppId, codes)
+      : [];
+    const productByCode = new Map(products.map((p) => [p.codigoProduto, p]));
+
     const anexo = data.aprovacaoAnexo?.name && data.aprovacaoAnexo?.data
       ? {
           name: data.aprovacaoAnexo.name.trim(),
@@ -556,10 +563,14 @@ export const enviarPedidoAssistenciaFn = createServerFn({ method: "POST" })
       servico: quote.observacao?.trim() || `Pedido do orçamento ${quote.numeroInterno}`,
       quoteId: quote.id,
       quoteNumero: quote.numeroInterno,
-      items: items.map((it) => ({
-        qtd: it.quantidade,
-        nome: it.descricao.trim() || `Produto ${it.codigoProduto}`,
-      })),
+      items: items.map((it) => {
+        const product = productByCode.get(it.codigoProduto);
+        return {
+          qtd: it.quantidade,
+          nome: it.descricao.trim() || product?.descricao || `Produto ${it.codigoProduto}`,
+          productId: product?.id ?? null,
+        };
+      }),
       aprovadoPor: data.aprovadoPor.trim(),
       aprovacaoAnexo: anexo,
       createdBy: user.id,

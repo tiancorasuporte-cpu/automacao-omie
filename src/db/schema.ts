@@ -1420,6 +1420,26 @@ export async function ensureSchema() {
   if (!(await indexExists("mat_saidas_os_idx"))) {
     await sql.unsafe("create index mat_saidas_os_idx on mat_saidas (os_id)");
   }
+  if ((await tableExists("mat_saidas")) && !(await columnExists("mat_saidas", "confirmed_at"))) {
+    await sql.unsafe("alter table mat_saidas add column confirmed_at timestamptz");
+  }
+  if ((await tableExists("mat_saidas")) && !(await columnExists("mat_saidas", "confirmed_by"))) {
+    await sql.unsafe(
+      "alter table mat_saidas add column confirmed_by integer references users(id) on delete set null",
+    );
+  }
+  if ((await tableExists("mat_saidas")) && !(await columnExists("mat_saidas", "confirmed_by_name"))) {
+    await sql.unsafe("alter table mat_saidas add column confirmed_by_name varchar(120)");
+  }
+  if (await tableExists("mat_saidas")) {
+    await sql.unsafe(`
+      update mat_saidas
+      set status = 'recebida',
+          confirmed_at = coalesce(confirmed_at, created_at),
+          confirmed_by_name = coalesce(confirmed_by_name, created_by_name)
+      where status = 'emitida'
+    `);
+  }
 
   if (!(await tableExists("mat_saida_itens"))) {
     await sql`

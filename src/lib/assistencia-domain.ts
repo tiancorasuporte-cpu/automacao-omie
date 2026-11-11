@@ -131,3 +131,36 @@ export function isDirectOsTipo(tipo: string) {
 export function entryStageForTipo(tipo: OsTipo) {
   return OS_TIPOS.find((t) => t.id === tipo)?.entryStage ?? 3;
 }
+
+/** Status operacional da OS para o app do técnico. */
+export type OsExecStatusKey =
+  | "agendada"
+  | "aguardando_material"
+  | "aguardando_checkin"
+  | "instalando"
+  | "pausada"
+  | "pos_checkout"
+  | "executado"
+  | "finalizado";
+
+export function osExecStatus(input: {
+  stage: number;
+  ciAt?: string | null;
+  coAt?: string | null;
+  pausedAt?: string | null;
+  needsMaterialConfirm?: boolean;
+}): { key: OsExecStatusKey; label: string } {
+  if (input.stage >= 7) return { key: "finalizado", label: "Finalizado" };
+  if (input.stage === 6) return { key: "executado", label: "Executado" };
+  if (input.stage === 5) {
+    if (input.coAt) return { key: "pos_checkout", label: "Aguardando conferência" };
+    if (input.pausedAt) return { key: "pausada", label: "Pausada" };
+    if (input.ciAt) return { key: "instalando", label: "Instalando" };
+    return { key: "aguardando_checkin", label: "Aguardando check-in" };
+  }
+  if (input.stage === 4 && input.needsMaterialConfirm) {
+    return { key: "aguardando_material", label: "Confirmar equipamentos" };
+  }
+  if (input.stage === 4) return { key: "agendada", label: "Agendada" };
+  return { key: "agendada", label: osStageName(input.stage) };
+}

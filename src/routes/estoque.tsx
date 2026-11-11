@@ -21,6 +21,7 @@ import {
 import { APP_NAME } from "@/lib/brand";
 import { osStageName, osTipoLabel } from "@/lib/assistencia-domain";
 import {
+  confirmMatSaidaFn,
   emitMatSaidaFn,
   getEstoqueBootstrapFn,
   getEstoquePdvBootstrapFn,
@@ -384,7 +385,7 @@ function EstoquePage() {
       setOsId("");
       setFeedback({
         type: "ok",
-        text: `Saída ${saida.num} emitida · ${saida.itens.length} item(ns) na ${saida.teamName}.`,
+        text: `Saída ${saida.num} emitida · aguardando confirmação do técnico (${saida.itens.length} item(ns) · ${saida.teamName}).`,
       });
       await reloadPdv();
     } catch (error) {
@@ -394,6 +395,24 @@ function EstoquePage() {
       });
     } finally {
       setEmitting(false);
+    }
+  }
+
+  async function confirmSaida(saidaId: number) {
+    setFeedback(null);
+    try {
+      const saida = await confirmMatSaidaFn({ data: { saidaId } });
+      setFeedback({
+        type: "ok",
+        text: `Recebimento de ${saida.num} confirmado.`,
+      });
+      await reloadPdv();
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text:
+          error instanceof Error ? error.message : "Falha ao confirmar recebimento.",
+      });
     }
   }
 
@@ -823,7 +842,9 @@ function EstoquePage() {
                         <th className="px-sm py-xs">Equipe</th>
                         <th className="px-sm py-xs">Técnico</th>
                         <th className="px-sm py-xs">Itens</th>
+                        <th className="px-sm py-xs">Status</th>
                         <th className="px-sm py-xs">Quando</th>
+                        <th className="px-sm py-xs">Ações</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -836,7 +857,37 @@ function EstoquePage() {
                           <td className="px-sm py-xs">{s.teamName}</td>
                           <td className="px-sm py-xs">{s.tecnicoNome ?? "—"}</td>
                           <td className="px-sm py-xs">{s.itens.length}</td>
+                          <td className="px-sm py-xs">
+                            {s.status === "aguardando" ? (
+                              <span className="rounded-full bg-amber-100 px-xs py-2xs text-label-sm font-semibold text-amber-900">
+                                Aguardando OK
+                              </span>
+                            ) : s.status === "recebida" ? (
+                              <span className="rounded-full bg-emerald-100 px-xs py-2xs text-label-sm font-semibold text-emerald-900">
+                                Recebida
+                              </span>
+                            ) : (
+                              s.status
+                            )}
+                          </td>
                           <td className="px-sm py-xs">{formatDateTime(s.createdAt)}</td>
+                          <td className="px-sm py-xs">
+                            {s.status === "aguardando" ? (
+                              <button
+                                type="button"
+                                className={cn(btnOutline, "text-label-sm")}
+                                onClick={() => void confirmSaida(s.id)}
+                              >
+                                Confirmar recebimento
+                              </button>
+                            ) : (
+                              <span className="text-label-sm text-on-surface-variant">
+                                {s.confirmedByName
+                                  ? `OK · ${s.confirmedByName}`
+                                  : "—"}
+                              </span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

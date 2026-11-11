@@ -37,6 +37,8 @@ export type MatSaida = {
   status: string;
   createdByName: string | null;
   createdAt: string;
+  confirmedAt: string | null;
+  confirmedByName: string | null;
   itens: Array<{
     id: number;
     productId: number;
@@ -76,8 +78,35 @@ function mapSaida(
     status: str(row["status"]),
     createdByName: row["created_by_name"] == null ? null : str(row["created_by_name"]),
     createdAt: iso(row["created_at"]),
+    confirmedAt: row["confirmed_at"] == null ? null : iso(row["confirmed_at"]),
+    confirmedByName:
+      row["confirmed_by_name"] == null ? null : str(row["confirmed_by_name"]),
     itens,
   };
+}
+
+async function loadItensForSaidas(saidaIds: number[]) {
+  if (!saidaIds.length) return new Map<number, MatSaida["itens"]>();
+  const db = await getDb();
+  const itens = await db`
+    select * from mat_saida_itens
+    where saida_id = any(${saidaIds})
+    order by id asc
+  `;
+  const bySaida = new Map<number, MatSaida["itens"]>();
+  for (const raw of itens as Record<string, unknown>[]) {
+    const saidaId = num(raw["saida_id"]);
+    const list = bySaida.get(saidaId) ?? [];
+    list.push({
+      id: num(raw["id"]),
+      productId: num(raw["product_id"]),
+      nome: str(raw["nome"]),
+      qtd: num(raw["qtd"]),
+      osItemId: raw["os_item_id"] == null ? null : num(raw["os_item_id"]),
+    });
+    bySaida.set(saidaId, list);
+  }
+  return bySaida;
 }
 
 export async function listMatSaidas(limit = 50) {
@@ -95,26 +124,48 @@ export async function listMatSaidas(limit = 50) {
   `;
   const saidas = (rows as Record<string, unknown>[]).map((r) => mapSaida(r));
   if (!saidas.length) return saidas;
-  const ids = saidas.map((s) => s.id);
-  const itens = await db`
-    select * from mat_saida_itens
-    where saida_id = any(${ids})
-    order by id asc
-  `;
-  const bySaida = new Map<number, MatSaida["itens"]>();
-  for (const raw of itens as Record<string, unknown>[]) {
-    const saidaId = num(raw["saida_id"]);
-    const list = bySaida.get(saidaId) ?? [];
-    list.push({
-      id: num(raw["id"]),
-      productId: num(raw["product_id"]),
-      nome: str(raw["nome"]),
-      qtd: num(raw["qtd"]),
-      osItemId: raw["os_item_id"] == null ? null : num(raw["os_item_id"]),
-    });
-    bySaida.set(saidaId, list);
-  }
+  const bySaida = await loadItensForSaidas(saidas.map((s) => s.id));
   return saidas.map((s) => ({ ...s, itens: bySaida.get(s.id) ?? [] }));
+}
+
+export async function listPendingMatSaidasForTeams(teamIds: number[]) {
+  const ids = [...new Set(teamIds.filter((id) => Number.isFinite(id) && id > 0))];
+  if (!ids.length) return [] as MatSaida[];
+  const db = await getDb();
+  const rows = await db`
+    select
+      s.*,
+      t.name as team_name,
+      o.num as os_num
+    from mat_saidas s
+    join assist_teams t on t.id = s.team_id
+    left join assist_os o on o.id = s.os_id
+    where s.team_id = any(${ids})
+      and s.status = 'aguardando'
+    order by s.id asc
+  `;
+  const saidas = (rows as Record<string, unknown>[]).map((r) => mapSaida(r));
+  if (!saidas.length) return saidas;
+  const bySaida = await loadItensForSaidas(saidas.map((s) => s.id));
+  return saidas.map((s) => ({ ...s, itens: bySaida.get(s.id) ?? [] }));
+}
+
+export async function getMatSaidaById(saidaId: number) {
+  const db = await getDb();
+  const [row] = (await db`
+    select
+      s.*,
+      t.name as team_name,
+      o.num as os_num
+    from mat_saidas s
+    join assist_teams t on t.id = s.team_id
+    left join assist_os o on o.id = s.os_id
+    where s.id = ${saidaId}
+    limit 1
+  `) as Record<string, unknown>[];
+  if (!row) return null;
+  const bySaida = await loadItensForSaidas([saidaId]);
+  return mapSaida(row, bySaida.get(saidaId) ?? []);
 }
 
 export async function emitMatSaida(input: {
@@ -161,7 +212,7 @@ export async function emitMatSaida(input: {
         ${input.teamId},
         ${tecnicoNome},
         ${os?.id ?? null},
-        'emitida',
+        'aguardando',
         ${input.userId},
         ${input.userName}
       )
@@ -222,20 +273,7 @@ export async function emitMatSaida(input: {
         returning id
       `) as Array<{ id: number }>;
 
-      await creditTeamStock(tx, {
-        teamId: input.teamId,
-        productId: item.productId,
-        nome,
-        quantidade: qtd,
-        tipo: "entrada_pdv",
-        tecnicoNome,
-        osId: os?.id ?? null,
-        saidaId,
-        motivo: os ? `Saída PDV ${numSaida} → OS ${os.num}` : `Saída PDV ${numSaida} → estoque equipe`,
-        userId: input.userId,
-        userName: input.userName,
-      });
-
+      // Estoque da equipe só entra após o técnico confirmar o recebimento.
       itensOut.push({
         id: line?.id ?? 0,
         productId: item.productId,
@@ -252,7 +290,7 @@ export async function emitMatSaida(input: {
           ${os.id},
           ${input.userName},
           ${input.userId},
-          ${`Saída PDV ${numSaida}: ${itensOut.length} item(ns) para equipe ${team.name}${tecnicoNome ? ` · téc. ${tecnicoNome}` : ""}`}
+          ${`Saída PDV ${numSaida}: ${itensOut.length} item(ns) enviados · aguardando confirmação do técnico${tecnicoNome ? ` (${tecnicoNome})` : ""}`}
         )
       `;
     }
@@ -266,4 +304,81 @@ export async function emitMatSaida(input: {
       itensOut,
     );
   });
+}
+
+export async function confirmMatSaida(input: {
+  saidaId: number;
+  userId: number;
+  userName: string;
+  /** Se true, permite confirmar saídas de qualquer equipe (estoque/admin). */
+  allowAnyTeam?: boolean;
+  allowedTeamIds?: number[];
+}) {
+  const db = await getDb();
+  const saida = await getMatSaidaById(input.saidaId);
+  if (!saida) throw new Error("Saída não encontrada.");
+  if (saida.status === "recebida") return saida;
+  if (saida.status !== "aguardando") {
+    throw new Error(`Saída ${saida.num} não está aguardando confirmação.`);
+  }
+  if (!input.allowAnyTeam) {
+    const allowed = new Set(input.allowedTeamIds ?? []);
+    if (!allowed.has(saida.teamId)) {
+      throw new Error("Você não pertence à equipe desta saída.");
+    }
+  }
+
+  await teamStockTransaction(db, async (tx) => {
+    const [locked] = (await tx`
+      select id, status from mat_saidas where id = ${saida.id} for update
+    `) as Array<{ id: number; status: string }>;
+    if (!locked) throw new Error("Saída não encontrada.");
+    if (locked.status === "recebida") return;
+    if (locked.status !== "aguardando") {
+      throw new Error(`Saída ${saida.num} não está aguardando confirmação.`);
+    }
+
+    for (const item of saida.itens) {
+      await creditTeamStock(tx, {
+        teamId: saida.teamId,
+        productId: item.productId,
+        nome: item.nome,
+        quantidade: item.qtd,
+        tipo: "entrada_pdv",
+        tecnicoNome: saida.tecnicoNome,
+        osId: saida.osId,
+        saidaId: saida.id,
+        motivo: saida.osNum
+          ? `Confirmação PDV ${saida.num} → OS ${saida.osNum}`
+          : `Confirmação PDV ${saida.num} → estoque equipe`,
+        userId: input.userId,
+        userName: input.userName,
+      });
+    }
+
+    await tx`
+      update mat_saidas
+      set status = 'recebida',
+          confirmed_at = now(),
+          confirmed_by = ${input.userId},
+          confirmed_by_name = ${input.userName}
+      where id = ${saida.id}
+    `;
+
+    if (saida.osId) {
+      await tx`
+        insert into assist_os_events (os_id, quem, user_id, acao)
+        values (
+          ${saida.osId},
+          ${input.userName},
+          ${input.userId},
+          ${`Recebimento confirmado · PDV ${saida.num} (${saida.itens.length} item(ns))`}
+        )
+      `;
+    }
+  });
+
+  const confirmed = await getMatSaidaById(saida.id);
+  if (!confirmed) throw new Error("Saída não encontrada após confirmação.");
+  return confirmed;
 }

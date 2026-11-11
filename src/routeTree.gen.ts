@@ -41,6 +41,7 @@ import { Route as ApiMobileMeRouteImport } from './routes/api/mobile/me'
 import { Route as ApiMobileSyncRouteImport } from './routes/api/mobile/sync'
 import { Route as ApiWahaWebhookRouteImport } from './routes/api/waha/webhook'
 import { Route as ApiMobileEstoqueIndexRouteImport } from './routes/api/mobile/estoque/index'
+import { Route as ApiMobileEstoqueConfirmarRouteImport } from './routes/api/mobile/estoque/confirmar'
 import { Route as ApiMobileFrotaAbastecimentoRouteImport } from './routes/api/mobile/frota/abastecimento'
 import { Route as ApiMobileFrotaKmRouteImport } from './routes/api/mobile/frota/km'
 import { Route as ApiMobileFrotaServicoRouteImport } from './routes/api/mobile/frota/servico'
@@ -214,6 +215,12 @@ const ApiMobileEstoqueIndexRoute = ApiMobileEstoqueIndexRouteImport.update({
   path: '/api/mobile/estoque/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMobileEstoqueConfirmarRoute =
+  ApiMobileEstoqueConfirmarRouteImport.update({
+    id: '/api/mobile/estoque/confirmar',
+    path: '/api/mobile/estoque/confirmar',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiMobileFrotaAbastecimentoRoute =
   ApiMobileFrotaAbastecimentoRouteImport.update({
     id: '/api/mobile/frota/abastecimento',
@@ -309,6 +316,7 @@ export interface FileRoutesByFullPath {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/sync': typeof ApiMobileSyncRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
+  '/api/mobile/estoque/confirmar': typeof ApiMobileEstoqueConfirmarRoute
   '/api/mobile/frota/abastecimento': typeof ApiMobileFrotaAbastecimentoRoute
   '/api/mobile/frota/km': typeof ApiMobileFrotaKmRoute
   '/api/mobile/frota/servico': typeof ApiMobileFrotaServicoRoute
@@ -355,6 +363,7 @@ export interface FileRoutesByTo {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/sync': typeof ApiMobileSyncRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
+  '/api/mobile/estoque/confirmar': typeof ApiMobileEstoqueConfirmarRoute
   '/api/mobile/frota/abastecimento': typeof ApiMobileFrotaAbastecimentoRoute
   '/api/mobile/frota/km': typeof ApiMobileFrotaKmRoute
   '/api/mobile/frota/servico': typeof ApiMobileFrotaServicoRoute
@@ -402,6 +411,7 @@ export interface FileRoutesById {
   '/api/mobile/me': typeof ApiMobileMeRoute
   '/api/mobile/sync': typeof ApiMobileSyncRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
+  '/api/mobile/estoque/confirmar': typeof ApiMobileEstoqueConfirmarRoute
   '/api/mobile/frota/abastecimento': typeof ApiMobileFrotaAbastecimentoRoute
   '/api/mobile/frota/km': typeof ApiMobileFrotaKmRoute
   '/api/mobile/frota/servico': typeof ApiMobileFrotaServicoRoute
@@ -450,6 +460,7 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/sync'
     | '/api/waha/webhook'
+    | '/api/mobile/estoque/confirmar'
     | '/api/mobile/frota/abastecimento'
     | '/api/mobile/frota/km'
     | '/api/mobile/frota/servico'
@@ -496,6 +507,7 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/sync'
     | '/api/waha/webhook'
+    | '/api/mobile/estoque/confirmar'
     | '/api/mobile/frota/abastecimento'
     | '/api/mobile/frota/km'
     | '/api/mobile/frota/servico'
@@ -542,6 +554,7 @@ export interface FileRouteTypes {
     | '/api/mobile/me'
     | '/api/mobile/sync'
     | '/api/waha/webhook'
+    | '/api/mobile/estoque/confirmar'
     | '/api/mobile/frota/abastecimento'
     | '/api/mobile/frota/km'
     | '/api/mobile/frota/servico'
@@ -589,6 +602,7 @@ export interface RootRouteChildren {
   ApiMobileMeRoute: typeof ApiMobileMeRoute
   ApiMobileSyncRoute: typeof ApiMobileSyncRoute
   ApiWahaWebhookRoute: typeof ApiWahaWebhookRoute
+  ApiMobileEstoqueConfirmarRoute: typeof ApiMobileEstoqueConfirmarRoute
   ApiMobileFrotaAbastecimentoRoute: typeof ApiMobileFrotaAbastecimentoRoute
   ApiMobileFrotaKmRoute: typeof ApiMobileFrotaKmRoute
   ApiMobileFrotaServicoRoute: typeof ApiMobileFrotaServicoRoute
@@ -830,6 +844,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMobileEstoqueIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mobile/estoque/confirmar': {
+      id: '/api/mobile/estoque/confirmar'
+      path: '/api/mobile/estoque/confirmar'
+      fullPath: '/api/mobile/estoque/confirmar'
+      preLoaderRoute: typeof ApiMobileEstoqueConfirmarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/mobile/frota/abastecimento': {
       id: '/api/mobile/frota/abastecimento'
       path: '/api/mobile/frota/abastecimento'
@@ -949,6 +970,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMobileMeRoute: ApiMobileMeRoute,
   ApiMobileSyncRoute: ApiMobileSyncRoute,
   ApiWahaWebhookRoute: ApiWahaWebhookRoute,
+  ApiMobileEstoqueConfirmarRoute: ApiMobileEstoqueConfirmarRoute,
   ApiMobileFrotaAbastecimentoRoute: ApiMobileFrotaAbastecimentoRoute,
   ApiMobileFrotaKmRoute: ApiMobileFrotaKmRoute,
   ApiMobileFrotaServicoRoute: ApiMobileFrotaServicoRoute,

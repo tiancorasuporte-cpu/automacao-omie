@@ -11,6 +11,7 @@ type ExpoPushMessage = {
   sound?: "default" | null;
   priority?: "default" | "normal" | "high";
   channelId?: string;
+  ttl?: number;
 };
 
 async function sendExpoPush(messages: ExpoPushMessage[]) {
@@ -71,6 +72,8 @@ export async function notifyTecnicoOsAssigned(input: {
       sound: "default",
       priority: "high",
       channelId: "os-tecnico",
+      // Ajuda entrega com tela apagada / app em background no Android.
+      ttl: 86_400,
       data: {
         type: "os_assigned",
         osId: input.osId,

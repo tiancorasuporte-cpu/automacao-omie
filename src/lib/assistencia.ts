@@ -8,6 +8,7 @@ import {
   checkInOs,
   checkOutOs,
   createOs,
+  deleteOs,
   finishVisita,
   pauseOs,
   resumeOs,
@@ -50,6 +51,7 @@ import {
 import { listTecnicos } from "@/db/users";
 import {
   canAccessModule,
+  canDeleteOs,
   canOsWorkflow,
   firstAccessiblePath,
   isAdmin,
@@ -118,6 +120,7 @@ export const getAssistenciaBootstrapFn = createServerFn({ method: "GET" }).handl
       canAssistencia: roles.canRole("assistencia"),
       canEstoque: roles.canRole("estoque"),
       canCompras: roles.canRole("compras"),
+      canDeleteOs: canDeleteOs(user),
     },
     omieAppId,
     apps,
@@ -237,7 +240,13 @@ export const createOsFn = createServerFn({ method: "POST" })
         quoteNumero: z.string().optional().nullable(),
         ticketId: z.number().int().positive().optional().nullable(),
         items: z
-          .array(z.object({ qtd: z.number().positive(), nome: z.string().min(1) }))
+          .array(
+            z.object({
+              qtd: z.number().positive(),
+              nome: z.string().min(1),
+              productId: z.number().int().positive().optional().nullable(),
+            }),
+          )
           .optional(),
       })
       .parse(input ?? {}),
@@ -278,6 +287,21 @@ export const advanceOsFn = createServerFn({ method: "POST" })
       userId: user.id,
       isAdmin: roles.isAdmin,
       canRole: roles.canRole,
+    });
+  });
+
+export const deleteOsFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ osId: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (!canDeleteOs(user)) {
+      throw new Error("Sem permissão para excluir OS.");
+    }
+    return deleteOs({
+      osId: data.osId,
+      quem: user.name,
+      userId: user.id,
     });
   });
 

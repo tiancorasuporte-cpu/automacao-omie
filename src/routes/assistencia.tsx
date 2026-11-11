@@ -38,6 +38,7 @@ import {
   checkInOsFn,
   checkOutOsFn,
   createOsFn,
+  deleteOsFn,
   pauseOsFn,
   resumeOsFn,
   finishVisitaFn,
@@ -271,6 +272,7 @@ function AssistenciaPage() {
   const [openColFilter, setOpenColFilter] = useState<number | null>(null);
   const [globalTipo, setGlobalTipo] = useState("");
   const [globalName, setGlobalName] = useState("");
+  const [agendaTecnico, setAgendaTecnico] = useState("");
   const [globalDatePreset, setGlobalDatePreset] = useState<DatePreset>("todos");
   const [globalDateFrom, setGlobalDateFrom] = useState("");
   const [globalDateTo, setGlobalDateTo] = useState("");
@@ -470,14 +472,33 @@ function AssistenciaPage() {
     return map;
   }, [filtered]);
 
+  const agendaTecnicoOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const os of osList) {
+      const tec = (os.tecnicoNome ?? "").trim();
+      if (tec) names.add(tec);
+    }
+    for (const team of boot.teams) {
+      for (const m of team.members) {
+        if (m.active && m.name.trim()) names.add(m.name.trim());
+      }
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [osList, boot.teams]);
+
   /** Agenda: só OS já agendadas (etapa Agendado+ com data). */
-  const agendaOs = useMemo(
-    () =>
-      filtered
-        .filter((o) => Boolean(o.agDate) && o.stage >= 4)
-        .sort((a, b) => (a.agDate ?? "").localeCompare(b.agDate ?? "")),
-    [filtered],
-  );
+  const agendaOs = useMemo(() => {
+    const tecQ = agendaTecnico.trim().toLowerCase();
+    return filtered
+      .filter((o) => Boolean(o.agDate) && o.stage >= 4)
+      .filter((o) => {
+        if (!tecQ) return true;
+        const tec = (o.tecnicoNome ?? "").trim().toLowerCase();
+        const team = (o.teamName ?? "").trim().toLowerCase();
+        return tec === tecQ || tec.includes(tecQ) || team.includes(tecQ);
+      })
+      .sort((a, b) => (a.agDate ?? "").localeCompare(b.agDate ?? ""));
+  }, [filtered, agendaTecnico]);
 
   const agendaCalendarItems = useMemo(
     () =>
@@ -560,7 +581,7 @@ function AssistenciaPage() {
   }
 
   function osNeedsDisposition(os: OsRow) {
-    if (os.stage !== 5 || !os.coAt) return false;
+    if ((os.stage !== 5 && os.stage !== 6) || !os.coAt) return false;
     const items = os.items.filter((i) =>
       ["campo", "extra", "aplicado", "separado", "recebido"].includes(i.status),
     );
@@ -827,7 +848,20 @@ function AssistenciaPage() {
       return;
     }
     if (cta.kind === "start") {
-      await run(() => startExecOsFn({ data: { osId: os.id, materialOk: true } }));
+      const hasItems = os.items.length > 0;
+      if (hasItems) {
+        const ok = window.confirm(
+          `Enviar a OS ${os.num} para o técnico confirmar os equipamentos no app?`,
+        );
+        if (!ok) return;
+        await run(() =>
+          startExecOsFn({ data: { osId: os.id, materialOk: false } }),
+        );
+      } else {
+        await run(() =>
+          startExecOsFn({ data: { osId: os.id, materialOk: true } }),
+        );
+      }
       return;
     }
     await openDetail(os);
@@ -1049,11 +1083,28 @@ function AssistenciaPage() {
                                   type="button"
                                   disabled={busy || it.status === "separado"}
                                   onClick={() =>
-                                    run(() =>
-                                      updateOsItemFn({
+                                    void run(async () => {
+                                      const updated = await updateOsItemFn({
                                         data: { itemId: it.id, status: "separado" },
-                                      }),
-                                    )
+                                      });
+                                      if (!updated || updated.stage !== 1) return updated;
+                                      const pending = updated.items.some(
+                                        (i) =>
+                                          i.status === "pendente" || i.status === "recebido",
+                                      );
+                                      if (pending) return updated;
+                                      const needBuy = updated.items.some(
+                                        (i) => i.status === "comprar",
+                                      );
+                                      const nextLabel = needBuy
+                                        ? "Compras"
+                                        : "Aguardando agendamento";
+                                      const ok = window.confirm(
+                                        `Todo material separado na OS ${updated.num}. Avançar automaticamente para “${nextLabel}”?`,
+                                      );
+                                      if (!ok) return updated;
+                                      return advanceOsFn({ data: { osId: updated.id } });
+                                    })
                                   }
                                   className={cn(
                                     "rounded-full px-sm py-2xs text-label-sm font-semibold disabled:opacity-60",
@@ -1228,6 +1279,30 @@ function AssistenciaPage() {
                 ) : null}
 
                 <div className="flex flex-wrap gap-sm">
+                  {boot.user.canDeleteOs ? (
+                    <button
+                      type="button"
+                      disabled={busy || selected.stage >= 7}
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            `Excluir a OS ${selected.num}? Esta ação não pode ser desfeita.`,
+                          )
+                        ) {
+                          return;
+                        }
+                        void run(async () => {
+                          await deleteOsFn({ data: { osId: selected.id } });
+                          setSelectedId(null);
+                          setCalSheetOpen(false);
+                          return null;
+                        });
+                      }}
+                      className="rounded-lg border border-error/40 bg-error-container/20 px-md py-sm text-label-md font-semibold text-error disabled:opacity-50"
+                    >
+                      Excluir OS
+                    </button>
+                  ) : null}
                   {selected.stage === 0 || selected.stage === 1 || selected.stage === 6 ? (
                     <button
                       type="button"
@@ -1250,18 +1325,59 @@ function AssistenciaPage() {
                     </button>
                   ) : null}
                   {selected.stage === 4 && (boot.user.canAssistencia || boot.user.isAdmin) ? (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        run(() =>
-                          startExecOsFn({ data: { osId: selected.id, materialOk: true } }),
-                        )
-                      }
-                      className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
-                    >
-                      Iniciar execução (OK material)
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          const hasItems = selected.items.length > 0;
+                          if (hasItems) {
+                            const ok = window.confirm(
+                              `Enviar material da OS ${selected.num} para o técnico confirmar no app?`,
+                            );
+                            if (!ok) return;
+                            void run(() =>
+                              startExecOsFn({
+                                data: { osId: selected.id, materialOk: false },
+                              }),
+                            );
+                            return;
+                          }
+                          void run(() =>
+                            startExecOsFn({
+                              data: { osId: selected.id, materialOk: true },
+                            }),
+                          );
+                        }}
+                        className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
+                      >
+                        {selected.items.length
+                          ? selected.envio
+                            ? "Reenviar p/ confirmar material"
+                            : "Enviar p/ técnico confirmar material"
+                          : "Iniciar execução"}
+                      </button>
+                      {selected.items.length ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            const ok = window.confirm(
+                              "Confirmar material agora e iniciar execução sem o app do técnico?",
+                            );
+                            if (!ok) return;
+                            void run(() =>
+                              startExecOsFn({
+                                data: { osId: selected.id, materialOk: true },
+                              }),
+                            );
+                          }}
+                          className="rounded-lg border border-outline-variant px-md py-sm text-label-md"
+                        >
+                          OK material (iniciar sem app)
+                        </button>
+                      ) : null}
+                    </>
                   ) : null}
                   {selected.stage === 5 &&
                   !selected.ciAt &&
@@ -1556,7 +1672,7 @@ function AssistenciaPage() {
                   </div>
                 ) : null}
 
-                {selected.stage === 5 &&
+                {(selected.stage === 5 || selected.stage === 6) &&
                 selected.coAt &&
                 selected.items.some((i) =>
                   ["campo", "extra", "aplicado", "separado", "recebido"].includes(i.status),
@@ -2550,7 +2666,7 @@ function AssistenciaPage() {
 
         {tab === "agenda" ? (
           <div className="flex flex-col gap-md">
-            <div className="flex flex-wrap gap-xs">
+            <div className="flex flex-wrap items-end gap-sm">
               {(
                 [
                   ["lista", "Lista"],
@@ -2566,6 +2682,30 @@ function AssistenciaPage() {
                   {label}
                 </button>
               ))}
+              <label className="flex min-w-[12rem] flex-col gap-2xs text-label-md text-on-surface-variant">
+                Técnico
+                <select
+                  value={agendaTecnico}
+                  onChange={(e) => setAgendaTecnico(e.target.value)}
+                  className={fieldClass}
+                >
+                  <option value="">Todos</option>
+                  {agendaTecnicoOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {agendaTecnico ? (
+                <button
+                  type="button"
+                  className={btnMuted}
+                  onClick={() => setAgendaTecnico("")}
+                >
+                  Limpar técnico
+                </button>
+              ) : null}
             </div>
 
             {agendaView === "lista" ? (

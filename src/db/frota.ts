@@ -241,6 +241,79 @@ export async function listFleetCatalog(kind: string) {
   return rows.map((r) => ({ id: num(r["id"]), kind: str(r["kind"]), name: str(r["name"]) }));
 }
 
+export async function deleteFleetVehicle(vehicleId: number) {
+  if (!Number.isFinite(vehicleId) || vehicleId <= 0) {
+    throw new Error("Veículo inválido.");
+  }
+  const db = await getDb();
+  const [row] = (await db`
+    select id, name from fleet_vehicles where id = ${vehicleId} limit 1
+  `) as Array<{ id: number; name: string }>;
+  if (!row) throw new Error("Veículo não encontrado.");
+  await db`delete from fleet_vehicles where id = ${vehicleId}`;
+  return { ok: true as const, id: vehicleId, name: str(row.name) };
+}
+
+async function syncVehicleOdometerFromReadings(vehicleId: number) {
+  const db = await getDb();
+  await db`
+    update fleet_vehicles v
+    set current_odometer = coalesce((
+      select max(r.odometer)::float from fleet_readings r where r.vehicle_id = v.id
+    ), v.current_odometer),
+        updated_at = now()
+    where v.id = ${vehicleId}
+  `;
+}
+
+export async function updateReading(input: {
+  id: number;
+  odometer: number;
+  occurredAt?: string | null;
+  reason?: string | null;
+  notes?: string | null;
+}) {
+  if (!Number.isFinite(input.id) || input.id <= 0) {
+    throw new Error("Lançamento inválido.");
+  }
+  if (!Number.isFinite(input.odometer) || input.odometer < 0) {
+    throw new Error("Informe o odômetro (km) válido.");
+  }
+  const reason = nullableStr(input.reason);
+  if (!reason) throw new Error("Informe o motivo da atualização do KM.");
+  const db = await getDb();
+  const [row] = (await db`
+    select id, vehicle_id from fleet_readings where id = ${input.id} limit 1
+  `) as Array<{ id: number; vehicle_id: number }>;
+  if (!row) throw new Error("Lançamento de KM não encontrado.");
+
+  const occurredAt = input.occurredAt?.trim() || null;
+  await db`
+    update fleet_readings
+    set odometer = ${input.odometer},
+        reason = ${reason.slice(0, 200)},
+        notes = ${nullableStr(input.notes)},
+        occurred_at = coalesce(${occurredAt}::timestamptz, occurred_at)
+    where id = ${input.id}
+  `;
+  await syncVehicleOdometerFromReadings(row.vehicle_id);
+  return { ok: true as const, id: input.id, vehicleId: row.vehicle_id };
+}
+
+export async function deleteReading(readingId: number) {
+  if (!Number.isFinite(readingId) || readingId <= 0) {
+    throw new Error("Lançamento inválido.");
+  }
+  const db = await getDb();
+  const [row] = (await db`
+    select id, vehicle_id from fleet_readings where id = ${readingId} limit 1
+  `) as Array<{ id: number; vehicle_id: number }>;
+  if (!row) throw new Error("Lançamento de KM não encontrado.");
+  await db`delete from fleet_readings where id = ${readingId}`;
+  await syncVehicleOdometerFromReadings(row.vehicle_id);
+  return { ok: true as const, id: readingId, vehicleId: row.vehicle_id };
+}
+
 export async function saveFleetVehicle(input: {
   id?: number | null;
   name: string;

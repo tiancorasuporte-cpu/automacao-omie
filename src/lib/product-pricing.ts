@@ -13,6 +13,20 @@ export function effectiveCmc(
   return Math.max(...values);
 }
 
+/** Custo de estoque: prioriza o CMC interno cadastrado em Produtos. */
+export function stockCostCmc(
+  cmcOmie: number | null | undefined,
+  cmcInterno: number | null | undefined,
+) {
+  if (cmcInterno != null && Number.isFinite(cmcInterno) && cmcInterno >= 0) {
+    return cmcInterno;
+  }
+  if (cmcOmie != null && Number.isFinite(cmcOmie) && cmcOmie >= 0) {
+    return cmcOmie;
+  }
+  return null;
+}
+
 export function suggestedPriceFromCmc(cmc: number | null | undefined, markup = DEFAULT_PRODUCT_MARKUP) {
   if (cmc == null || !Number.isFinite(cmc) || cmc <= 0) return null;
   const m = Number.isFinite(markup) && markup > 0 ? markup : DEFAULT_PRODUCT_MARKUP;

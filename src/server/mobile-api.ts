@@ -11,10 +11,13 @@ import {
 import {
   checkInOs,
   checkOutOs,
+  markMaterialDivergence,
+  osNeedsMaterialConfirm,
   pauseOs,
   resumeOs,
   startExecOs,
 } from "@/db/assistencia";
+import { osExecStatus } from "@/lib/assistencia-domain";
 import {
   createReading,
   createRefueling,
@@ -54,6 +57,14 @@ function serializeOs(
     : never,
   options: { includeRel?: boolean } = {},
 ) {
+  const needsMaterialConfirm = osNeedsMaterialConfirm(os);
+  const exec = osExecStatus({
+    stage: os.stage,
+    ciAt: os.ciAt,
+    coAt: os.coAt,
+    pausedAt: os.pausedAt,
+    needsMaterialConfirm,
+  });
   const base = {
     id: os.id,
     num: os.num,
@@ -78,11 +89,24 @@ function serializeOs(
     fotosCount: os.rel?.fotos.length ?? 0,
     anexosCount: os.rel?.anexos.length ?? 0,
     hasAssinatura: Boolean(os.rel?.assinatura),
+    needsMaterialConfirm,
+    execStatus: exec.key,
+    execStatusLabel: exec.label,
+    envio: os.envio
+      ? {
+          equipe: os.envio.equipe,
+          quando: os.envio.quando,
+          div: os.envio.div ?? null,
+        }
+      : null,
     items: os.items.map((i) => ({
       id: i.id,
       qtd: i.qtd,
       nome: i.nome,
       status: i.status,
+      productId: i.productId,
+      usado: i.usado,
+      sobraDestino: i.sobraDestino,
     })),
     events: (os.events ?? []).map((e) => ({
       id: e.id,
@@ -176,13 +200,75 @@ export async function handleMobileEstoque(request: Request) {
   if (!auth.ok) return auth.response;
   const teams = await listTeamsForTecnico(auth.user.id);
   if (!teams.length) {
-    return jsonOk({ ok: true, teams: [], items: [] });
+    return jsonOk({ ok: true, teams: [], items: [], pendentes: [] });
   }
   const { listTeamStock } = await import("@/db/team-stock");
-  const items = (
-    await Promise.all(teams.map((t) => listTeamStock({ teamId: t.id })))
-  ).flat();
-  return jsonOk({ ok: true, teams, items });
+  const { listPendingMatSaidasForTeams } = await import("@/db/mat-saidas");
+  const [items, pendentes] = await Promise.all([
+    Promise.all(teams.map((t) => listTeamStock({ teamId: t.id }))).then((rows) =>
+      rows.flat(),
+    ),
+    listPendingMatSaidasForTeams(teams.map((t) => t.id)),
+  ]);
+  return jsonOk({
+    ok: true,
+    teams,
+    items,
+    pendentes: pendentes.map((s) => ({
+      id: s.id,
+      num: s.num,
+      destino: s.destino,
+      teamId: s.teamId,
+      teamName: s.teamName,
+      tecnicoNome: s.tecnicoNome,
+      osId: s.osId,
+      osNum: s.osNum,
+      status: s.status,
+      createdAt: s.createdAt,
+      itens: s.itens.map((i) => ({
+        id: i.id,
+        productId: i.productId,
+        nome: i.nome,
+        qtd: i.qtd,
+      })),
+    })),
+  });
+}
+
+export async function handleMobileConfirmMatSaida(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const body = await readJsonBody<{ saidaId?: number }>(request);
+  const saidaId = Number(body?.saidaId);
+  if (!Number.isFinite(saidaId) || saidaId <= 0) {
+    return jsonError("Saída inválida.");
+  }
+  const teams = await listTeamsForTecnico(auth.user.id);
+  if (!teams.length) return jsonError("Técnico sem equipe vinculada.");
+  try {
+    const { confirmMatSaida } = await import("@/db/mat-saidas");
+    const saida = await confirmMatSaida({
+      saidaId,
+      userId: auth.user.id,
+      userName: auth.user.name,
+      allowedTeamIds: teams.map((t) => t.id),
+    });
+    return jsonOk({
+      ok: true,
+      saida: {
+        id: saida.id,
+        num: saida.num,
+        status: saida.status,
+        confirmedAt: saida.confirmedAt,
+        confirmedByName: saida.confirmedByName,
+      },
+    });
+  } catch (error) {
+    return jsonError(
+      error instanceof Error ? error.message : "Falha ao confirmar recebimento.",
+    );
+  }
 }
 
 export async function handleMobileUsarEstoque(
@@ -345,18 +431,57 @@ async function withOwnedOs(
 }
 
 export async function handleMobileStartOs(request: Request, osId: number) {
-  return withOwnedOs(request, osId, async (user) => {
-    const body = await readJsonBody<{ materialOk?: boolean }>(request);
+  return withOwnedOs(request, osId, async (user, ownedOs) => {
+    const body = await readJsonBody<{ materialOk?: boolean; divergencia?: string }>(
+      request,
+    );
     const roles = mobileOsRoles(user);
+    const hasItems = ownedOs.items.length > 0;
+    const confirmOk = body?.materialOk === true;
+
+    // Com material: técnico precisa confirmar equipamentos explicitamente.
+    if (hasItems && !confirmOk) {
+      let os = ownedOs;
+      if (ownedOs.stage === 4) {
+        os =
+          (await startExecOs({
+            osId,
+            materialOk: false,
+            quem: user.name,
+            userId: user.id,
+            isAdmin: roles.isAdmin,
+            canRole: roles.canRole,
+          })) ?? ownedOs;
+      }
+      if (body?.divergencia?.trim()) {
+        os =
+          (await markMaterialDivergence({
+            osId,
+            texto: body.divergencia.trim(),
+            quem: user.name,
+            userId: user.id,
+          })) ?? os;
+      }
+      return jsonOk({
+        ok: true,
+        needsMaterialConfirm: true,
+        os: serializeOs(os!),
+      });
+    }
+
     const os = await startExecOs({
       osId,
-      materialOk: body?.materialOk ?? true,
+      materialOk: true,
       quem: user.name,
       userId: user.id,
       isAdmin: roles.isAdmin,
       canRole: roles.canRole,
     });
-    return jsonOk({ ok: true, os: serializeOs(os!) });
+    return jsonOk({
+      ok: true,
+      needsMaterialConfirm: false,
+      os: serializeOs(os!),
+    });
   });
 }
 
@@ -480,18 +605,28 @@ export async function handleMobileFrotaKm(request: Request) {
       odometer?: number;
       occurredAt?: string;
       reason?: string;
+      kind?: string;
       notes?: string;
       clientActionId?: string;
     }>(request);
     const vehicle = await requireDefaultVehicle(auth.user);
     const driver = await ensureFleetDriverForUser(auth.user);
+    const kindRaw = String(body?.kind ?? "daily_km").trim().toLowerCase();
+    const kind =
+      kindRaw === "entrada" || kindRaw === "saida" || kindRaw === "saída"
+        ? kindRaw === "saída"
+          ? "saida"
+          : kindRaw
+        : "daily_km";
+    const defaultReason =
+      kind === "entrada" ? "Entrada" : kind === "saida" ? "Saída" : "Lançamento app técnico";
     const id = await createReading({
       vehicleId: vehicle.id,
       driverId: driver.id,
       occurredAt: body?.occurredAt || new Date().toISOString(),
       odometer: Number(body?.odometer),
-      kind: "daily_km",
-      reason: body?.reason?.trim() || "Lançamento app técnico",
+      kind,
+      reason: body?.reason?.trim() || defaultReason,
       notes: body?.notes ?? null,
       createdBy: auth.user.id,
     });
@@ -649,10 +784,12 @@ async function applySyncAction(
     if (!owned.ok) throw new Error(owned.error);
 
     if (action.type === "os_start") {
+      const hasItems = owned.os.items.length > 0;
+      const materialOk = payload.materialOk === true || !hasItems;
       return serializeOs(
         (await startExecOs({
           osId: action.osId,
-          materialOk: Boolean(payload.materialOk ?? true),
+          materialOk,
           quem: user.name,
           userId: user.id,
           isAdmin: roles.isAdmin,

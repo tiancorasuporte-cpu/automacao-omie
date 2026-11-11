@@ -43,6 +43,12 @@ export function canDeleteOrcamento(user: Pick<AppUser, "role" | "modules"> | nul
   return hasPermission(user.modules, "orcamentos_excluir");
 }
 
+export function canDeleteOs(user: Pick<AppUser, "role" | "modules"> | null | undefined) {
+  if (!user) return false;
+  if (isAdmin(user)) return true;
+  return hasPermission(user.modules, "os_excluir");
+}
+
 export function canManageMonthlyServices(
   user: Pick<AppUser, "role" | "modules"> | null | undefined,
 ) {

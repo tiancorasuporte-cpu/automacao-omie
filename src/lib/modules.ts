@@ -49,6 +49,11 @@ export const APP_PERMISSIONS = [
     hint: "Etapa de compras da OS (marcar comprado / previsão).",
   },
   {
+    id: "os_excluir",
+    label: "OS · Excluir",
+    hint: "Permite excluir ordens de serviço do kanban da Assistência.",
+  },
+  {
     id: "ticket_assist",
     label: "Ticket · Assistência Técnica",
     hint: "Atender tickets do setor Assistência Técnica.",
