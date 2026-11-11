@@ -7,6 +7,7 @@ import {
   activityInitial,
   osActivityStatus,
 } from "@/components/ActivitiesCalendar";
+import { useAppConfirm } from "@/components/AppConfirm";
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
 import { PhotoCapture, type CapturedPhoto } from "@/components/PhotoCapture";
@@ -245,6 +246,7 @@ function AssistenciaPage() {
   const { view: viewFromUrl } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { query } = useShellSearch();
+  const { confirm: askConfirm, ConfirmHost } = useAppConfirm();
   const [tab, setTab] = useState<TabId>(viewFromUrl);
   const [agendaView, setAgendaView] = useState<AgendaView>("lista");
 
@@ -850,9 +852,11 @@ function AssistenciaPage() {
     if (cta.kind === "start") {
       const hasItems = os.items.length > 0;
       if (hasItems) {
-        const ok = window.confirm(
-          `Enviar a OS ${os.num} para o técnico confirmar os equipamentos no app?`,
-        );
+        const ok = await askConfirm({
+          title: "Confirmar equipamentos",
+          description: `Enviar a OS ${os.num} para o técnico confirmar os equipamentos no app?`,
+          confirmLabel: "Enviar",
+        });
         if (!ok) return;
         await run(() =>
           startExecOsFn({ data: { osId: os.id, materialOk: false } }),
@@ -1099,9 +1103,11 @@ function AssistenciaPage() {
                                       const nextLabel = needBuy
                                         ? "Compras"
                                         : "Aguardando agendamento";
-                                      const ok = window.confirm(
-                                        `Todo material separado na OS ${updated.num}. Avançar automaticamente para “${nextLabel}”?`,
-                                      );
+                                      const ok = await askConfirm({
+                                        title: "Avançar etapa",
+                                        description: `Todo material separado na OS ${updated.num}. Avançar automaticamente para “${nextLabel}”?`,
+                                        confirmLabel: "Avançar",
+                                      });
                                       if (!ok) return updated;
                                       return advanceOsFn({ data: { osId: updated.id } });
                                     })
@@ -1284,19 +1290,21 @@ function AssistenciaPage() {
                       type="button"
                       disabled={busy || selected.stage >= 7}
                       onClick={() => {
-                        if (
-                          !window.confirm(
-                            `Excluir a OS ${selected.num}? Esta ação não pode ser desfeita.`,
-                          )
-                        ) {
-                          return;
-                        }
-                        void run(async () => {
-                          await deleteOsFn({ data: { osId: selected.id } });
-                          setSelectedId(null);
-                          setCalSheetOpen(false);
-                          return null;
-                        });
+                        void (async () => {
+                          const ok = await askConfirm({
+                            title: "Excluir OS",
+                            description: `Excluir a OS ${selected.num}? Esta ação não pode ser desfeita.`,
+                            confirmLabel: "Excluir",
+                            danger: true,
+                          });
+                          if (!ok) return;
+                          await run(async () => {
+                            await deleteOsFn({ data: { osId: selected.id } });
+                            setSelectedId(null);
+                            setCalSheetOpen(false);
+                            return null;
+                          });
+                        })();
                       }}
                       className="rounded-lg border border-error/40 bg-error-container/20 px-md py-sm text-label-md font-semibold text-error disabled:opacity-50"
                     >
@@ -1330,24 +1338,28 @@ function AssistenciaPage() {
                         type="button"
                         disabled={busy}
                         onClick={() => {
-                          const hasItems = selected.items.length > 0;
-                          if (hasItems) {
-                            const ok = window.confirm(
-                              `Enviar material da OS ${selected.num} para o técnico confirmar no app?`,
-                            );
-                            if (!ok) return;
-                            void run(() =>
+                          void (async () => {
+                            const hasItems = selected.items.length > 0;
+                            if (hasItems) {
+                              const ok = await askConfirm({
+                                title: "Confirmar material",
+                                description: `Enviar material da OS ${selected.num} para o técnico confirmar no app?`,
+                                confirmLabel: "Enviar",
+                              });
+                              if (!ok) return;
+                              await run(() =>
+                                startExecOsFn({
+                                  data: { osId: selected.id, materialOk: false },
+                                }),
+                              );
+                              return;
+                            }
+                            await run(() =>
                               startExecOsFn({
-                                data: { osId: selected.id, materialOk: false },
+                                data: { osId: selected.id, materialOk: true },
                               }),
                             );
-                            return;
-                          }
-                          void run(() =>
-                            startExecOsFn({
-                              data: { osId: selected.id, materialOk: true },
-                            }),
-                          );
+                          })();
                         }}
                         className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
                       >
@@ -1362,15 +1374,20 @@ function AssistenciaPage() {
                           type="button"
                           disabled={busy}
                           onClick={() => {
-                            const ok = window.confirm(
-                              "Confirmar material agora e iniciar execução sem o app do técnico?",
-                            );
-                            if (!ok) return;
-                            void run(() =>
-                              startExecOsFn({
-                                data: { osId: selected.id, materialOk: true },
-                              }),
-                            );
+                            void (async () => {
+                              const ok = await askConfirm({
+                                title: "Iniciar sem app",
+                                description:
+                                  "Confirmar material agora e iniciar execução sem o app do técnico?",
+                                confirmLabel: "Iniciar",
+                              });
+                              if (!ok) return;
+                              await run(() =>
+                                startExecOsFn({
+                                  data: { osId: selected.id, materialOk: true },
+                                }),
+                              );
+                            })();
                           }}
                           className="rounded-lg border border-outline-variant px-md py-sm text-label-md"
                         >
@@ -3869,6 +3886,7 @@ function AssistenciaPage() {
           </SoftDialogFooter>
         </SoftDialogContent>
       </Dialog>
+      {ConfirmHost}
     </AppShell>
   );
 }
