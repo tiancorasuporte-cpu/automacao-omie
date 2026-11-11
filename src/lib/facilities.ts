@@ -6,11 +6,13 @@ import {
   FACILITIES_ESCALAS,
   FACILITIES_FUNCOES,
   FACILITIES_MOTIVOS,
+  FACILITIES_PERIODOS,
   currentMonthKey,
   isFacilitiesEmpresaId,
   isFacilitiesEscalaId,
   isFacilitiesFuncaoId,
   isFacilitiesMotivoId,
+  isFacilitiesPeriodoId,
 } from "@/lib/facilities-domain";
 
 const empresaSchema = z
@@ -32,6 +34,11 @@ const motivoSchema = z
   .string()
   .refine(isFacilitiesMotivoId, "Motivo inválido.")
   .transform((v) => v as (typeof FACILITIES_MOTIVOS)[number]["id"]);
+
+const periodoSchema = z
+  .string()
+  .refine(isFacilitiesPeriodoId, "Período inválido.")
+  .transform((v) => v as (typeof FACILITIES_PERIODOS)[number]["id"]);
 
 const monthKeySchema = z
   .string()
@@ -56,18 +63,21 @@ export const getFacilitiesBootstrapFn = createServerFn({ method: "GET" })
       listFacilitiesSubstitutions,
       listFacilitiesVacations,
       getFacilitiesMonthSummary,
+      listFacilitiesHourRates,
     } = await import("@/db/facilities");
-    const [posts, collaborators, substitutions, vacations, summary] = await Promise.all([
-      listFacilitiesPosts(false),
-      listFacilitiesCollaborators(false),
-      listFacilitiesSubstitutions({
-        monthKey: data.monthKey,
-      }),
-      listFacilitiesVacations({
-        monthKey: data.monthKey,
-      }),
-      getFacilitiesMonthSummary(data.monthKey),
-    ]);
+    const [posts, collaborators, substitutions, vacations, summary, hourRates] =
+      await Promise.all([
+        listFacilitiesPosts(false),
+        listFacilitiesCollaborators(false),
+        listFacilitiesSubstitutions({
+          monthKey: data.monthKey,
+        }),
+        listFacilitiesVacations({
+          monthKey: data.monthKey,
+        }),
+        getFacilitiesMonthSummary(data.monthKey),
+        listFacilitiesHourRates(),
+      ]);
     return {
       monthKey: data.monthKey,
       posts,
@@ -75,11 +85,13 @@ export const getFacilitiesBootstrapFn = createServerFn({ method: "GET" })
       substitutions,
       vacations,
       summary,
+      hourRates,
       catalogs: {
         empresas: [...FACILITIES_EMPRESAS],
         funcoes: [...FACILITIES_FUNCOES],
         escalas: [...FACILITIES_ESCALAS],
         motivos: [...FACILITIES_MOTIVOS],
+        periodos: [...FACILITIES_PERIODOS],
       },
     };
   });
@@ -268,6 +280,13 @@ export const createFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
         ausenteId: z.number().int().positive().nullable().optional(),
         substitutoId: z.number().int().positive(),
         horas: z.number().positive("Informe horas e minutos maiores que zero."),
+        periodo: periodoSchema,
+        horasExtra: z.number().nonnegative().optional(),
+        periodoExtra: periodoSchema.nullable().optional(),
+        aplicaDesconto: z.boolean().optional(),
+        atestadoNome: z.string().trim().max(255).nullable().optional(),
+        atestadoMime: z.string().trim().max(120).nullable().optional(),
+        atestadoData: z.string().nullable().optional(),
         observacao: z.string().trim().nullable().optional(),
         pagaAlmoco: z.boolean().optional(),
         valorAlmoco: z.number().nonnegative().optional(),
@@ -281,13 +300,28 @@ export const createFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
               path: ["ausenteId"],
             });
           }
-          return;
-        }
-        if (value.ausenteId == null) {
+        } else if (value.ausenteId == null) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: "Informe quem faltou (ausente).",
             path: ["ausenteId"],
+          });
+        }
+        if (value.motivo === "atestado") {
+          if (!value.atestadoData?.trim()) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Anexe o atestado (PDF ou imagem).",
+              path: ["atestadoData"],
+            });
+          }
+        }
+        const he = value.horasExtra ?? 0;
+        if (he > 0 && !value.periodoExtra) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Informe o período da hora extra.",
+            path: ["periodoExtra"],
           });
         }
       })
@@ -305,6 +339,15 @@ export const createFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
         ausenteId: data.motivo === "extra" ? null : data.ausenteId ?? null,
         substitutoId: data.substitutoId,
         horas: data.horas,
+        periodo: data.periodo,
+        horasExtra: data.horasExtra ?? 0,
+        periodoExtra: data.periodoExtra ?? null,
+        ...(data.aplicaDesconto === undefined
+          ? {}
+          : { aplicaDesconto: data.aplicaDesconto }),
+        atestadoNome: data.atestadoNome ?? null,
+        atestadoMime: data.atestadoMime ?? null,
+        atestadoData: data.atestadoData ?? null,
         observacao: data.observacao ?? null,
         pagaAlmoco: data.pagaAlmoco ?? false,
         valorAlmoco: data.valorAlmoco ?? 0,
@@ -315,6 +358,78 @@ export const createFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
       return {
         ok: false as const,
         error: error instanceof Error ? error.message : "Falha ao lançar substituição.",
+      };
+    }
+  });
+
+export const saveFacilitiesHourRatesFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        rates: z
+          .array(
+            z.object({
+              funcao: funcaoSchema,
+              valorDiurna: z.number().nonnegative(),
+              valorNoturna: z.number().nonnegative(),
+              valorExtraDiurna: z.number().nonnegative(),
+              valorExtraNoturna: z.number().nonnegative(),
+              valorDescontoDiurna: z.number().nonnegative(),
+              valorDescontoNoturna: z.number().nonnegative(),
+            }),
+          )
+          .min(1),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("facilities");
+    const { upsertFacilitiesHourRates } = await import("@/db/facilities");
+    try {
+      const rates = await upsertFacilitiesHourRates(data.rates);
+      return { ok: true as const, rates };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao salvar valores das horas.",
+      };
+    }
+  });
+
+export const getFacilitiesSubstitutionAtestadoFn = createServerFn({ method: "GET" })
+  .validator((input) => z.object({ id: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("facilities");
+    const { getFacilitiesSubstitutionAtestado } = await import("@/db/facilities");
+    try {
+      const file = await getFacilitiesSubstitutionAtestado(data.id);
+      if (!file) {
+        return { ok: false as const, error: "Atestado não encontrado." };
+      }
+      return { ok: true as const, file };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao baixar atestado.",
+      };
+    }
+  });
+
+export const deleteFacilitiesSubstitutionAtestadoFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ id: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("facilities");
+    const { deleteFacilitiesSubstitutionAtestado } = await import("@/db/facilities");
+    try {
+      await deleteFacilitiesSubstitutionAtestado(data.id);
+      return { ok: true as const };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao apagar atestado.",
       };
     }
   });

@@ -1,5 +1,5 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
@@ -19,6 +19,7 @@ import {
   tableHeadCellClass,
   tableHeadClass,
 } from "@/components/PageChrome";
+import type { AppUser } from "@/db/schema";
 import {
   createUserFn,
   getUsersAdminBootstrapFn,
@@ -38,6 +39,13 @@ import { isSuperadmin, roleLabel, requireAdmin } from "@/lib/require-auth";
 import { matchesQuery } from "@/lib/text-search";
 import { cn } from "@/lib/utils";
 import { Route as RootRoute } from "@/routes/__root";
+
+type FleetVehicleOption = {
+  id: number;
+  name: string;
+  plate: string | null;
+  active: boolean;
+};
 
 export const Route = createFileRoute("/users")({
   beforeLoad: requireAdmin,
@@ -186,6 +194,373 @@ function roleBadgeClass(role: string) {
   return "bg-surface-container text-on-surface-variant";
 }
 
+function UserDetails({
+  user,
+  vehicles,
+  busyId,
+  setBusyId,
+  setError,
+  setMessage,
+  canResetPassword,
+  passwordUserId,
+  setPasswordUserId,
+  newPassword,
+  setNewPassword,
+  editingModulesId,
+  setEditingModulesId,
+  draftModules,
+  setDraftModules,
+  onInvalidate,
+}: {
+  user: AppUser;
+  vehicles: FleetVehicleOption[];
+  busyId: number | null;
+  setBusyId: Dispatch<SetStateAction<number | null>>;
+  setError: Dispatch<SetStateAction<string | null>>;
+  setMessage: Dispatch<SetStateAction<string | null>>;
+  canResetPassword: boolean;
+  passwordUserId: number | null;
+  setPasswordUserId: Dispatch<SetStateAction<number | null>>;
+  newPassword: string;
+  setNewPassword: Dispatch<SetStateAction<string>>;
+  editingModulesId: number | null;
+  setEditingModulesId: Dispatch<SetStateAction<number | null>>;
+  draftModules: AppModuleId[];
+  setDraftModules: Dispatch<SetStateAction<AppModuleId[]>>;
+  onInvalidate: () => Promise<void>;
+}) {
+  const menus = APP_MODULES.filter((m) => user.modules.includes(m.id));
+  const extras = APP_PERMISSIONS.filter((p) => user.modules.includes(p.id));
+
+  return (
+    <div className="space-y-md">
+      {user.role === "operator" ? (
+        <div className="space-y-sm rounded-lg border border-outline-variant bg-surface p-md">
+          <p className="text-label-md font-semibold text-on-surface-variant">Menu</p>
+          <div className="flex flex-wrap gap-xs">
+            {menus.length ? (
+              menus.map((m) => (
+                <span
+                  key={m.id}
+                  className="rounded-full bg-surface-container px-sm py-2xs text-label-sm text-on-surface"
+                >
+                  {m.label}
+                </span>
+              ))
+            ) : (
+              <span className="text-label-md text-on-surface-variant">Nenhum módulo</span>
+            )}
+          </div>
+          {extras.length ? (
+            <>
+              <p className="pt-xs text-label-md font-semibold text-on-surface-variant">
+                Permissões
+              </p>
+              <div className="flex flex-wrap gap-xs">
+                {extras.map((p) => (
+                  <span
+                    key={p.id}
+                    className="rounded-full bg-amber-50 px-sm py-2xs text-label-sm text-amber-900"
+                    title={p.hint}
+                  >
+                    {p.label}
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-label-md text-on-surface-variant">Sem permissões extras</p>
+          )}
+        </div>
+      ) : (
+        <p className="rounded-lg border border-outline-variant bg-surface px-md py-md text-body-md text-on-surface-variant">
+          Acesso completo a todos os módulos.
+        </p>
+      )}
+
+      <div className="space-y-sm rounded-lg border border-outline-variant bg-surface p-md">
+        <p className="text-label-md font-semibold text-on-surface-variant">
+          Funções e veículo
+        </p>
+        <label className="flex items-center gap-sm text-body-md text-on-surface">
+          <input
+            type="checkbox"
+            checked={Boolean(user.isTecnico)}
+            disabled={busyId === user.id}
+            onChange={async (e) => {
+              setBusyId(user.id);
+              setError(null);
+              setMessage(null);
+              try {
+                const result = await updateUserStaffFn({
+                  data: {
+                    id: user.id,
+                    isTecnico: e.target.checked,
+                    isComprador: Boolean(user.isComprador),
+                    defaultVehicleId: user.defaultVehicleId,
+                  },
+                });
+                if (!result.ok) setError(result.error);
+                else {
+                  setMessage(
+                    e.target.checked
+                      ? `${user.name} marcado como técnico.`
+                      : `${user.name} removido de técnico.`,
+                  );
+                  await onInvalidate();
+                }
+              } finally {
+                setBusyId(null);
+              }
+            }}
+          />
+          É técnico (para equipes e app futuro)
+        </label>
+        <label className="flex items-center gap-sm text-body-md text-on-surface">
+          <input
+            type="checkbox"
+            checked={Boolean(user.isComprador)}
+            disabled={busyId === user.id}
+            onChange={async (e) => {
+              setBusyId(user.id);
+              setError(null);
+              setMessage(null);
+              try {
+                const result = await updateUserStaffFn({
+                  data: {
+                    id: user.id,
+                    isTecnico: Boolean(user.isTecnico),
+                    isComprador: e.target.checked,
+                    defaultVehicleId: user.defaultVehicleId,
+                  },
+                });
+                if (!result.ok) setError(result.error);
+                else {
+                  setMessage(
+                    e.target.checked
+                      ? `${user.name} marcado como comprador.`
+                      : `${user.name} removido de comprador.`,
+                  );
+                  await onInvalidate();
+                }
+              } finally {
+                setBusyId(null);
+              }
+            }}
+          />
+          É comprador (cotações, CMC e Kanban de compras)
+        </label>
+        <label className="block text-label-md text-on-surface-variant">
+          Veículo padrão
+          <select
+            value={user.defaultVehicleId ?? ""}
+            disabled={busyId === user.id}
+            className={fieldClass}
+            onChange={async (e) => {
+              const raw = e.target.value;
+              const nextId = raw ? Number(raw) : null;
+              setBusyId(user.id);
+              setError(null);
+              setMessage(null);
+              try {
+                const result = await updateUserStaffFn({
+                  data: {
+                    id: user.id,
+                    isTecnico: Boolean(user.isTecnico),
+                    isComprador: Boolean(user.isComprador),
+                    defaultVehicleId: nextId,
+                  },
+                });
+                if (!result.ok) setError(result.error);
+                else {
+                  setMessage(`Veículo padrão de ${user.name} atualizado.`);
+                  await onInvalidate();
+                }
+              } finally {
+                setBusyId(null);
+              }
+            }}
+          >
+            <option value="">Nenhum</option>
+            {vehicles.map((v) => (
+              <option
+                key={v.id}
+                value={v.id}
+                disabled={!v.active && v.id !== user.defaultVehicleId}
+              >
+                {vehicleOptionLabel(v)}
+                {!v.active ? " (inativo)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="flex flex-wrap gap-xs">
+        {user.role === "operator" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setEditingModulesId(editingModulesId === user.id ? null : user.id);
+              setDraftModules([...user.modules]);
+              setPasswordUserId(null);
+              setError(null);
+              setMessage(null);
+            }}
+            className={btnOutline}
+          >
+            <Icon name="tune" className="text-[16px]" />
+            {editingModulesId === user.id ? "Fechar edição" : "Editar acessos"}
+          </button>
+        ) : null}
+        {canResetPassword ? (
+          <button
+            type="button"
+            onClick={() => {
+              setPasswordUserId(passwordUserId === user.id ? null : user.id);
+              setNewPassword("");
+              setEditingModulesId(null);
+              setError(null);
+              setMessage(null);
+            }}
+            className={btnOutline}
+          >
+            <Icon name="lock_reset" className="text-[16px]" />
+            {passwordUserId === user.id ? "Fechar senha" : "Alterar senha"}
+          </button>
+        ) : null}
+        {user.role !== "superadmin" ? (
+          <button
+            type="button"
+            disabled={busyId === user.id}
+            onClick={async () => {
+              setBusyId(user.id);
+              setError(null);
+              setMessage(null);
+              try {
+                const result = await setUserActiveFn({
+                  data: { id: user.id, active: !user.active },
+                });
+                if (!result.ok) setError(result.error);
+                else
+                  setMessage(
+                    user.active ? `${user.name} desativado.` : `${user.name} reativado.`,
+                  );
+                await onInvalidate();
+              } finally {
+                setBusyId(null);
+              }
+            }}
+            className={user.active ? btnDanger : btnMuted}
+          >
+            <Icon name={user.active ? "person_off" : "person"} className="text-[16px]" />
+            {user.active ? "Desativar" : "Reativar"}
+          </button>
+        ) : null}
+      </div>
+
+      {passwordUserId === user.id ? (
+        <div className="rounded-lg border border-outline-variant bg-surface p-md">
+          <label className="block text-label-md text-on-surface-variant">
+            Nova senha para {user.name}
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(event) => setNewPassword(event.target.value)}
+              placeholder="Mínimo 4 caracteres"
+              className={fieldClass}
+            />
+          </label>
+          <div className="mt-md flex flex-wrap gap-xs">
+            <button
+              type="button"
+              disabled={busyId === user.id || newPassword.trim().length < 4}
+              onClick={async () => {
+                setBusyId(user.id);
+                setError(null);
+                setMessage(null);
+                try {
+                  const result = await setUserPasswordFn({
+                    data: { id: user.id, password: newPassword.trim() },
+                  });
+                  if (!result.ok) {
+                    setError(result.error);
+                    return;
+                  }
+                  setMessage(`Senha de ${user.name} atualizada.`);
+                  setPasswordUserId(null);
+                  setNewPassword("");
+                } finally {
+                  setBusyId(null);
+                }
+              }}
+              className={btnPrimary}
+            >
+              Salvar senha
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPasswordUserId(null);
+                setNewPassword("");
+              }}
+              className={btnMuted}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {editingModulesId === user.id ? (
+        <div className="rounded-lg border border-outline-variant bg-surface p-md">
+          <p className="text-label-md font-semibold text-on-surface">Acessos de {user.name}</p>
+          <ModulesPicker
+            value={draftModules}
+            onChange={(next) => setDraftModules(sanitizeOperatorModules(next))}
+          />
+          <div className="mt-md flex flex-wrap gap-xs">
+            <button
+              type="button"
+              disabled={busyId === user.id}
+              onClick={async () => {
+                setBusyId(user.id);
+                setError(null);
+                setMessage(null);
+                try {
+                  const result = await updateUserModulesFn({
+                    data: { id: user.id, modules: draftModules },
+                  });
+                  if (!result.ok) {
+                    setError(result.error);
+                    return;
+                  }
+                  setMessage(`Acessos de ${user.name} atualizados.`);
+                  setEditingModulesId(null);
+                  await onInvalidate();
+                } finally {
+                  setBusyId(null);
+                }
+              }}
+              className={btnPrimary}
+            >
+              Salvar acessos
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditingModulesId(null)}
+              className={btnMuted}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function UsersPage() {
   const loaded = Route.useLoaderData();
   const { user: currentUser } = RootRoute.useRouteContext();
@@ -218,7 +593,7 @@ function UsersPage() {
   const [userSearch, setUserSearch] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  function canResetPassword(target: (typeof users)[number]) {
+  function canResetPassword(target: AppUser) {
     if (!currentUser) return false;
     if (isSuperadmin(currentUser)) return true;
     return target.role === "operator";
@@ -240,11 +615,6 @@ function UsersPage() {
     });
   }, [users, query, userSearch, roleFilter, statusFilter]);
 
-  const menuAccess = (userMods: AppModuleId[]) =>
-    APP_MODULES.filter((m) => userMods.includes(m.id));
-  const extraAccess = (userMods: AppModuleId[]) =>
-    APP_PERMISSIONS.filter((p) => userMods.includes(p.id));
-
   function toggleExpand(userId: number) {
     const closing = expandedId === userId;
     setExpandedId(closing ? null : userId);
@@ -254,334 +624,22 @@ function UsersPage() {
     }
   }
 
-  function UserDetails({ user }: { user: (typeof users)[number] }) {
-    const menus = menuAccess(user.modules);
-    const extras = extraAccess(user.modules);
-
-    return (
-      <div className="space-y-md">
-        {user.role === "operator" ? (
-          <div className="space-y-sm rounded-lg border border-outline-variant bg-surface p-md">
-            <p className="text-label-md font-semibold text-on-surface-variant">Menu</p>
-            <div className="flex flex-wrap gap-xs">
-              {menus.length ? (
-                menus.map((m) => (
-                  <span
-                    key={m.id}
-                    className="rounded-full bg-surface-container px-sm py-2xs text-label-sm text-on-surface"
-                  >
-                    {m.label}
-                  </span>
-                ))
-              ) : (
-                <span className="text-label-md text-on-surface-variant">Nenhum módulo</span>
-              )}
-            </div>
-            {extras.length ? (
-              <>
-                <p className="pt-xs text-label-md font-semibold text-on-surface-variant">
-                  Permissões
-                </p>
-                <div className="flex flex-wrap gap-xs">
-                  {extras.map((p) => (
-                    <span
-                      key={p.id}
-                      className="rounded-full bg-amber-50 px-sm py-2xs text-label-sm text-amber-900"
-                      title={p.hint}
-                    >
-                      {p.label}
-                    </span>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <p className="text-label-md text-on-surface-variant">Sem permissões extras</p>
-            )}
-          </div>
-        ) : (
-          <p className="rounded-lg border border-outline-variant bg-surface px-md py-md text-body-md text-on-surface-variant">
-            Acesso completo a todos os módulos.
-          </p>
-        )}
-
-        <div className="space-y-sm rounded-lg border border-outline-variant bg-surface p-md">
-          <p className="text-label-md font-semibold text-on-surface-variant">
-            Funções e veículo
-          </p>
-          <label className="flex items-center gap-sm text-body-md text-on-surface">
-            <input
-              type="checkbox"
-              checked={Boolean(user.isTecnico)}
-              disabled={busyId === user.id}
-              onChange={async (e) => {
-                setBusyId(user.id);
-                setError(null);
-                setMessage(null);
-                try {
-                  const result = await updateUserStaffFn({
-                    data: {
-                      id: user.id,
-                      isTecnico: e.target.checked,
-                      isComprador: Boolean(user.isComprador),
-                      defaultVehicleId: user.defaultVehicleId,
-                    },
-                  });
-                  if (!result.ok) setError(result.error);
-                  else {
-                    setMessage(
-                      e.target.checked
-                        ? `${user.name} marcado como técnico.`
-                        : `${user.name} removido de técnico.`,
-                    );
-                    await router.invalidate();
-                  }
-                } finally {
-                  setBusyId(null);
-                }
-              }}
-            />
-            É técnico (para equipes e app futuro)
-          </label>
-          <label className="flex items-center gap-sm text-body-md text-on-surface">
-            <input
-              type="checkbox"
-              checked={Boolean(user.isComprador)}
-              disabled={busyId === user.id}
-              onChange={async (e) => {
-                setBusyId(user.id);
-                setError(null);
-                setMessage(null);
-                try {
-                  const result = await updateUserStaffFn({
-                    data: {
-                      id: user.id,
-                      isTecnico: Boolean(user.isTecnico),
-                      isComprador: e.target.checked,
-                      defaultVehicleId: user.defaultVehicleId,
-                    },
-                  });
-                  if (!result.ok) setError(result.error);
-                  else {
-                    setMessage(
-                      e.target.checked
-                        ? `${user.name} marcado como comprador.`
-                        : `${user.name} removido de comprador.`,
-                    );
-                    await router.invalidate();
-                  }
-                } finally {
-                  setBusyId(null);
-                }
-              }}
-            />
-            É comprador (cotações, CMC e Kanban de compras)
-          </label>
-          <label className="block text-label-md text-on-surface-variant">
-            Veículo padrão
-            <select
-              value={user.defaultVehicleId ?? ""}
-              disabled={busyId === user.id}
-              className={fieldClass}
-              onChange={async (e) => {
-                const raw = e.target.value;
-                const nextId = raw ? Number(raw) : null;
-                setBusyId(user.id);
-                setError(null);
-                setMessage(null);
-                try {
-                  const result = await updateUserStaffFn({
-                    data: {
-                      id: user.id,
-                      isTecnico: Boolean(user.isTecnico),
-                      isComprador: Boolean(user.isComprador),
-                      defaultVehicleId: nextId,
-                    },
-                  });
-                  if (!result.ok) setError(result.error);
-                  else {
-                    setMessage(`Veículo padrão de ${user.name} atualizado.`);
-                    await router.invalidate();
-                  }
-                } finally {
-                  setBusyId(null);
-                }
-              }}
-            >
-              <option value="">Nenhum</option>
-              {vehicles.map((v) => (
-                <option key={v.id} value={v.id} disabled={!v.active && v.id !== user.defaultVehicleId}>
-                  {vehicleOptionLabel(v)}
-                  {!v.active ? " (inativo)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        <div className="flex flex-wrap gap-xs">
-          {user.role === "operator" ? (
-            <button
-              type="button"
-              onClick={() => {
-                setEditingModulesId(editingModulesId === user.id ? null : user.id);
-                setDraftModules([...user.modules]);
-                setPasswordUserId(null);
-                setError(null);
-                setMessage(null);
-              }}
-              className={btnOutline}
-            >
-              <Icon name="tune" className="text-[16px]" />
-              {editingModulesId === user.id ? "Fechar edição" : "Editar acessos"}
-            </button>
-          ) : null}
-          {canResetPassword(user) ? (
-            <button
-              type="button"
-              onClick={() => {
-                setPasswordUserId(passwordUserId === user.id ? null : user.id);
-                setNewPassword("");
-                setEditingModulesId(null);
-                setError(null);
-                setMessage(null);
-              }}
-              className={btnOutline}
-            >
-              <Icon name="lock_reset" className="text-[16px]" />
-              {passwordUserId === user.id ? "Fechar senha" : "Alterar senha"}
-            </button>
-          ) : null}
-          {user.role !== "superadmin" ? (
-            <button
-              type="button"
-              disabled={busyId === user.id}
-              onClick={async () => {
-                setBusyId(user.id);
-                setError(null);
-                setMessage(null);
-                try {
-                  const result = await setUserActiveFn({
-                    data: { id: user.id, active: !user.active },
-                  });
-                  if (!result.ok) setError(result.error);
-                  else
-                    setMessage(
-                      user.active ? `${user.name} desativado.` : `${user.name} reativado.`,
-                    );
-                  await router.invalidate();
-                } finally {
-                  setBusyId(null);
-                }
-              }}
-              className={user.active ? btnDanger : btnMuted}
-            >
-              <Icon name={user.active ? "person_off" : "person"} className="text-[16px]" />
-              {user.active ? "Desativar" : "Reativar"}
-            </button>
-          ) : null}
-        </div>
-
-        {passwordUserId === user.id ? (
-          <div className="rounded-lg border border-outline-variant bg-surface p-md">
-            <label className="block text-label-md text-on-surface-variant">
-              Nova senha para {user.name}
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={newPassword}
-                onChange={(event) => setNewPassword(event.target.value)}
-                placeholder="Mínimo 4 caracteres"
-                className={fieldClass}
-              />
-            </label>
-            <div className="mt-md flex flex-wrap gap-xs">
-              <button
-                type="button"
-                disabled={busyId === user.id || newPassword.trim().length < 4}
-                onClick={async () => {
-                  setBusyId(user.id);
-                  setError(null);
-                  setMessage(null);
-                  try {
-                    const result = await setUserPasswordFn({
-                      data: { id: user.id, password: newPassword.trim() },
-                    });
-                    if (!result.ok) {
-                      setError(result.error);
-                      return;
-                    }
-                    setMessage(`Senha de ${user.name} atualizada.`);
-                    setPasswordUserId(null);
-                    setNewPassword("");
-                  } finally {
-                    setBusyId(null);
-                  }
-                }}
-                className={btnPrimary}
-              >
-                Salvar senha
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setPasswordUserId(null);
-                  setNewPassword("");
-                }}
-                className={btnMuted}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        {editingModulesId === user.id ? (
-          <div className="rounded-lg border border-outline-variant bg-surface p-md">
-            <p className="text-label-md font-semibold text-on-surface">Acessos de {user.name}</p>
-            <ModulesPicker
-              value={draftModules}
-              onChange={(next) => setDraftModules(sanitizeOperatorModules(next))}
-            />
-            <div className="mt-md flex flex-wrap gap-xs">
-              <button
-                type="button"
-                disabled={busyId === user.id}
-                onClick={async () => {
-                  setBusyId(user.id);
-                  setError(null);
-                  setMessage(null);
-                  try {
-                    const result = await updateUserModulesFn({
-                      data: { id: user.id, modules: draftModules },
-                    });
-                    if (!result.ok) {
-                      setError(result.error);
-                      return;
-                    }
-                    setMessage(`Acessos de ${user.name} atualizados.`);
-                    setEditingModulesId(null);
-                    await router.invalidate();
-                  } finally {
-                    setBusyId(null);
-                  }
-                }}
-                className={btnPrimary}
-              >
-                Salvar acessos
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditingModulesId(null)}
-                className={btnMuted}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
+  const userDetailsProps = {
+    vehicles: vehicles as FleetVehicleOption[],
+    busyId,
+    setBusyId,
+    setError,
+    setMessage,
+    passwordUserId,
+    setPasswordUserId,
+    newPassword,
+    setNewPassword,
+    editingModulesId,
+    setEditingModulesId,
+    draftModules,
+    setDraftModules,
+    onInvalidate: () => router.invalidate(),
+  };
 
   return (
     <AppShell mobileTitle="Usuários" searchPlaceholder="Buscar nome, login ou módulo...">
@@ -850,7 +908,11 @@ function UsersPage() {
                         </div>
                         {expanded ? (
                           <div className="mt-md border-t border-outline-variant pt-md">
-                            <UserDetails user={user} />
+                            <UserDetails
+                              user={user}
+                              canResetPassword={canResetPassword(user)}
+                              {...userDetailsProps}
+                            />
                           </div>
                         ) : null}
                       </article>
@@ -923,7 +985,11 @@ function UsersPage() {
                             {expanded ? (
                               <tr className="border-t border-outline-variant/60 bg-surface/50">
                                 <td colSpan={5} className="px-sm py-md">
-                                  <UserDetails user={user} />
+                                  <UserDetails
+                                    user={user}
+                                    canResetPassword={canResetPassword(user)}
+                                    {...userDetailsProps}
+                                  />
                                 </td>
                               </tr>
                             ) : null}

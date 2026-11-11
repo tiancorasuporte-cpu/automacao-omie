@@ -89,7 +89,10 @@ export function facilitiesMotivoPagaHoras(id: string) {
 }
 
 export function facilitiesMotivoHint(id: string) {
-  return FACILITIES_MOTIVOS.find((e) => e.id === id)?.hint ?? null;
+  const motivo = FACILITIES_MOTIVOS.find((e) => e.id === id) as
+    | { hint?: string }
+    | undefined;
+  return motivo?.hint ?? null;
 }
 
 export function isFacilitiesPermutaMotivo(id: string) {
@@ -105,6 +108,112 @@ export const FACILITIES_MOTIVOS_SUBSTITUICAO = FACILITIES_MOTIVOS.filter((m) => 
 
 export function defaultHoursForEscala(escalaId: string) {
   return FACILITIES_ESCALAS.find((e) => e.id === escalaId)?.defaultHours ?? 12;
+}
+
+export const FACILITIES_PERIODOS = [
+  { id: "diurno", label: "Diurno" },
+  { id: "noturno", label: "Noturno" },
+] as const;
+
+export type FacilitiesPeriodoId = (typeof FACILITIES_PERIODOS)[number]["id"];
+
+export function isFacilitiesPeriodoId(value: string): value is FacilitiesPeriodoId {
+  return FACILITIES_PERIODOS.some((p) => p.id === value);
+}
+
+export function facilitiesPeriodoLabel(id: string) {
+  return FACILITIES_PERIODOS.find((p) => p.id === id)?.label ?? id;
+}
+
+/** Default do lançamento a partir da escala do colaborador. */
+export function defaultPeriodoFromEscala(escalaId: string): FacilitiesPeriodoId {
+  return escalaId === "12x36_noturno" ? "noturno" : "diurno";
+}
+
+/** Default: desconto SIM só em falta; NÃO em atestado/folga/outros. */
+export function defaultAplicaDesconto(motivoId: string) {
+  return motivoId === "falta";
+}
+
+export type FacilitiesHourRate = {
+  funcao: FacilitiesFuncaoId;
+  valorDiurna: number;
+  valorNoturna: number;
+  valorExtraDiurna: number;
+  valorExtraNoturna: number;
+  valorDescontoDiurna: number;
+  valorDescontoNoturna: number;
+};
+
+export function pickHourRate(
+  rates: FacilitiesHourRate[],
+  funcao: string,
+): FacilitiesHourRate | null {
+  return rates.find((r) => r.funcao === funcao) ?? null;
+}
+
+export function rateForPeriodo(
+  rate: FacilitiesHourRate | null,
+  periodo: FacilitiesPeriodoId,
+  extra = false,
+) {
+  if (!rate) return 0;
+  if (extra) {
+    return periodo === "noturno" ? rate.valorExtraNoturna : rate.valorExtraDiurna;
+  }
+  return periodo === "noturno" ? rate.valorNoturna : rate.valorDiurna;
+}
+
+export function rateForDesconto(
+  rate: FacilitiesHourRate | null,
+  periodo: FacilitiesPeriodoId,
+) {
+  if (!rate) return 0;
+  return periodo === "noturno" ? rate.valorDescontoNoturna : rate.valorDescontoDiurna;
+}
+
+/**
+ * Pagamento do substituto e desconto do ausente (snapshot em R$).
+ * Motivos sem horas a pagar → pagamento 0; desconto só se aplicaDesconto e há ausente.
+ * Desconto usa a tarifa de desconto da função/período (não a de pagamento).
+ */
+export function calcFacilitiesMoney(input: {
+  motivo: string;
+  horas: number;
+  horasExtra: number;
+  periodo: FacilitiesPeriodoId;
+  periodoExtra: FacilitiesPeriodoId | null;
+  aplicaDesconto: boolean;
+  hasAusente: boolean;
+  rate: FacilitiesHourRate | null;
+}) {
+  const pagaHoras = facilitiesMotivoPagaHoras(input.motivo);
+  const tarifaHora = rateForPeriodo(input.rate, input.periodo, false);
+  const periodoExtra = input.periodoExtra ?? input.periodo;
+  const tarifaExtra = rateForPeriodo(input.rate, periodoExtra, true);
+  const tarifaDesconto = rateForDesconto(input.rate, input.periodo);
+  const horas = Math.max(0, Number(input.horas) || 0);
+  const horasExtra = Math.max(0, Number(input.horasExtra) || 0);
+
+  const valorPagamento = pagaHoras
+    ? roundMoney(horas * tarifaHora + horasExtra * tarifaExtra)
+    : 0;
+  const valorDesconto =
+    pagaHoras && input.hasAusente && input.aplicaDesconto
+      ? roundMoney(horas * tarifaDesconto)
+      : 0;
+
+  return {
+    tarifaHora,
+    tarifaExtra,
+    tarifaDesconto,
+    valorPagamento,
+    valorDesconto,
+  };
+}
+
+function roundMoney(n: number) {
+  return Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 }
 
 /** Converte horas decimais (ex.: 7.5) em partes { hours, minutes }. */

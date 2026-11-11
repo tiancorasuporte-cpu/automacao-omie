@@ -61,11 +61,11 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
   doc.setFontSize(9);
   doc.setTextColor(...MUT);
   doc.text(`Competência ${input.monthKey}`, W - M, 14, { align: "right" });
+  const money = (n: number) =>
+    `R$ ${Number(n).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   doc.text(
-    `Horas a pagar: ${formatDurationHours(input.horasPagar)} · ${input.trocas} lançamento(s) · ${input.permutas} permuta(s)` +
-      ((input.almoco ?? 0) > 0
-        ? ` · almoço R$ ${Number(input.almoco ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-        : "") +
+    `Horas: ${formatDurationHours(input.horasPagar)} · pgto ${money(input.pagamento ?? 0)} · desc. ${money(input.desconto ?? 0)} · ${input.trocas} lanç. · ${input.permutas} permuta(s)` +
+      ((input.almoco ?? 0) > 0 ? ` · almoço ${money(input.almoco ?? 0)}` : "") +
       ((input.ferias ?? 0) > 0
         ? ` · férias ${input.feriasDias ?? 0}d / ${formatDurationHours(input.feriasHoras ?? 0)}`
         : ""),
@@ -89,7 +89,7 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
     theme: "striped",
     headStyles: { fillColor: NAVY, textColor: 255, fontSize: 8 },
     styles: { fontSize: 8, cellPadding: 1.4, textColor: [20, 32, 44] },
-    head: [["#", "Colaborador", "Empresa", "Escala", "Coberturas", "Horas a pagar"]],
+    head: [["#", "Colaborador", "Empresa", "Escala", "Cob.", "Horas", "HE", "Almoço", "Pagamento"]],
     body:
       input.bySubstituto.length > 0
         ? input.bySubstituto.map((row, i) => [
@@ -99,8 +99,43 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
             clean(row.escala),
             String(row.trocas),
             formatDurationHours(row.horas),
+            (row.horasExtra ?? 0) > 0 ? formatDurationHours(row.horasExtra ?? 0) : "—",
+            (row.almoco ?? 0) > 0 ? money(row.almoco ?? 0) : "—",
+            money(row.pagamento ?? 0),
           ])
-        : [["—", "Sem horas a pagar neste mês.", "", "", "", ""]],
+        : [["—", "Sem horas a pagar neste mês.", "", "", "", "", "", "", ""]],
+  });
+  y =
+    (doc as InstanceType<typeof jsPDF> & { lastAutoTable: { finalY: number } }).lastAutoTable
+      .finalY + 8;
+
+  if (y > 170) {
+    doc.addPage();
+    y = 16;
+  }
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(...NAVY);
+  doc.text("Desconto por ausente", M, y);
+  y += 2;
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: M, right: M },
+    theme: "striped",
+    headStyles: { fillColor: NAVY, textColor: 255, fontSize: 8 },
+    styles: { fontSize: 8, cellPadding: 1.4, textColor: [20, 32, 44] },
+    head: [["Ausente", "Empresa", "Lanç.", "Horas", "Desconto"]],
+    body:
+      (input.byAusente ?? []).length > 0
+        ? (input.byAusente ?? []).map((row) => [
+            clean(row.nome),
+            clean(row.empresa),
+            String(row.lancamentos),
+            formatDurationHours(row.horas),
+            money(row.desconto),
+          ])
+        : [["Nenhum desconto neste mês.", "", "", "", ""]],
   });
   y =
     (doc as InstanceType<typeof jsPDF> & { lastAutoTable: { finalY: number } }).lastAutoTable
@@ -122,45 +157,65 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
     theme: "striped",
     headStyles: { fillColor: NAVY, textColor: 255, fontSize: 8 },
     styles: { fontSize: 8, cellPadding: 1.4, textColor: [20, 32, 44] },
-    head: [["Posto", "Lançamentos", "Horas a pagar"]],
+    head: [["Posto", "Lanç.", "Horas", "HE", "Pagamento", "Desconto", "Almoço"]],
     body:
       input.byPosto.length > 0
         ? input.byPosto.map((row) => [
             clean(row.nome),
             String(row.trocas),
             formatDurationHours(row.horas),
+            (row.horasExtra ?? 0) > 0 ? formatDurationHours(row.horasExtra ?? 0) : "—",
+            money(row.pagamento ?? 0),
+            money(row.desconto ?? 0),
+            (row.almoco ?? 0) > 0 ? money(row.almoco ?? 0) : "—",
           ])
-        : [["Sem lançamentos neste mês.", "", ""]],
+        : [["Sem lançamentos neste mês.", "", "", "", "", "", ""]],
   });
   y =
     (doc as InstanceType<typeof jsPDF> & { lastAutoTable: { finalY: number } }).lastAutoTable
       .finalY + 8;
+
+  if ((input.byMotivo ?? []).length > 0) {
+    if (y > 170) {
+      doc.addPage();
+      y = 16;
+    }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...NAVY);
+    doc.text("Por motivo", M, y);
+    y += 2;
+    autoTable(doc, {
+      startY: y,
+      margin: { left: M, right: M },
+      theme: "striped",
+      headStyles: { fillColor: NAVY, textColor: 255, fontSize: 8 },
+      styles: { fontSize: 8, cellPadding: 1.4, textColor: [20, 32, 44] },
+      head: [["Motivo", "Lanç.", "Horas", "Pagamento", "Desconto"]],
+      body: (input.byMotivo ?? []).map((row) => [
+        clean(row.motivoLabel),
+        String(row.trocas),
+        formatDurationHours(row.horas),
+        money(row.pagamento ?? 0),
+        money(row.desconto ?? 0),
+      ]),
+    });
+  }
 
   doc.addPage();
   y = 16;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
   doc.setTextColor(...NAVY);
-  doc.text("Lançamentos (com observações)", M, y);
+  doc.text("Lançamentos (detalhado)", M, y);
   y += 2;
 
   autoTable(doc, {
     startY: y,
     margin: { left: M, right: M },
     theme: "striped",
-    headStyles: { fillColor: NAVY, textColor: 255, fontSize: 7 },
-    styles: { fontSize: 7, cellPadding: 1.2, textColor: [20, 32, 44], overflow: "linebreak" },
-    columnStyles: {
-      0: { cellWidth: 18 },
-      1: { cellWidth: 28 },
-      2: { cellWidth: 32 },
-      3: { cellWidth: 32 },
-      4: { cellWidth: 24 },
-      5: { cellWidth: 16 },
-      6: { cellWidth: 16 },
-      7: { cellWidth: 55 },
-      8: { cellWidth: 28 },
-    },
+    headStyles: { fillColor: NAVY, textColor: 255, fontSize: 6.5 },
+    styles: { fontSize: 6, cellPadding: 1, textColor: [20, 32, 44], overflow: "linebreak" },
     head: [
       [
         "Data",
@@ -168,11 +223,17 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
         "Ausente",
         "Substituto",
         "Motivo",
+        "Período",
         "Horas",
-        "Pagar",
+        "HE",
+        "Tarifa",
+        "Pagamento",
+        "Desc.?",
+        "Desconto",
         "Almoço",
-        "Observação",
-        "Registrado por",
+        "Atest.",
+        "Obs.",
+        "Por",
       ],
     ],
     body:
@@ -180,18 +241,45 @@ export async function buildFacilitiesFechamentoPdf(input: FacilitiesFechamentoEx
         ? input.lancamentos.map((row) => [
             formatDateBr(row.data),
             clean(row.postoNome),
-            clean(row.ausenteNome),
+            clean(row.ausenteNome || "—"),
             clean(row.substitutoNome),
             clean(row.motivoLabel),
+            clean(row.periodoLabel || "—"),
             formatDurationHours(row.horas),
-            row.pagaHoras ? "Sim" : "Não",
-            row.pagaAlmoco && Number(row.valorAlmoco ?? 0) > 0
-              ? `R$ ${Number(row.valorAlmoco).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            (row.horasExtra ?? 0) > 0
+              ? `${formatDurationHours(row.horasExtra ?? 0)}${row.periodoExtraLabel ? `/${row.periodoExtraLabel}` : ""}`
               : "—",
+            `${money(row.tarifaHora ?? 0)}${(row.tarifaDesconto ?? 0) > 0 ? ` / D ${money(row.tarifaDesconto ?? 0)}` : ""}`,
+            money(row.valorPagamento ?? 0),
+            row.aplicaDesconto ? "Sim" : "Não",
+            money(row.valorDesconto ?? 0),
+            row.pagaAlmoco && Number(row.valorAlmoco ?? 0) > 0
+              ? money(Number(row.valorAlmoco))
+              : "—",
+            row.hasAtestado ? "Sim" : "Não",
             clean(row.observacao?.trim() || "—"),
             clean(row.registradoPor || "—"),
           ])
-        : [["—", "Nenhum lançamento neste mês.", "", "", "", "", "", "", "", ""]],
+        : [
+            [
+              "—",
+              "Nenhum lançamento neste mês.",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+              "",
+            ],
+          ],
   });
 
   doc.addPage();

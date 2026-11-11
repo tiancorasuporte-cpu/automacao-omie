@@ -645,6 +645,133 @@ export async function ensureSchema() {
       "alter table facilities_substitutions alter column ausente_id drop not null",
     );
   }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "periodo"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column periodo varchar(16) not null default 'diurno'",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "horas_extra"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column horas_extra numeric(10, 4) not null default 0",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "periodo_extra"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column periodo_extra varchar(16)",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "aplica_desconto"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column aplica_desconto boolean not null default false",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "atestado_nome"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column atestado_nome varchar(255)",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "atestado_mime"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column atestado_mime varchar(120)",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "atestado_data"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column atestado_data text",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "tarifa_hora"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column tarifa_hora numeric(12, 4) not null default 0",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "tarifa_extra"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column tarifa_extra numeric(12, 4) not null default 0",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "valor_pagamento"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column valor_pagamento numeric(12, 2) not null default 0",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "valor_desconto"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column valor_desconto numeric(12, 2) not null default 0",
+    );
+  }
+
+  if (!(await tableExists("facilities_hour_rates"))) {
+    await sql`
+      create table facilities_hour_rates (
+        funcao varchar(32) primary key,
+        valor_diurna numeric(12, 4) not null default 0,
+        valor_noturna numeric(12, 4) not null default 0,
+        valor_extra_diurna numeric(12, 4) not null default 0,
+        valor_extra_noturna numeric(12, 4) not null default 0,
+        valor_desconto_diurna numeric(12, 4) not null default 0,
+        valor_desconto_noturna numeric(12, 4) not null default 0,
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (
+    (await tableExists("facilities_hour_rates")) &&
+    !(await columnExists("facilities_hour_rates", "valor_desconto_diurna"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_hour_rates add column valor_desconto_diurna numeric(12, 4) not null default 0",
+    );
+  }
+  if (
+    (await tableExists("facilities_hour_rates")) &&
+    !(await columnExists("facilities_hour_rates", "valor_desconto_noturna"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_hour_rates add column valor_desconto_noturna numeric(12, 4) not null default 0",
+    );
+  }
+  if (
+    (await tableExists("facilities_substitutions")) &&
+    !(await columnExists("facilities_substitutions", "tarifa_desconto"))
+  ) {
+    await sql.unsafe(
+      "alter table facilities_substitutions add column tarifa_desconto numeric(12, 4) not null default 0",
+    );
+  }
 
   if (!(await tableExists("facilities_vacations"))) {
     await sql`

@@ -24,9 +24,12 @@ import {
   deactivateFacilitiesPostFn,
   deleteFacilitiesSubstitutionFn,
   deleteFacilitiesVacationFn,
+  deleteFacilitiesSubstitutionAtestadoFn,
   getFacilitiesBootstrapFn,
+  getFacilitiesSubstitutionAtestadoFn,
   importFacilitiesCollaboratorsFn,
   importFacilitiesPostsFn,
+  saveFacilitiesHourRatesFn,
   updateFacilitiesCollaboratorFn,
   updateFacilitiesPostFn,
   updateFacilitiesSubstitutionAlmocoFn,
@@ -35,8 +38,12 @@ import {
   combineHoursAndMinutes,
   countInclusiveDays,
   currentMonthKey,
+  defaultAplicaDesconto,
   defaultHoursForEscala,
+  defaultPeriodoFromEscala,
   FACILITIES_MOTIVOS_SUBSTITUICAO,
+  FACILITIES_PERIODOS,
+  facilitiesFuncaoLabel,
   facilitiesMotivoHint,
   facilitiesMotivoPagaHoras,
   formatDurationHours,
@@ -46,7 +53,9 @@ import {
   type FacilitiesEmpresaId,
   type FacilitiesEscalaId,
   type FacilitiesFuncaoId,
+  type FacilitiesHourRate,
   type FacilitiesMotivoId,
+  type FacilitiesPeriodoId,
 } from "@/lib/facilities-domain";
 import {
   downloadFacilitiesCollaboratorsModeloExcel,
@@ -66,7 +75,9 @@ const searchSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}$/)
     .catch(currentMonthKey()),
-  tab: z.enum(["painel", "lancar", "ferias", "cadastros", "fechamento"]).catch("painel"),
+  tab: z
+    .enum(["painel", "lancar", "ferias", "cadastros", "valores", "fechamento"])
+    .catch("painel"),
   postoId: z.coerce.number().int().positive().optional().catch(undefined),
   collaboratorId: z.coerce.number().int().positive().optional().catch(undefined),
   dataDe: z
@@ -129,8 +140,28 @@ const TABS: Array<{ id: TabId; label: string; icon: string }> = [
   { id: "lancar", label: "Lançar", icon: "swap_horiz" },
   { id: "ferias", label: "Férias", icon: "beach_access" },
   { id: "cadastros", label: "Cadastros", icon: "badge" },
-  { id: "fechamento", label: "Fechamento", icon: "payments" },
+  { id: "valores", label: "Valores", icon: "payments" },
+  { id: "fechamento", label: "Fechamento", icon: "receipt_long" },
 ];
+
+async function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Falha ao ler arquivo"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function downloadDataUrl(dataUrl: string, fileName: string) {
+  const a = document.createElement("a");
+  a.href = dataUrl;
+  a.download = fileName;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
 
 const EMPRESA_TONE: Record<string, string> = {
   angela: "bg-amber-100 text-amber-900",
@@ -533,10 +564,22 @@ function FacilitiesPage() {
     substitutoId: "",
     horasHoras: "12",
     horasMinutos: "0",
+    periodo: "diurno" as FacilitiesPeriodoId,
+    temHoraExtra: false,
+    horasExtraHoras: "0",
+    horasExtraMinutos: "0",
+    periodoExtra: "diurno" as FacilitiesPeriodoId,
+    aplicaDesconto: true,
+    atestadoNome: null as string | null,
+    atestadoMime: null as string | null,
+    atestadoData: null as string | null,
     observacao: "",
     pagaAlmoco: false,
     valorAlmoco: "",
   });
+  const [ratesForm, setRatesForm] = useState<FacilitiesHourRate[]>(() =>
+    (data.hourRates ?? []).map((r) => ({ ...r })),
+  );
 
   const [vacForm, setVacForm] = useState({
     colaboradorId: "",
@@ -584,6 +627,7 @@ function FacilitiesPage() {
   const [colFilterEscala, setColFilterEscala] = useState<"" | FacilitiesEscalaId>("");
   const postImportRef = useRef<HTMLInputElement>(null);
   const colImportRef = useRef<HTMLInputElement>(null);
+  const atestadoInputRef = useRef<HTMLInputElement>(null);
   const [colFilterPostoId, setColFilterPostoId] = useState("");
   const [colFilterStatus, setColFilterStatus] = useState<"all" | "active" | "inactive">("all");
   const [lancPage, setLancPage] = useState(1);
@@ -897,14 +941,19 @@ function FacilitiesPage() {
     monthKey: data.monthKey,
     monthLabel: monthLabel(data.monthKey),
     horasPagar: data.summary.horas,
+    horasExtra: data.summary.horasExtra ?? 0,
     trocas: data.summary.trocas,
     permutas: data.summary.permutas,
     almoco: data.summary.almoco ?? 0,
+    pagamento: data.summary.pagamento ?? 0,
+    desconto: data.summary.desconto ?? 0,
     ferias: data.summary.ferias ?? 0,
     feriasDias: data.summary.feriasDias ?? 0,
     feriasHoras: data.summary.feriasHoras ?? 0,
     bySubstituto: data.summary.bySubstituto,
     byPosto: data.summary.byPosto,
+    byAusente: data.summary.byAusente ?? [],
+    byMotivo: data.summary.byMotivo ?? [],
     byCoberturaFerias: data.summary.byCoberturaFerias ?? [],
     lancamentos: data.substitutions.map((row) => ({
       data: row.data,
@@ -913,11 +962,23 @@ function FacilitiesPage() {
       ausenteEmpresa: row.ausenteEmpresa,
       substitutoNome: row.substitutoNome,
       substitutoEmpresa: row.substitutoEmpresa,
+      substitutoEscala: row.substitutoEscala,
       motivoLabel: row.motivoLabel,
+      periodoLabel: row.periodoLabel,
+      periodoExtraLabel: row.periodoExtraLabel,
       horas: row.horas,
+      horasExtra: row.horasExtra,
+      tarifaHora: row.tarifaHora,
+      tarifaExtra: row.tarifaExtra,
+      tarifaDesconto: row.tarifaDesconto,
       pagaHoras: row.pagaHoras,
+      aplicaDesconto: row.aplicaDesconto,
+      valorPagamento: row.valorPagamento,
+      valorDesconto: row.valorDesconto,
       pagaAlmoco: row.pagaAlmoco,
       valorAlmoco: row.valorAlmoco,
+      hasAtestado: row.hasAtestado,
+      foraDoPostoBase: row.foraDoPostoBase,
       observacao: row.observacao,
       registradoPor: row.createdByName,
     })),
@@ -937,12 +998,22 @@ function FacilitiesPage() {
     })),
   });
 
+  useEffect(() => {
+    setRatesForm((data.hourRates ?? []).map((r) => ({ ...r })));
+  }, [data.hourRates]);
+
   const onSelectSubstituto = (id: string) => {
     const person = activeCollaborators.find((c) => String(c.id) === id);
     setSubForm((prev) => ({
       ...prev,
       substitutoId: id,
-      ...(person ? durationPartsFromHours(person.defaultHours) : {}),
+      ...(person
+        ? {
+            ...durationPartsFromHours(person.defaultHours),
+            periodo: defaultPeriodoFromEscala(person.escala),
+            periodoExtra: defaultPeriodoFromEscala(person.escala),
+          }
+        : {}),
     }));
   };
 
@@ -960,7 +1031,11 @@ function FacilitiesPage() {
         ...(hasSubstituto
           ? {}
           : person
-            ? durationPartsFromHours(defaultHoursForEscala(person.escala))
+            ? {
+                ...durationPartsFromHours(defaultHoursForEscala(person.escala)),
+                periodo: defaultPeriodoFromEscala(person.escala),
+                periodoExtra: defaultPeriodoFromEscala(person.escala),
+              }
             : {}),
       };
     });
@@ -1002,6 +1077,23 @@ function FacilitiesPage() {
       flash(null, "A duração deve ser maior que zero.");
       return;
     }
+    const heH = Number.parseInt(subForm.horasExtraHoras || "0", 10);
+    const heM = Number.parseInt(subForm.horasExtraMinutos || "0", 10);
+    const horasExtra = subForm.temHoraExtra
+      ? combineHoursAndMinutes(
+          Number.isFinite(heH) ? heH : 0,
+          Number.isFinite(heM) ? heM : 0,
+        )
+      : 0;
+    if (subForm.temHoraExtra && !(horasExtra > 0)) {
+      flash(null, "Informe a duração da hora extra.");
+      return;
+    }
+    const motivo: FacilitiesMotivoId = isExtra ? "extra" : subForm.motivo;
+    if (motivo === "atestado" && !subForm.atestadoData) {
+      flash(null, "Anexe o atestado (PDF ou imagem).");
+      return;
+    }
     const valorAlmoco = subForm.pagaAlmoco
       ? Number(String(subForm.valorAlmoco).replace(",", "."))
       : 0;
@@ -1012,7 +1104,6 @@ function FacilitiesPage() {
     setPending(true);
     flash(null);
     try {
-      const motivo: FacilitiesMotivoId = isExtra ? "extra" : subForm.motivo;
       const result = await createFacilitiesSubstitutionFn({
         data: {
           data: subForm.data,
@@ -1021,6 +1112,13 @@ function FacilitiesPage() {
           ausenteId: isExtra ? null : Number(subForm.ausenteId),
           substitutoId: Number(subForm.substitutoId),
           horas,
+          periodo: subForm.periodo,
+          horasExtra,
+          periodoExtra: horasExtra > 0 ? subForm.periodoExtra : null,
+          aplicaDesconto: isExtra ? false : subForm.aplicaDesconto,
+          atestadoNome: motivo === "atestado" ? subForm.atestadoNome : null,
+          atestadoMime: motivo === "atestado" ? subForm.atestadoMime : null,
+          atestadoData: motivo === "atestado" ? subForm.atestadoData : null,
           observacao: subForm.observacao.trim() || null,
           pagaAlmoco: subForm.pagaAlmoco,
           valorAlmoco,
@@ -1030,15 +1128,23 @@ function FacilitiesPage() {
         flash(null, result.error);
         return;
       }
+      const payTxt =
+        result.substitution.valorPagamento > 0
+          ? ` · pgto ${formatMoneyBr(result.substitution.valorPagamento)}`
+          : "";
+      const descTxt =
+        result.substitution.valorDesconto > 0
+          ? ` · desc. ${formatMoneyBr(result.substitution.valorDesconto)}`
+          : "";
       const almocoTxt =
         result.substitution.pagaAlmoco && result.substitution.valorAlmoco > 0
-          ? ` · almoço R$ ${result.substitution.valorAlmoco.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          ? ` · almoço ${formatMoneyBr(result.substitution.valorAlmoco)}`
           : "";
       flash(
         isFacilitiesExtraMotivo(result.substitution.motivo)
-          ? `Extra lançado: ${result.substitution.substitutoNome} no posto ${result.substitution.postoNome} (${formatHours(result.substitution.horas)} a pagar${almocoTxt}).`
+          ? `Extra lançado: ${result.substitution.substitutoNome} no posto ${result.substitution.postoNome} (${formatHours(result.substitution.horas)}${payTxt}${almocoTxt}).`
           : result.substitution.pagaHoras
-            ? `Troca lançada: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${formatHours(result.substitution.horas)} a pagar${almocoTxt}).`
+            ? `Troca lançada: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${formatHours(result.substitution.horas)}${payTxt}${descTxt}${almocoTxt}).`
             : isFacilitiesPermutaMotivo(result.substitution.motivo)
               ? `Solicitação de troca registrada: ${result.substitution.substitutoNome} ↔ ${result.substitution.ausenteNome} (sem horas a pagar${almocoTxt}).`
               : `Lançamento registrado: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${result.substitution.motivoLabel}, sem horas a pagar${almocoTxt}).`,
@@ -1050,6 +1156,13 @@ function FacilitiesPage() {
         observacao: "",
         horasHoras: "12",
         horasMinutos: "0",
+        temHoraExtra: false,
+        horasExtraHoras: "0",
+        horasExtraMinutos: "0",
+        aplicaDesconto: defaultAplicaDesconto(prev.motivo === "extra" ? "falta" : prev.motivo),
+        atestadoNome: null,
+        atestadoMime: null,
+        atestadoData: null,
         pagaAlmoco: false,
         valorAlmoco: "",
       }));
@@ -1058,6 +1171,64 @@ function FacilitiesPage() {
     } finally {
       setPending(false);
     }
+  };
+
+  const saveHourRates = async () => {
+    setPending(true);
+    flash(null);
+    try {
+      const result = await saveFacilitiesHourRatesFn({ data: { rates: ratesForm } });
+      if (!result.ok) {
+        flash(null, result.error);
+        return;
+      }
+      setRatesForm(result.rates.map((r) => ({ ...r })));
+      flash("Valores das horas salvos.");
+      await router.invalidate();
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const downloadAtestado = async (id: number) => {
+    setPending(true);
+    try {
+      const result = await getFacilitiesSubstitutionAtestadoFn({ data: { id } });
+      if (!result.ok) {
+        flash(null, result.error);
+        return;
+      }
+      downloadDataUrl(result.file.data, result.file.name);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const removeAtestado = async (id: number) => {
+    if (!confirm("Apagar o atestado anexado deste lançamento?")) return;
+    setPending(true);
+    flash(null);
+    try {
+      const result = await deleteFacilitiesSubstitutionAtestadoFn({ data: { id } });
+      if (!result.ok) {
+        flash(null, result.error);
+        return;
+      }
+      flash("Atestado apagado.");
+      await router.invalidate();
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const clearSubFormAtestado = () => {
+    if (atestadoInputRef.current) atestadoInputRef.current.value = "";
+    setSubForm((p) => ({
+      ...p,
+      atestadoNome: null,
+      atestadoMime: null,
+      atestadoData: null,
+    }));
   };
 
   const submitVacation = async (event: FormEvent) => {
@@ -1130,21 +1301,50 @@ function FacilitiesPage() {
   const paymentText = useMemo(() => {
     const lines = [
       `Facilities — fechamento ${monthLabel(data.monthKey)}`,
-      `Horas a pagar: ${formatHours(data.summary.horas)} · ${data.summary.trocas - data.summary.permutas} cobertura(s) pagáveis` +
+      `Horas a pagar: ${formatHours(data.summary.horas)}` +
+        ((data.summary.horasExtra ?? 0) > 0
+          ? ` · HE ${formatHours(data.summary.horasExtra ?? 0)}`
+          : "") +
+        ` · ${data.summary.trocas - data.summary.permutas} cobertura(s) pagáveis` +
         (data.summary.permutas > 0
           ? ` · ${data.summary.permutas} solicitação(ões) de troca (sem pagamento)`
           : ""),
+      `Pagamento: ${formatMoneyBr(data.summary.pagamento ?? 0)} · Desconto: ${formatMoneyBr(data.summary.desconto ?? 0)}` +
+        ((data.summary.almoco ?? 0) > 0
+          ? ` · Almoço: ${formatMoneyBr(data.summary.almoco ?? 0)}`
+          : ""),
       `Férias: ${data.summary.ferias ?? 0} período(s) · ${data.summary.feriasDias ?? 0} dia(s) · ${formatHours(data.summary.feriasHoras ?? 0)}`,
       "",
-      "Por colaborador (substituto — horas a pagar):",
+      "Pagamento por substituto:",
       ...data.summary.bySubstituto.map(
         (row) =>
-          `- ${row.nome} (${row.empresa}) · ${row.trocas} cobertura(s) · ${formatHours(row.horas)} · escala ${row.escala}`,
+          `- ${row.nome} (${row.empresa}) · ${row.trocas} cobertura(s) · ${formatHours(row.horas)}` +
+          ((row.horasExtra ?? 0) > 0 ? ` + HE ${formatHours(row.horasExtra ?? 0)}` : "") +
+          ` · ${formatMoneyBr(row.pagamento ?? 0)} · escala ${row.escala}` +
+          ((row.almoco ?? 0) > 0 ? ` · almoço ${formatMoneyBr(row.almoco ?? 0)}` : ""),
       ),
       "",
-      "Por posto (horas a pagar):",
+      "Desconto por ausente:",
+      ...((data.summary.byAusente ?? []).length > 0
+        ? (data.summary.byAusente ?? []).map(
+            (row) =>
+              `- ${row.nome} (${row.empresa}) · ${row.lancamentos} lanç. · ${formatHours(row.horas)} · desc. ${formatMoneyBr(row.desconto)}`,
+          )
+        : ["- Nenhum desconto neste mês."]),
+      "",
+      "Por posto:",
       ...data.summary.byPosto.map(
-        (row) => `- ${row.nome} · ${row.trocas} lançamento(s) · ${formatHours(row.horas)}`,
+        (row) =>
+          `- ${row.nome} · ${row.trocas} lanç. · ${formatHours(row.horas)}` +
+          ((row.horasExtra ?? 0) > 0 ? ` + HE ${formatHours(row.horasExtra ?? 0)}` : "") +
+          ` · pgto ${formatMoneyBr(row.pagamento ?? 0)} · desc. ${formatMoneyBr(row.desconto ?? 0)}` +
+          ((row.almoco ?? 0) > 0 ? ` · almoço ${formatMoneyBr(row.almoco ?? 0)}` : ""),
+      ),
+      "",
+      "Por motivo:",
+      ...(data.summary.byMotivo ?? []).map(
+        (row) =>
+          `- ${row.motivoLabel} · ${row.trocas} · ${formatHours(row.horas)} · pgto ${formatMoneyBr(row.pagamento ?? 0)} · desc. ${formatMoneyBr(row.desconto ?? 0)}`,
       ),
       "",
       "Férias — cobertura (dias e horas):",
@@ -1458,14 +1658,14 @@ function FacilitiesPage() {
                     icon: "schedule",
                   },
                   {
-                    label: "Férias (dias)",
-                    value: `${data.summary.feriasDias ?? 0}d · ${formatHours(data.summary.feriasHoras ?? 0)}`,
-                    icon: "beach_access",
+                    label: "Pagamento",
+                    value: formatMoneyBr(data.summary.pagamento ?? 0),
+                    icon: "payments",
                   },
                   {
-                    label: "Postos / equipe",
-                    value: `${data.summary.postosAtivos} / ${data.summary.colaboradoresAtivos}`,
-                    icon: "groups",
+                    label: "Desconto",
+                    value: formatMoneyBr(data.summary.desconto ?? 0),
+                    icon: "remove_circle",
                   },
                 ].map((card) => (
                   <div
@@ -1498,12 +1698,13 @@ function FacilitiesPage() {
                           <th className="px-md py-sm">Posto</th>
                           <th className="px-md py-sm">Trocas</th>
                           <th className="px-md py-sm">Horas</th>
+                          <th className="px-md py-sm">Pagamento</th>
                         </tr>
                       </thead>
                       <tbody>
                         {data.summary.byPosto.length === 0 ? (
                           <tr>
-                            <td colSpan={3} className="px-md py-xl text-center text-on-surface-variant">
+                            <td colSpan={4} className="px-md py-xl text-center text-on-surface-variant">
                               Nenhuma troca neste mês.
                             </td>
                           </tr>
@@ -1513,6 +1714,7 @@ function FacilitiesPage() {
                               <td className="px-md py-sm text-primary">{row.nome}</td>
                               <td className="px-md py-sm">{row.trocas}</td>
                               <td className="px-md py-sm font-semibold">{formatHours(row.horas)}</td>
+                              <td className="px-md py-sm">{formatMoneyBr(row.pagamento ?? 0)}</td>
                             </tr>
                           ))
                         )}
@@ -1536,12 +1738,13 @@ function FacilitiesPage() {
                           <th className="px-md py-sm">Empresa</th>
                           <th className="px-md py-sm">Trocas</th>
                           <th className="px-md py-sm">Horas</th>
+                          <th className="px-md py-sm">Pagamento</th>
                         </tr>
                       </thead>
                       <tbody>
                         {data.summary.bySubstituto.length === 0 ? (
                           <tr>
-                            <td colSpan={4} className="px-md py-xl text-center text-on-surface-variant">
+                            <td colSpan={5} className="px-md py-xl text-center text-on-surface-variant">
                               Sem substituições ainda.
                             </td>
                           </tr>
@@ -1552,6 +1755,7 @@ function FacilitiesPage() {
                               <td className="px-md py-sm text-on-surface-variant">{row.empresa}</td>
                               <td className="px-md py-sm">{row.trocas}</td>
                               <td className="px-md py-sm font-semibold">{formatHours(row.horas)}</td>
+                              <td className="px-md py-sm">{formatMoneyBr(row.pagamento ?? 0)}</td>
                             </tr>
                           ))
                         )}
@@ -1655,15 +1859,20 @@ function FacilitiesPage() {
                         <div className="flex items-start justify-between gap-sm">
                           <div>
                             <p className="text-label-md text-on-surface-variant">
-                              {formatDateBr(row.data)} · {row.motivoLabel}
+                              {formatDateBr(row.data)} · {row.motivoLabel} · {row.periodoLabel}
                             </p>
                             <p className="mt-xs text-title-md text-primary">{row.postoNome}</p>
                           </div>
                           <div className="text-right">
                             {row.pagaHoras ? (
-                              <p className="text-title-md font-semibold text-primary">
-                                {formatHours(row.horas)}
-                              </p>
+                              <>
+                                <p className="text-title-md font-semibold text-primary">
+                                  {formatHours(row.horas)}
+                                </p>
+                                <p className="text-label-md text-on-surface-variant">
+                                  {formatMoneyBr(row.valorPagamento ?? 0)}
+                                </p>
+                              </>
                             ) : (
                               <p className="text-label-md font-semibold text-on-surface-variant">
                                 Sem pgto
@@ -1692,6 +1901,12 @@ function FacilitiesPage() {
                               </p>
                             </>
                           )}
+                          {(row.valorDesconto ?? 0) > 0 ? (
+                            <p>
+                              <span className="text-on-surface-variant">Desconto: </span>
+                              {formatMoneyBr(row.valorDesconto)}
+                            </p>
+                          ) : null}
                           {row.createdByName ? (
                             <p>
                               <span className="text-on-surface-variant">Registrado por: </span>
@@ -1703,6 +1918,27 @@ function FacilitiesPage() {
                           ) : null}
                         </div>
                         <div className="mt-sm flex flex-wrap gap-sm">
+                          {row.hasAtestado ? (
+                            <>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-primary"
+                                disabled={pending}
+                                onClick={() => void downloadAtestado(row.id)}
+                              >
+                                <Icon name="attach_file" className="text-[16px]" />
+                                Atestado
+                              </button>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-error"
+                                disabled={pending}
+                                onClick={() => void removeAtestado(row.id)}
+                              >
+                                Apagar anexo
+                              </button>
+                            </>
+                          ) : null}
                           {hasObservacao(row.observacao) ? (
                             <button
                               type="button"
@@ -1746,7 +1982,10 @@ function FacilitiesPage() {
                         <th className="px-md py-sm">Ausente</th>
                         <th className="px-md py-sm">Substituto</th>
                         <th className="px-md py-sm">Motivo</th>
+                        <th className="px-md py-sm">Período</th>
                         <th className="px-md py-sm">Horas</th>
+                        <th className="px-md py-sm">Pagamento</th>
+                        <th className="px-md py-sm">Desconto</th>
                         <th className="px-md py-sm">Registrado por</th>
                         <th className="px-md py-sm" />
                       </tr>
@@ -1754,7 +1993,7 @@ function FacilitiesPage() {
                     <tbody>
                       {pagedSubstitutions.totalItems === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-md py-xl text-center text-on-surface-variant">
+                          <td colSpan={11} className="px-md py-xl text-center text-on-surface-variant">
                             Nenhum lançamento neste filtro.
                           </td>
                         </tr>
@@ -1783,9 +2022,15 @@ function FacilitiesPage() {
                               </div>
                             </td>
                             <td className="px-md py-sm">{row.motivoLabel}</td>
+                            <td className="px-md py-sm">{row.periodoLabel}</td>
                             <td className="px-md py-sm font-semibold">
                               {row.pagaHoras ? (
-                                `${formatHours(row.horas)}`
+                                <>
+                                  {formatHours(row.horas)}
+                                  {row.horasExtra > 0
+                                    ? ` + HE ${formatHours(row.horasExtra)}`
+                                    : ""}
+                                </>
                               ) : (
                                 <span className="text-label-md font-semibold text-on-surface-variant">
                                   Sem pagamento
@@ -1797,11 +2042,36 @@ function FacilitiesPage() {
                                 </div>
                               ) : null}
                             </td>
+                            <td className="px-md py-sm">{formatMoneyBr(row.valorPagamento ?? 0)}</td>
+                            <td className="px-md py-sm">{formatMoneyBr(row.valorDesconto ?? 0)}</td>
                             <td className="px-md py-sm text-on-surface-variant">
                               {row.createdByName ?? "—"}
                             </td>
                             <td className="px-md py-sm text-right">
                               <div className="inline-flex flex-wrap items-center justify-end gap-sm">
+                                {row.hasAtestado ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="inline-flex items-center gap-xs text-label-md font-semibold text-primary hover:underline"
+                                      disabled={pending}
+                                      onClick={() => void downloadAtestado(row.id)}
+                                      title="Baixar atestado"
+                                    >
+                                      <Icon name="attach_file" className="text-[16px]" />
+                                      Atestado
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-label-md font-semibold text-error hover:underline"
+                                      disabled={pending}
+                                      onClick={() => void removeAtestado(row.id)}
+                                      title="Apagar atestado"
+                                    >
+                                      Apagar anexo
+                                    </button>
+                                  </>
+                                ) : null}
                                 {hasObservacao(row.observacao) ? (
                                   <button
                                     type="button"
@@ -1947,12 +2217,17 @@ function FacilitiesPage() {
                         <span className="text-label-md text-primary">Motivo</span>
                         <select
                           value={subForm.motivo}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const motivo = e.target.value as FacilitiesMotivoId;
                             setSubForm((p) => ({
                               ...p,
-                              motivo: e.target.value as FacilitiesMotivoId,
-                            }))
-                          }
+                              motivo,
+                              aplicaDesconto: defaultAplicaDesconto(motivo),
+                              atestadoNome: motivo === "atestado" ? p.atestadoNome : null,
+                              atestadoMime: motivo === "atestado" ? p.atestadoMime : null,
+                              atestadoData: motivo === "atestado" ? p.atestadoData : null,
+                            }));
+                          }}
                           className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
                         >
                           {FACILITIES_MOTIVOS_SUBSTITUICAO.map((m) => (
@@ -2025,7 +2300,7 @@ function FacilitiesPage() {
                   <div className="grid gap-md sm:grid-cols-2">
                     <div className="space-y-xs">
                       <span className="text-label-md text-primary">
-                        {!pagaHorasMotivo ? "Duração do plantão (registro)" : "Horas a pagar"}
+                        {!pagaHorasMotivo ? "Duração do plantão (registro)" : "Horas da substituição"}
                       </span>
                       <div className="grid grid-cols-2 gap-sm">
                         <label className="block space-y-xs">
@@ -2069,15 +2344,174 @@ function FacilitiesPage() {
                       )}
                     </div>
                     <label className="block space-y-xs">
-                      <span className="text-label-md text-primary">Observação</span>
-                      <input
-                        value={subForm.observacao}
-                        onChange={(e) => setSubForm((p) => ({ ...p, observacao: e.target.value }))}
-                        placeholder="Opcional"
+                      <span className="text-label-md text-primary">Período</span>
+                      <select
+                        value={subForm.periodo}
+                        onChange={(e) =>
+                          setSubForm((p) => ({
+                            ...p,
+                            periodo: e.target.value as FacilitiesPeriodoId,
+                          }))
+                        }
                         className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
-                      />
+                      >
+                        {FACILITIES_PERIODOS.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </div>
+
+                  {pagaHorasMotivo ? (
+                    <div className="space-y-sm rounded-lg border border-outline-variant bg-surface p-md">
+                      <label className="flex items-center gap-sm text-body-md">
+                        <input
+                          type="checkbox"
+                          checked={subForm.temHoraExtra}
+                          onChange={(e) =>
+                            setSubForm((p) => ({
+                              ...p,
+                              temHoraExtra: e.target.checked,
+                              horasExtraHoras: e.target.checked ? p.horasExtraHoras : "0",
+                              horasExtraMinutos: e.target.checked ? p.horasExtraMinutos : "0",
+                            }))
+                          }
+                        />
+                        <span className="text-primary">Haverá hora extra?</span>
+                      </label>
+                      {subForm.temHoraExtra ? (
+                        <div className="grid gap-md sm:grid-cols-3">
+                          <label className="block space-y-xs">
+                            <span className="text-label-md text-on-surface-variant">Horas extra</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              value={subForm.horasExtraHoras}
+                              onChange={(e) =>
+                                setSubForm((p) => ({ ...p, horasExtraHoras: e.target.value }))
+                              }
+                              className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                            />
+                          </label>
+                          <label className="block space-y-xs">
+                            <span className="text-label-md text-on-surface-variant">Minutos extra</span>
+                            <input
+                              type="number"
+                              min={0}
+                              max={59}
+                              step={1}
+                              value={subForm.horasExtraMinutos}
+                              onChange={(e) =>
+                                setSubForm((p) => ({ ...p, horasExtraMinutos: e.target.value }))
+                              }
+                              className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                            />
+                          </label>
+                          <label className="block space-y-xs">
+                            <span className="text-label-md text-on-surface-variant">Período da extra</span>
+                            <select
+                              value={subForm.periodoExtra}
+                              onChange={(e) =>
+                                setSubForm((p) => ({
+                                  ...p,
+                                  periodoExtra: e.target.value as FacilitiesPeriodoId,
+                                }))
+                              }
+                              className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                            >
+                              {FACILITIES_PERIODOS.map((p) => (
+                                <option key={p.id} value={p.id}>
+                                  {p.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {!isExtraMode && pagaHorasMotivo ? (
+                    <label className="flex items-center gap-sm rounded-lg border border-outline-variant bg-surface px-md py-sm text-body-md">
+                      <input
+                        type="checkbox"
+                        checked={subForm.aplicaDesconto}
+                        onChange={(e) =>
+                          setSubForm((p) => ({ ...p, aplicaDesconto: e.target.checked }))
+                        }
+                      />
+                      <span className="text-primary">Aplicar desconto no ausente?</span>
+                    </label>
+                  ) : null}
+
+                  {!isExtraMode && subForm.motivo === "atestado" ? (
+                    <label className="block space-y-xs">
+                      <span className="text-label-md text-primary">Atestado (PDF ou imagem)</span>
+                      <input
+                        ref={atestadoInputRef}
+                        type="file"
+                        accept="application/pdf,image/jpeg,image/png,image/webp"
+                        required={!subForm.atestadoData}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) {
+                            clearSubFormAtestado();
+                            return;
+                          }
+                          if (file.size > 4_000_000) {
+                            flash(null, `Arquivo muito grande: ${file.name} (máx. 4 MB).`);
+                            e.target.value = "";
+                            return;
+                          }
+                          void (async () => {
+                            try {
+                              const dataUrl = await readFileAsDataUrl(file);
+                              setSubForm((p) => ({
+                                ...p,
+                                atestadoNome: file.name,
+                                atestadoMime: file.type || "application/octet-stream",
+                                atestadoData: dataUrl,
+                              }));
+                            } catch {
+                              flash(null, "Falha ao ler o atestado.");
+                            }
+                          })();
+                        }}
+                        className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+                      />
+                      {subForm.atestadoNome ? (
+                        <div className="flex flex-wrap items-center gap-sm">
+                          <span className="text-label-md text-on-surface-variant">
+                            Anexo: {subForm.atestadoNome}
+                          </span>
+                          <button
+                            type="button"
+                            className="text-label-md font-semibold text-error hover:underline"
+                            onClick={clearSubFormAtestado}
+                          >
+                            Apagar anexo
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-label-md text-on-surface-variant">
+                          Obrigatório para motivo atestado.
+                        </span>
+                      )}
+                    </label>
+                  ) : null}
+
+                  <label className="block space-y-xs">
+                    <span className="text-label-md text-primary">Observação</span>
+                    <input
+                      value={subForm.observacao}
+                      onChange={(e) => setSubForm((p) => ({ ...p, observacao: e.target.value }))}
+                      placeholder="Opcional"
+                      className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                    />
+                  </label>
 
                   <div className="grid gap-md sm:grid-cols-2">
                     <label className="flex items-center gap-sm rounded-lg border border-outline-variant bg-surface px-md py-sm text-body-md">
@@ -2995,6 +3429,81 @@ function FacilitiesPage() {
             </section>
           )}
 
+          {search.tab === "valores" && (
+            <section className="mx-auto w-full max-w-[64rem] space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-md md:p-lg">
+              <div>
+                <h3 className="text-title-lg text-primary">Valores das horas</h3>
+                <p className="mt-xs text-body-md text-on-surface-variant">
+                  Tabela global por função: pagamento (diurna/noturna/extra) e desconto no ausente.
+                  O lançamento grava o valor (snapshot) — alterações futuras não mudam o histórico.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-body-md">
+                  <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
+                    <tr>
+                      <th className="px-md py-sm">Função</th>
+                      <th className="px-md py-sm">Pgto diurna</th>
+                      <th className="px-md py-sm">Pgto noturna</th>
+                      <th className="px-md py-sm">Extra diurna</th>
+                      <th className="px-md py-sm">Extra noturna</th>
+                      <th className="px-md py-sm">Desc. diurna</th>
+                      <th className="px-md py-sm">Desc. noturna</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ratesForm.map((rate, index) => (
+                      <tr key={rate.funcao} className="border-t border-outline-variant/60">
+                        <td className="px-md py-sm font-medium text-primary">
+                          {facilitiesFuncaoLabel(rate.funcao)}
+                        </td>
+                        {(
+                          [
+                            ["valorDiurna", rate.valorDiurna],
+                            ["valorNoturna", rate.valorNoturna],
+                            ["valorExtraDiurna", rate.valorExtraDiurna],
+                            ["valorExtraNoturna", rate.valorExtraNoturna],
+                            ["valorDescontoDiurna", rate.valorDescontoDiurna],
+                            ["valorDescontoNoturna", rate.valorDescontoNoturna],
+                          ] as const
+                        ).map(([key, value]) => (
+                          <td key={key} className="px-md py-sm">
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={value}
+                              onChange={(e) => {
+                                const n = Number(e.target.value);
+                                setRatesForm((prev) =>
+                                  prev.map((row, i) =>
+                                    i === index
+                                      ? { ...row, [key]: Number.isFinite(n) ? n : 0 }
+                                      : row,
+                                  ),
+                                );
+                              }}
+                              className="w-24 rounded-lg border border-outline-variant bg-surface px-sm py-sm"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => void saveHourRates()}
+                className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary disabled:opacity-60"
+              >
+                <Icon name="save" className="text-[18px]" />
+                {pending ? "Salvando..." : "Salvar valores"}
+              </button>
+            </section>
+          )}
+
           {search.tab === "fechamento" && (
             <section className="space-y-md">
               <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md md:p-lg">
@@ -3056,16 +3565,31 @@ function FacilitiesPage() {
                   </div>
                 </div>
                 <p className="mt-sm text-body-md text-on-surface-variant">
-                  Use as abas abaixo: pagamento (horas), lançamentos do dia e férias do mês.
+                  Resumo completo: pagamento por substituto, desconto por ausente, postos, motivos,
+                  lançamentos detalhados e férias. Excel/PDF trazem todas as colunas.
                 </p>
 
-                <div className="mt-md grid grid-cols-2 gap-sm lg:grid-cols-4">
+                <div className="mt-md grid grid-cols-2 gap-sm lg:grid-cols-3 xl:grid-cols-6">
                   {[
                     {
                       label: "Horas a pagar",
                       value: formatHours(data.summary.horas),
                       hint: `${Math.max(0, data.summary.trocas - data.summary.permutas)} cobertura(s)`,
                       tone: "bg-amber-50 text-amber-950 border-amber-200",
+                    },
+                    {
+                      label: "Pagamento",
+                      value: formatMoneyBr(data.summary.pagamento ?? 0),
+                      hint: (data.summary.horasExtra ?? 0) > 0
+                        ? `+ HE ${formatHours(data.summary.horasExtra ?? 0)}`
+                        : "substitutos",
+                      tone: "bg-emerald-50 text-emerald-950 border-emerald-200",
+                    },
+                    {
+                      label: "Desconto",
+                      value: formatMoneyBr(data.summary.desconto ?? 0),
+                      hint: "ausentes",
+                      tone: "bg-rose-50 text-rose-950 border-rose-200",
                     },
                     {
                       label: "Almoço",
@@ -3152,12 +3676,12 @@ function FacilitiesPage() {
               </div>
 
               {fechPanel === "pagamento" ? (
-                <div className="grid gap-md lg:grid-cols-5">
-                  <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest lg:col-span-3">
+                <div className="space-y-md">
+                  <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
                     <div className="border-b border-outline-variant px-md py-sm">
-                      <h4 className="text-title-md text-primary">Quem recebe horas</h4>
+                      <h4 className="text-title-md text-primary">Pagamento por substituto</h4>
                       <p className="text-label-md text-on-surface-variant">
-                        Somente coberturas com pagamento (faltas, atestados, folgas…).
+                        Horas, hora extra, almoço e valor a pagar de quem cobriu.
                       </p>
                     </div>
                     <div className="space-y-sm p-md md:hidden">
@@ -3169,20 +3693,35 @@ function FacilitiesPage() {
                         pagedFechColaboradores.items.map((row, index) => (
                           <article
                             key={row.id}
-                            className="flex items-center justify-between gap-sm rounded-xl border border-outline-variant bg-surface p-md"
+                            className="rounded-xl border border-outline-variant bg-surface p-md"
                           >
-                            <div className="min-w-0">
-                              <p className="text-label-md text-on-surface-variant">
-                                #{(pagedFechColaboradores.page - 1) * fechPageSize + index + 1}
-                              </p>
-                              <p className="font-medium text-primary">{row.nome}</p>
-                              <p className="text-label-md text-on-surface-variant">
-                                {row.empresa} · {row.trocas} cobertura(s)
-                              </p>
+                            <div className="flex items-start justify-between gap-sm">
+                              <div className="min-w-0">
+                                <p className="text-label-md text-on-surface-variant">
+                                  #{(pagedFechColaboradores.page - 1) * fechPageSize + index + 1}
+                                </p>
+                                <p className="font-medium text-primary">{row.nome}</p>
+                                <p className="text-label-md text-on-surface-variant">
+                                  {row.empresa} · {row.escala} · {row.trocas} cobertura(s)
+                                </p>
+                              </div>
+                              <div className="shrink-0 text-right">
+                                <p className="text-title-md font-semibold text-primary">
+                                  {formatMoneyBr(row.pagamento ?? 0)}
+                                </p>
+                                <p className="text-label-md text-on-surface-variant">
+                                  {formatHours(row.horas)}
+                                  {(row.horasExtra ?? 0) > 0
+                                    ? ` + HE ${formatHours(row.horasExtra ?? 0)}`
+                                    : ""}
+                                </p>
+                              </div>
                             </div>
-                            <p className="shrink-0 text-title-md font-semibold text-primary">
-                              {formatHours(row.horas)}
-                            </p>
+                            {(row.almoco ?? 0) > 0 ? (
+                              <p className="mt-sm text-label-md text-secondary">
+                                Almoço {formatMoneyBr(row.almoco ?? 0)}
+                              </p>
+                            ) : null}
                           </article>
                         ))
                       )}
@@ -3197,13 +3736,16 @@ function FacilitiesPage() {
                             <th className="px-md py-sm">Escala</th>
                             <th className="px-md py-sm">Coberturas</th>
                             <th className="px-md py-sm">Horas</th>
+                            <th className="px-md py-sm">HE</th>
+                            <th className="px-md py-sm">Almoço</th>
+                            <th className="px-md py-sm">Pagamento</th>
                           </tr>
                         </thead>
                         <tbody>
                           {pagedFechColaboradores.totalItems === 0 ? (
                             <tr>
                               <td
-                                colSpan={6}
+                                colSpan={9}
                                 className="px-md py-xl text-center text-on-surface-variant"
                               >
                                 Sem horas a pagar neste mês.
@@ -3219,8 +3761,19 @@ function FacilitiesPage() {
                                 <td className="px-md py-sm">{row.empresa}</td>
                                 <td className="px-md py-sm text-on-surface-variant">{row.escala}</td>
                                 <td className="px-md py-sm">{row.trocas}</td>
+                                <td className="px-md py-sm font-semibold">{formatHours(row.horas)}</td>
+                                <td className="px-md py-sm">
+                                  {(row.horasExtra ?? 0) > 0
+                                    ? formatHours(row.horasExtra ?? 0)
+                                    : "—"}
+                                </td>
+                                <td className="px-md py-sm">
+                                  {(row.almoco ?? 0) > 0
+                                    ? formatMoneyBr(row.almoco ?? 0)
+                                    : "—"}
+                                </td>
                                 <td className="px-md py-sm text-title-md font-semibold text-primary">
-                                  {formatHours(row.horas)}
+                                  {formatMoneyBr(row.pagamento ?? 0)}
                                 </td>
                               </tr>
                             ))
@@ -3237,45 +3790,183 @@ function FacilitiesPage() {
                     />
                   </div>
 
-                  <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest lg:col-span-2">
-                    <div className="border-b border-outline-variant px-md py-sm">
-                      <h4 className="text-title-md text-primary">Por posto</h4>
-                      <p className="text-label-md text-on-surface-variant">
-                        Horas pagáveis agrupadas no posto.
-                      </p>
-                    </div>
-                    <div className="space-y-sm p-md">
-                      {pagedFechPostos.totalItems === 0 ? (
-                        <p className="py-lg text-center text-body-md text-on-surface-variant">
-                          Sem lançamentos neste mês.
+                  <div className="grid gap-md lg:grid-cols-2">
+                    <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
+                      <div className="border-b border-outline-variant px-md py-sm">
+                        <h4 className="text-title-md text-primary">Desconto por ausente</h4>
+                        <p className="text-label-md text-on-surface-variant">
+                          Quem teve desconto de horas no mês.
                         </p>
-                      ) : (
-                        pagedFechPostos.items.map((row) => (
-                          <article
-                            key={row.id}
-                            className="flex items-center justify-between gap-sm rounded-xl border border-outline-variant bg-surface px-md py-sm"
-                          >
-                            <div className="min-w-0">
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-left text-body-md">
+                          <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
+                            <tr>
+                              <th className="px-md py-sm">Ausente</th>
+                              <th className="px-md py-sm">Empresa</th>
+                              <th className="px-md py-sm">Lanç.</th>
+                              <th className="px-md py-sm">Horas</th>
+                              <th className="px-md py-sm">Desconto</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(data.summary.byAusente ?? []).length === 0 ? (
+                              <tr>
+                                <td
+                                  colSpan={5}
+                                  className="px-md py-xl text-center text-on-surface-variant"
+                                >
+                                  Nenhum desconto neste mês.
+                                </td>
+                              </tr>
+                            ) : (
+                              (data.summary.byAusente ?? []).map((row) => (
+                                <tr key={row.id} className="border-t border-outline-variant/60">
+                                  <td className="px-md py-sm font-medium text-primary">{row.nome}</td>
+                                  <td className="px-md py-sm">{row.empresa}</td>
+                                  <td className="px-md py-sm">{row.lancamentos}</td>
+                                  <td className="px-md py-sm">{formatHours(row.horas)}</td>
+                                  <td className="px-md py-sm font-semibold text-rose-800">
+                                    {formatMoneyBr(row.desconto)}
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
+                      <div className="border-b border-outline-variant px-md py-sm">
+                        <h4 className="text-title-md text-primary">Por posto</h4>
+                        <p className="text-label-md text-on-surface-variant">
+                          Horas, pagamento, desconto e almoço por posto.
+                        </p>
+                      </div>
+                      <div className="space-y-sm p-md md:hidden">
+                        {pagedFechPostos.totalItems === 0 ? (
+                          <p className="py-lg text-center text-body-md text-on-surface-variant">
+                            Sem lançamentos neste mês.
+                          </p>
+                        ) : (
+                          pagedFechPostos.items.map((row) => (
+                            <article
+                              key={row.id}
+                              className="rounded-xl border border-outline-variant bg-surface px-md py-sm"
+                            >
                               <p className="font-medium text-primary">{row.nome}</p>
                               <p className="text-label-md text-on-surface-variant">
-                                {row.trocas} lançamento(s)
+                                {row.trocas} lanç. · {formatHours(row.horas)}
+                                {(row.horasExtra ?? 0) > 0
+                                  ? ` + HE ${formatHours(row.horasExtra ?? 0)}`
+                                  : ""}
                               </p>
-                            </div>
-                            <p className="shrink-0 text-title-md font-semibold text-primary">
-                              {formatHours(row.horas)}
-                            </p>
-                          </article>
-                        ))
-                      )}
+                              <p className="mt-xs text-label-md">
+                                Pgto {formatMoneyBr(row.pagamento ?? 0)} · Desc.{" "}
+                                {formatMoneyBr(row.desconto ?? 0)}
+                              </p>
+                            </article>
+                          ))
+                        )}
+                      </div>
+                      <div className="hidden overflow-x-auto md:block">
+                        <table className="min-w-full text-left text-body-md">
+                          <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
+                            <tr>
+                              <th className="px-md py-sm">Posto</th>
+                              <th className="px-md py-sm">Lanç.</th>
+                              <th className="px-md py-sm">Horas</th>
+                              <th className="px-md py-sm">HE</th>
+                              <th className="px-md py-sm">Pagamento</th>
+                              <th className="px-md py-sm">Desconto</th>
+                              <th className="px-md py-sm">Almoço</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pagedFechPostos.totalItems === 0 ? (
+                              <tr>
+                                <td
+                                  colSpan={7}
+                                  className="px-md py-xl text-center text-on-surface-variant"
+                                >
+                                  Sem lançamentos neste mês.
+                                </td>
+                              </tr>
+                            ) : (
+                              pagedFechPostos.items.map((row) => (
+                                <tr key={row.id} className="border-t border-outline-variant/60">
+                                  <td className="px-md py-sm font-medium text-primary">{row.nome}</td>
+                                  <td className="px-md py-sm">{row.trocas}</td>
+                                  <td className="px-md py-sm">{formatHours(row.horas)}</td>
+                                  <td className="px-md py-sm">
+                                    {(row.horasExtra ?? 0) > 0
+                                      ? formatHours(row.horasExtra ?? 0)
+                                      : "—"}
+                                  </td>
+                                  <td className="px-md py-sm font-semibold">
+                                    {formatMoneyBr(row.pagamento ?? 0)}
+                                  </td>
+                                  <td className="px-md py-sm">{formatMoneyBr(row.desconto ?? 0)}</td>
+                                  <td className="px-md py-sm">
+                                    {(row.almoco ?? 0) > 0
+                                      ? formatMoneyBr(row.almoco ?? 0)
+                                      : "—"}
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                      <TablePager
+                        page={pagedFechPostos.page}
+                        totalPages={pagedFechPostos.totalPages}
+                        totalItems={pagedFechPostos.totalItems}
+                        pageSize={fechPageSize}
+                        onPageChange={setFechPostoPage}
+                      />
                     </div>
-                    <TablePager
-                      page={pagedFechPostos.page}
-                      totalPages={pagedFechPostos.totalPages}
-                      totalItems={pagedFechPostos.totalItems}
-                      pageSize={fechPageSize}
-                      onPageChange={setFechPostoPage}
-                    />
                   </div>
+
+                  {(data.summary.byMotivo ?? []).length > 0 ? (
+                    <div className="overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest">
+                      <div className="border-b border-outline-variant px-md py-sm">
+                        <h4 className="text-title-md text-primary">Por motivo</h4>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-left text-body-md">
+                          <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
+                            <tr>
+                              <th className="px-md py-sm">Motivo</th>
+                              <th className="px-md py-sm">Lançamentos</th>
+                              <th className="px-md py-sm">Horas</th>
+                              <th className="px-md py-sm">Pagamento</th>
+                              <th className="px-md py-sm">Desconto</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(data.summary.byMotivo ?? []).map((row) => (
+                              <tr key={row.motivo} className="border-t border-outline-variant/60">
+                                <td className="px-md py-sm font-medium text-primary">
+                                  {row.motivoLabel}
+                                  {!row.pagaHoras ? (
+                                    <span className="ml-xs text-label-md text-on-surface-variant">
+                                      (sem pgto)
+                                    </span>
+                                  ) : null}
+                                </td>
+                                <td className="px-md py-sm">{row.trocas}</td>
+                                <td className="px-md py-sm">{formatHours(row.horas)}</td>
+                                <td className="px-md py-sm">{formatMoneyBr(row.pagamento ?? 0)}</td>
+                                <td className="px-md py-sm">{formatMoneyBr(row.desconto ?? 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -3306,7 +3997,13 @@ function FacilitiesPage() {
                               <p className="mt-xs text-title-md text-primary">
                                 {row.substitutoNome}{" "}
                                 <span className="font-normal text-on-surface-variant">cobriu</span>{" "}
-                                {row.ausenteNome}
+                                {row.ausenteNome || "—"}
+                              </p>
+                              <p className="mt-2xs text-label-md text-on-surface-variant">
+                                {row.motivoLabel} · {row.periodoLabel}
+                                {row.horasExtra > 0
+                                  ? ` · HE ${formatHours(row.horasExtra)}${row.periodoExtraLabel ? ` (${row.periodoExtraLabel})` : ""}`
+                                  : ""}
                               </p>
                             </div>
                             <div className="text-right">
@@ -3320,24 +4017,68 @@ function FacilitiesPage() {
                               >
                                 {row.pagaHoras ? formatHours(row.horas) : "Sem pgto"}
                               </span>
-                              <p className="mt-xs text-label-md text-on-surface-variant">
-                                {row.motivoLabel}
+                              <p className="mt-xs text-label-md font-semibold text-primary">
+                                {formatMoneyBr(row.valorPagamento)}
                               </p>
+                              {(row.valorDesconto ?? 0) > 0 ? (
+                                <p className="text-label-md text-rose-800">
+                                  Desc. {formatMoneyBr(row.valorDesconto)}
+                                </p>
+                              ) : null}
                             </div>
+                          </div>
+                          <div className="mt-sm grid gap-2xs text-label-md text-on-surface-variant">
+                            <p>
+                              Tarifa {formatMoneyBr(row.tarifaHora)}/h
+                              {row.horasExtra > 0
+                                ? ` · Extra ${formatMoneyBr(row.tarifaExtra)}/h`
+                                : ""}
+                              {row.aplicaDesconto
+                                ? ` · Desc. ${formatMoneyBr(row.tarifaDesconto)}/h`
+                                : ""}
+                            </p>
+                            <p>
+                              Desconto no ausente: {row.aplicaDesconto ? "Sim" : "Não"}
+                              {row.foraDoPostoBase ? " · Fora do posto base" : ""}
+                            </p>
+                            {row.createdByName ? <p>Registrado por: {row.createdByName}</p> : null}
                           </div>
                           {almocoLabel(row) ? (
                             <p className="mt-sm text-label-md text-secondary">{almocoLabel(row)}</p>
                           ) : null}
-                          {hasObservacao(row.observacao) ? (
-                            <button
-                              type="button"
-                              className="mt-sm inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-primary"
-                              onClick={() => setObsDialog(row)}
-                            >
-                              <Icon name="notes" className="text-[16px]" />
-                              Ver observação
-                            </button>
-                          ) : null}
+                          <div className="mt-sm flex flex-wrap gap-sm">
+                            {row.hasAtestado ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-primary"
+                                  disabled={pending}
+                                  onClick={() => void downloadAtestado(row.id)}
+                                >
+                                  <Icon name="attach_file" className="text-[16px]" />
+                                  Atestado
+                                </button>
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-error"
+                                  disabled={pending}
+                                  onClick={() => void removeAtestado(row.id)}
+                                >
+                                  Apagar anexo
+                                </button>
+                              </>
+                            ) : null}
+                            {hasObservacao(row.observacao) ? (
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-primary"
+                                onClick={() => setObsDialog(row)}
+                              >
+                                <Icon name="notes" className="text-[16px]" />
+                                Ver observação
+                              </button>
+                            ) : null}
+                          </div>
                         </article>
                       ))
                     )}
@@ -3351,16 +4092,23 @@ function FacilitiesPage() {
                           <th className="px-md py-sm">Ausente</th>
                           <th className="px-md py-sm">Substituto</th>
                           <th className="px-md py-sm">Motivo</th>
-                          <th className="px-md py-sm">Status</th>
+                          <th className="px-md py-sm">Período</th>
+                          <th className="px-md py-sm">Horas</th>
+                          <th className="px-md py-sm">HE</th>
+                          <th className="px-md py-sm">Tarifa</th>
+                          <th className="px-md py-sm">Pagamento</th>
+                          <th className="px-md py-sm">Desc.?</th>
+                          <th className="px-md py-sm">Desconto</th>
                           <th className="px-md py-sm">Almoço</th>
-                          <th className="px-md py-sm">Obs.</th>
+                          <th className="px-md py-sm">Por</th>
+                          <th className="px-md py-sm">Anexos</th>
                         </tr>
                       </thead>
                       <tbody>
                         {pagedFechLancamentos.totalItems === 0 ? (
                           <tr>
                             <td
-                              colSpan={8}
+                              colSpan={15}
                               className="px-md py-xl text-center text-on-surface-variant"
                             >
                               Nenhum lançamento neste mês.
@@ -3372,20 +4120,28 @@ function FacilitiesPage() {
                               <td className="whitespace-nowrap px-md py-sm">
                                 {formatDateBr(row.data)}
                               </td>
-                              <td className="px-md py-sm text-primary">{row.postoNome}</td>
+                              <td className="px-md py-sm text-primary">
+                                {row.postoNome}
+                                {row.foraDoPostoBase ? (
+                                  <span className="mt-2xs block text-label-md text-secondary">
+                                    Fora do posto base
+                                  </span>
+                                ) : null}
+                              </td>
                               <td className="px-md py-sm">
-                                <div className="font-medium">{row.ausenteNome}</div>
+                                <div className="font-medium">{row.ausenteNome || "—"}</div>
                                 <div className="text-label-md text-on-surface-variant">
-                                  {row.ausenteEmpresa}
+                                  {row.ausenteEmpresa || ""}
                                 </div>
                               </td>
                               <td className="px-md py-sm">
                                 <div className="font-medium">{row.substitutoNome}</div>
                                 <div className="text-label-md text-on-surface-variant">
-                                  {row.substitutoEmpresa}
+                                  {row.substitutoEmpresa} · {row.substitutoEscala}
                                 </div>
                               </td>
                               <td className="px-md py-sm">{row.motivoLabel}</td>
+                              <td className="px-md py-sm">{row.periodoLabel}</td>
                               <td className="px-md py-sm">
                                 <span
                                   className={cn(
@@ -3398,23 +4154,83 @@ function FacilitiesPage() {
                                   {row.pagaHoras ? formatHours(row.horas) : "Sem pgto"}
                                 </span>
                               </td>
+                              <td className="px-md py-sm">
+                                {row.horasExtra > 0 ? (
+                                  <>
+                                    {formatHours(row.horasExtra)}
+                                    {row.periodoExtraLabel ? (
+                                      <div className="text-label-md text-on-surface-variant">
+                                        {row.periodoExtraLabel}
+                                      </div>
+                                    ) : null}
+                                  </>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                              <td className="px-md py-sm text-label-md">
+                                {formatMoneyBr(row.tarifaHora)}/h
+                                {row.horasExtra > 0 ? (
+                                  <div className="text-on-surface-variant">
+                                    HE {formatMoneyBr(row.tarifaExtra)}/h
+                                  </div>
+                                ) : null}
+                                {row.aplicaDesconto ? (
+                                  <div className="text-on-surface-variant">
+                                    Desc. {formatMoneyBr(row.tarifaDesconto)}/h
+                                  </div>
+                                ) : null}
+                              </td>
+                              <td className="px-md py-sm font-semibold">
+                                {formatMoneyBr(row.valorPagamento ?? 0)}
+                              </td>
+                              <td className="px-md py-sm">{row.aplicaDesconto ? "Sim" : "Não"}</td>
+                              <td className="px-md py-sm">
+                                {formatMoneyBr(row.valorDesconto ?? 0)}
+                              </td>
                               <td className="px-md py-sm text-secondary">
                                 {almocoLabel(row) ?? "—"}
                               </td>
+                              <td className="px-md py-sm text-on-surface-variant">
+                                {row.createdByName ?? "—"}
+                              </td>
                               <td className="px-md py-sm">
-                                {hasObservacao(row.observacao) ? (
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center gap-xs text-label-md font-semibold text-primary hover:underline"
-                                    onClick={() => setObsDialog(row)}
-                                    title={row.observacao ?? undefined}
-                                  >
-                                    <Icon name="notes" className="text-[16px]" />
-                                    Ver
-                                  </button>
-                                ) : (
-                                  <span className="text-on-surface-variant">—</span>
-                                )}
+                                <div className="inline-flex flex-wrap items-center gap-sm">
+                                  {row.hasAtestado ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-xs text-label-md font-semibold text-primary hover:underline"
+                                        disabled={pending}
+                                        onClick={() => void downloadAtestado(row.id)}
+                                      >
+                                        <Icon name="attach_file" className="text-[16px]" />
+                                        Atestado
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="text-label-md font-semibold text-error hover:underline"
+                                        disabled={pending}
+                                        onClick={() => void removeAtestado(row.id)}
+                                      >
+                                        Apagar
+                                      </button>
+                                    </>
+                                  ) : null}
+                                  {hasObservacao(row.observacao) ? (
+                                    <button
+                                      type="button"
+                                      className="inline-flex items-center gap-xs text-label-md font-semibold text-primary hover:underline"
+                                      onClick={() => setObsDialog(row)}
+                                      title={row.observacao ?? undefined}
+                                    >
+                                      <Icon name="notes" className="text-[16px]" />
+                                      Obs.
+                                    </button>
+                                  ) : !row.hasAtestado ? (
+                                    <span className="text-on-surface-variant">—</span>
+                                  ) : null}
+                                </div>
                               </td>
                             </tr>
                           ))

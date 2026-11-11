@@ -2,20 +2,27 @@ import "@tanstack/react-start/server-only";
 
 import { getDb } from "@/db/schema";
 import {
+  calcFacilitiesMoney,
   countInclusiveDays,
   currentMonthKey,
+  defaultAplicaDesconto,
   defaultHoursForEscala,
+  FACILITIES_FUNCOES,
   FACILITIES_MOTIVOS_SEM_HORAS,
   facilitiesEmpresaLabel,
   facilitiesEscalaLabel,
   facilitiesFuncaoLabel,
   facilitiesMotivoLabel,
   facilitiesMotivoPagaHoras,
+  facilitiesPeriodoLabel,
   monthRange,
+  pickHourRate,
   type FacilitiesEmpresaId,
   type FacilitiesEscalaId,
   type FacilitiesFuncaoId,
+  type FacilitiesHourRate,
   type FacilitiesMotivoId,
+  type FacilitiesPeriodoId,
 } from "@/lib/facilities-domain";
 
 export type FacilitiesPost = {
@@ -63,6 +70,20 @@ export type FacilitiesSubstitution = {
   substitutoEmpresa: string;
   substitutoEscala: string;
   horas: number;
+  periodo: FacilitiesPeriodoId;
+  periodoLabel: string;
+  horasExtra: number;
+  periodoExtra: FacilitiesPeriodoId | null;
+  periodoExtraLabel: string | null;
+  aplicaDesconto: boolean;
+  tarifaHora: number;
+  tarifaExtra: number;
+  tarifaDesconto: number;
+  valorPagamento: number;
+  valorDesconto: number;
+  atestadoNome: string | null;
+  atestadoMime: string | null;
+  hasAtestado: boolean;
   observacao: string | null;
   pagaAlmoco: boolean;
   valorAlmoco: number;
@@ -185,6 +206,30 @@ function mapSubstitution(row: Record<string, unknown>): FacilitiesSubstitution {
     substitutoEmpresa: facilitiesEmpresaLabel(String(row["substituto_empresa"] ?? "")),
     substitutoEscala: facilitiesEscalaLabel(String(row["substituto_escala"] ?? "")),
     horas: toNumber(row["horas"]),
+    periodo: (String(row["periodo"] ?? "diurno") === "noturno"
+      ? "noturno"
+      : "diurno") as FacilitiesPeriodoId,
+    periodoLabel: facilitiesPeriodoLabel(String(row["periodo"] ?? "diurno")),
+    horasExtra: toNumber(row["horas_extra"]),
+    periodoExtra:
+      row["periodo_extra"] == null || String(row["periodo_extra"]).trim() === ""
+        ? null
+        : (String(row["periodo_extra"]) === "noturno" ? "noturno" : "diurno"),
+    periodoExtraLabel:
+      row["periodo_extra"] == null || String(row["periodo_extra"]).trim() === ""
+        ? null
+        : facilitiesPeriodoLabel(String(row["periodo_extra"])),
+    aplicaDesconto: Boolean(row["aplica_desconto"]),
+    tarifaHora: toNumber(row["tarifa_hora"]),
+    tarifaExtra: toNumber(row["tarifa_extra"]),
+    tarifaDesconto: toNumber(row["tarifa_desconto"]),
+    valorPagamento: toNumber(row["valor_pagamento"]),
+    valorDesconto: toNumber(row["valor_desconto"]),
+    atestadoNome: row["atestado_nome"] == null ? null : String(row["atestado_nome"]),
+    atestadoMime: row["atestado_mime"] == null ? null : String(row["atestado_mime"]),
+    hasAtestado: Boolean(
+      row["atestado_data"] != null && String(row["atestado_data"]).length > 0,
+    ),
     observacao: row["observacao"] == null ? null : String(row["observacao"]),
     pagaAlmoco: Boolean(row["paga_almoco"]),
     valorAlmoco: toNumber(row["valor_almoco"]),
@@ -197,6 +242,111 @@ function mapSubstitution(row: Record<string, unknown>): FacilitiesSubstitution {
     })(),
     createdAt: toIso(row["created_at"] as string | Date),
   };
+}
+
+function mapHourRate(row: Record<string, unknown>): FacilitiesHourRate {
+  return {
+    funcao: String(row["funcao"] ?? "") as FacilitiesFuncaoId,
+    valorDiurna: toNumber(row["valor_diurna"]),
+    valorNoturna: toNumber(row["valor_noturna"]),
+    valorExtraDiurna: toNumber(row["valor_extra_diurna"]),
+    valorExtraNoturna: toNumber(row["valor_extra_noturna"]),
+    valorDescontoDiurna: toNumber(row["valor_desconto_diurna"]),
+    valorDescontoNoturna: toNumber(row["valor_desconto_noturna"]),
+  };
+}
+
+export async function listFacilitiesHourRates(): Promise<FacilitiesHourRate[]> {
+  const db = await getDb();
+  const rows = (await db`
+    select * from facilities_hour_rates order by funcao asc
+  `) as Array<Record<string, unknown>>;
+  const byFuncao = new Map(rows.map((r) => [String(r["funcao"]), mapHourRate(r)]));
+  return FACILITIES_FUNCOES.map((f) => {
+    const existing = byFuncao.get(f.id);
+    return (
+      existing ?? {
+        funcao: f.id,
+        valorDiurna: 0,
+        valorNoturna: 0,
+        valorExtraDiurna: 0,
+        valorExtraNoturna: 0,
+        valorDescontoDiurna: 0,
+        valorDescontoNoturna: 0,
+      }
+    );
+  });
+}
+
+export async function upsertFacilitiesHourRates(rates: FacilitiesHourRate[]) {
+  const db = await getDb();
+  for (const rate of rates) {
+    await db`
+      insert into facilities_hour_rates (
+        funcao, valor_diurna, valor_noturna, valor_extra_diurna, valor_extra_noturna,
+        valor_desconto_diurna, valor_desconto_noturna, updated_at
+      ) values (
+        ${rate.funcao},
+        ${Math.max(0, rate.valorDiurna)},
+        ${Math.max(0, rate.valorNoturna)},
+        ${Math.max(0, rate.valorExtraDiurna)},
+        ${Math.max(0, rate.valorExtraNoturna)},
+        ${Math.max(0, rate.valorDescontoDiurna)},
+        ${Math.max(0, rate.valorDescontoNoturna)},
+        now()
+      )
+      on conflict (funcao) do update set
+        valor_diurna = excluded.valor_diurna,
+        valor_noturna = excluded.valor_noturna,
+        valor_extra_diurna = excluded.valor_extra_diurna,
+        valor_extra_noturna = excluded.valor_extra_noturna,
+        valor_desconto_diurna = excluded.valor_desconto_diurna,
+        valor_desconto_noturna = excluded.valor_desconto_noturna,
+        updated_at = now()
+    `;
+  }
+  return listFacilitiesHourRates();
+}
+
+export async function getFacilitiesSubstitutionAtestado(id: number) {
+  const db = await getDb();
+  const [row] = (await db`
+    select atestado_nome, atestado_mime, atestado_data
+    from facilities_substitutions
+    where id = ${id}
+    limit 1
+  `) as Array<{
+    atestado_nome: string | null;
+    atestado_mime: string | null;
+    atestado_data: string | null;
+  }>;
+  if (!row?.atestado_data) return null;
+  return {
+    name: row.atestado_nome || "atestado",
+    mime: row.atestado_mime || "application/octet-stream",
+    data: row.atestado_data,
+  };
+}
+
+export async function deleteFacilitiesSubstitutionAtestado(id: number) {
+  const db = await getDb();
+  const existing = (await db`
+    select id, atestado_data
+    from facilities_substitutions
+    where id = ${id}
+    limit 1
+  `) as Array<{ id: number; atestado_data: string | null }>;
+  if (!existing[0]) throw new Error("Lançamento não encontrado.");
+  if (!existing[0].atestado_data) throw new Error("Este lançamento não tem atestado anexado.");
+  await db`
+    update facilities_substitutions
+    set
+      atestado_nome = null,
+      atestado_mime = null,
+      atestado_data = null,
+      updated_at = now()
+    where id = ${id}
+  `;
 }
 
 export async function listFacilitiesPosts(activeOnly = true) {
@@ -425,6 +575,13 @@ export async function createFacilitiesSubstitution(input: {
   ausenteId?: number | null;
   substitutoId: number;
   horas: number;
+  periodo: FacilitiesPeriodoId;
+  horasExtra?: number;
+  periodoExtra?: FacilitiesPeriodoId | null;
+  aplicaDesconto?: boolean;
+  atestadoNome?: string | null;
+  atestadoMime?: string | null;
+  atestadoData?: string | null;
   observacao?: string | null;
   pagaAlmoco?: boolean;
   valorAlmoco?: number;
@@ -453,19 +610,63 @@ export async function createFacilitiesSubstitution(input: {
   if (!Number.isFinite(input.horas) || input.horas <= 0) {
     throw new Error("Informe duração maior que zero.");
   }
+  const periodo = input.periodo === "noturno" ? "noturno" : "diurno";
+  const horasExtra = Math.max(0, Number(input.horasExtra ?? 0) || 0);
+  const periodoExtra =
+    horasExtra > 0
+      ? input.periodoExtra === "noturno"
+        ? "noturno"
+        : "diurno"
+      : null;
+  if (input.motivo === "atestado") {
+    const data = input.atestadoData?.trim() || "";
+    if (!data) {
+      throw new Error("Anexe o atestado (PDF ou imagem) para este lançamento.");
+    }
+  }
   const pagaAlmoco = Boolean(input.pagaAlmoco);
   const valorAlmoco = pagaAlmoco ? Math.max(0, Number(input.valorAlmoco ?? 0)) : 0;
   if (pagaAlmoco && !(valorAlmoco > 0)) {
     throw new Error("Informe o valor do almoço.");
   }
   const db = await getDb();
+  const [subRow] = (await db`
+    select funcao from facilities_collaborators where id = ${input.substitutoId} limit 1
+  `) as Array<{ funcao: string }>;
+  if (!subRow) throw new Error("Substituto não encontrado.");
+  const rates = await listFacilitiesHourRates();
+  const rate = pickHourRate(rates, subRow.funcao);
+  const aplicaDesconto =
+    ausenteId != null && input.aplicaDesconto != null
+      ? Boolean(input.aplicaDesconto)
+      : ausenteId != null && defaultAplicaDesconto(input.motivo);
+  const money = calcFacilitiesMoney({
+    motivo: input.motivo,
+    horas: input.horas,
+    horasExtra,
+    periodo,
+    periodoExtra,
+    aplicaDesconto,
+    hasAusente: ausenteId != null,
+    rate,
+  });
   const rows = (await db`
     insert into facilities_substitutions (
-      data, motivo, posto_id, ausente_id, substituto_id, horas, observacao,
-      paga_almoco, valor_almoco, created_by, created_at, updated_at
+      data, motivo, posto_id, ausente_id, substituto_id, horas, periodo,
+      horas_extra, periodo_extra, aplica_desconto,
+      atestado_nome, atestado_mime, atestado_data,
+      tarifa_hora, tarifa_extra, tarifa_desconto, valor_pagamento, valor_desconto,
+      observacao, paga_almoco, valor_almoco, created_by, created_at, updated_at
     ) values (
       ${input.data}::date, ${input.motivo}, ${input.postoId}, ${ausenteId}, ${input.substitutoId},
-      ${input.horas}, ${input.observacao?.trim() || null},
+      ${input.horas}, ${periodo},
+      ${horasExtra}, ${periodoExtra}, ${aplicaDesconto},
+      ${input.motivo === "atestado" ? input.atestadoNome?.trim() || null : null},
+      ${input.motivo === "atestado" ? input.atestadoMime?.trim() || null : null},
+      ${input.motivo === "atestado" ? input.atestadoData?.trim() || null : null},
+      ${money.tarifaHora}, ${money.tarifaExtra}, ${money.tarifaDesconto},
+      ${money.valorPagamento}, ${money.valorDesconto},
+      ${input.observacao?.trim() || null},
       ${pagaAlmoco}, ${valorAlmoco}, ${input.createdBy ?? null}, now(), now()
     )
     returning id
@@ -690,10 +891,21 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       count(*)::int as trocas,
       count(*) filter (where motivo = 'troca')::int as permutas,
       coalesce(sum(case when motivo <> all(${semHoras}) then horas else 0 end), 0)::float as horas,
-      coalesce(sum(case when paga_almoco then valor_almoco else 0 end), 0)::float as almoco
+      coalesce(sum(case when motivo <> all(${semHoras}) then horas_extra else 0 end), 0)::float as horas_extra,
+      coalesce(sum(case when paga_almoco then valor_almoco else 0 end), 0)::float as almoco,
+      coalesce(sum(valor_pagamento), 0)::float as pagamento,
+      coalesce(sum(valor_desconto), 0)::float as desconto
     from facilities_substitutions
     where data >= ${start}::date and data <= ${end}::date
-  `) as Array<{ trocas: number; permutas: number; horas: number; almoco: number }>;
+  `) as Array<{
+    trocas: number;
+    permutas: number;
+    horas: number;
+    horas_extra: number;
+    almoco: number;
+    pagamento: number;
+    desconto: number;
+  }>;
 
   const byPosto = (await db`
     select
@@ -701,13 +913,25 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       p.nome,
       count(*)::int as trocas,
       coalesce(sum(case when s.motivo <> all(${semHoras}) then s.horas else 0 end), 0)::float as horas,
-      coalesce(sum(case when s.paga_almoco then s.valor_almoco else 0 end), 0)::float as almoco
+      coalesce(sum(case when s.motivo <> all(${semHoras}) then s.horas_extra else 0 end), 0)::float as horas_extra,
+      coalesce(sum(case when s.paga_almoco then s.valor_almoco else 0 end), 0)::float as almoco,
+      coalesce(sum(s.valor_pagamento), 0)::float as pagamento,
+      coalesce(sum(s.valor_desconto), 0)::float as desconto
     from facilities_substitutions s
     join facilities_posts p on p.id = s.posto_id
     where s.data >= ${start}::date and s.data <= ${end}::date
     group by p.id, p.nome
     order by trocas desc, p.nome asc
-  `) as Array<{ id: number; nome: string; trocas: number; horas: number; almoco: number }>;
+  `) as Array<{
+    id: number;
+    nome: string;
+    trocas: number;
+    horas: number;
+    horas_extra: number;
+    almoco: number;
+    pagamento: number;
+    desconto: number;
+  }>;
 
   const bySubstituto = (await db`
     select
@@ -718,7 +942,10 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       count(*) filter (where s.motivo <> all(${semHoras}))::int as trocas,
       count(*) filter (where s.motivo = 'troca')::int as permutas,
       coalesce(sum(case when s.motivo <> all(${semHoras}) then s.horas else 0 end), 0)::float as horas,
-      coalesce(sum(case when s.paga_almoco then s.valor_almoco else 0 end), 0)::float as almoco
+      coalesce(sum(case when s.motivo <> all(${semHoras}) then s.horas_extra else 0 end), 0)::float as horas_extra,
+      coalesce(sum(case when s.paga_almoco then s.valor_almoco else 0 end), 0)::float as almoco,
+      coalesce(sum(s.valor_pagamento), 0)::float as pagamento,
+      coalesce(sum(s.valor_desconto), 0)::float as desconto
     from facilities_substitutions s
     join facilities_collaborators c on c.id = s.substituto_id
     where s.data >= ${start}::date and s.data <= ${end}::date
@@ -727,6 +954,7 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       count(*) filter (where s.motivo <> all(${semHoras})) > 0
       or coalesce(sum(case when s.motivo <> all(${semHoras}) then s.horas else 0 end), 0) > 0
       or coalesce(sum(case when s.paga_almoco then s.valor_almoco else 0 end), 0) > 0
+      or coalesce(sum(s.valor_pagamento), 0) > 0
     order by horas desc, trocas desc, c.nome asc
   `) as Array<{
     id: number;
@@ -736,19 +964,56 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
     trocas: number;
     permutas: number;
     horas: number;
+    horas_extra: number;
     almoco: number;
+    pagamento: number;
+    desconto: number;
   }>;
 
   const byMotivo = (await db`
     select
       motivo,
       count(*)::int as trocas,
-      coalesce(sum(case when motivo <> all(${semHoras}) then horas else 0 end), 0)::float as horas
+      coalesce(sum(case when motivo <> all(${semHoras}) then horas else 0 end), 0)::float as horas,
+      coalesce(sum(valor_pagamento), 0)::float as pagamento,
+      coalesce(sum(valor_desconto), 0)::float as desconto
     from facilities_substitutions
     where data >= ${start}::date and data <= ${end}::date
     group by motivo
     order by trocas desc
-  `) as Array<{ motivo: string; trocas: number; horas: number }>;
+  `) as Array<{
+    motivo: string;
+    trocas: number;
+    horas: number;
+    pagamento: number;
+    desconto: number;
+  }>;
+
+  const byAusente = (await db`
+    select
+      c.id,
+      c.nome,
+      c.empresa,
+      c.escala,
+      count(*)::int as lancamentos,
+      coalesce(sum(s.horas), 0)::float as horas,
+      coalesce(sum(s.valor_desconto), 0)::float as desconto
+    from facilities_substitutions s
+    join facilities_collaborators c on c.id = s.ausente_id
+    where s.data >= ${start}::date
+      and s.data <= ${end}::date
+      and s.valor_desconto > 0
+    group by c.id, c.nome, c.empresa, c.escala
+    order by desconto desc, c.nome asc
+  `) as Array<{
+    id: number;
+    nome: string;
+    empresa: string;
+    escala: string;
+    lancamentos: number;
+    horas: number;
+    desconto: number;
+  }>;
 
   const counts = (await db`
     select
@@ -818,7 +1083,10 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
     trocas: Number(totals[0]?.trocas ?? 0),
     permutas: Number(totals[0]?.permutas ?? 0),
     horas: Number(totals[0]?.horas ?? 0),
+    horasExtra: Number(totals[0]?.horas_extra ?? 0),
     almoco: Number(totals[0]?.almoco ?? 0),
+    pagamento: Number(totals[0]?.pagamento ?? 0),
+    desconto: Number(totals[0]?.desconto ?? 0),
     foraDoPostoBase: Number(foraBase[0]?.total ?? 0),
     postosAtivos: Number(counts[0]?.postos ?? 0),
     colaboradoresAtivos: Number(counts[0]?.colaboradores ?? 0),
@@ -832,7 +1100,10 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       nome: row.nome,
       trocas: Number(row.trocas),
       horas: Number(row.horas),
+      horasExtra: Number(row.horas_extra),
       almoco: Number(row.almoco),
+      pagamento: Number(row.pagamento),
+      desconto: Number(row.desconto),
     })),
     bySubstituto: bySubstituto.map((row) => ({
       id: row.id,
@@ -842,7 +1113,10 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       trocas: Number(row.trocas),
       permutas: Number(row.permutas),
       horas: Number(row.horas),
+      horasExtra: Number(row.horas_extra),
       almoco: Number(row.almoco),
+      pagamento: Number(row.pagamento),
+      desconto: Number(row.desconto),
       defaultHours: defaultHoursForEscala(row.escala),
     })),
     byMotivo: byMotivo.map((row) => ({
@@ -851,6 +1125,17 @@ export async function getFacilitiesMonthSummary(monthKey: string) {
       pagaHoras: facilitiesMotivoPagaHoras(row.motivo),
       trocas: Number(row.trocas),
       horas: Number(row.horas),
+      pagamento: Number(row.pagamento),
+      desconto: Number(row.desconto),
+    })),
+    byAusente: byAusente.map((row) => ({
+      id: row.id,
+      nome: row.nome,
+      empresa: facilitiesEmpresaLabel(row.empresa),
+      escala: facilitiesEscalaLabel(row.escala),
+      lancamentos: Number(row.lancamentos),
+      horas: Number(row.horas),
+      desconto: Number(row.desconto),
     })),
     byCoberturaFerias: byCoberturaFerias.map((row) => ({
       id: row.id,
