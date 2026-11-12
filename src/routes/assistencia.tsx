@@ -394,6 +394,7 @@ function AssistenciaPage() {
   const [matDisp, setMatDisp] = useState<
     Record<number, { usado: string; sobraDestino: "" | "devolver" | "equipe" }>
   >({});
+  const [matDispErrors, setMatDispErrors] = useState<Record<number, string>>({});
 
   const selected = useMemo(
     () => osList.find((o) => o.id === selectedId) ?? null,
@@ -619,6 +620,7 @@ function AssistenciaPage() {
   useEffect(() => {
     if (!selected) {
       setMatDisp({});
+      setMatDispErrors({});
       return;
     }
     const next: Record<number, { usado: string; sobraDestino: "" | "devolver" | "equipe" }> =
@@ -633,6 +635,7 @@ function AssistenciaPage() {
       };
     }
     setMatDisp(next);
+    setMatDispErrors({});
   }, [selected?.id, selected?.items]);
 
   function openNewOs() {
@@ -1710,335 +1713,560 @@ function AssistenciaPage() {
                 selected.items.some((i) =>
                   ["campo", "extra", "aplicado", "separado", "recebido"].includes(i.status),
                 ) ? (
-                  <div className="rounded-lg border border-violet-300 bg-violet-50 p-sm">
-                    <h3 className="text-label-md font-semibold text-violet-950">
-                      Materiais usados / sobra
-                    </h3>
-                    <p className="mt-2xs text-label-md text-violet-900/80">
-                      Informe quanto foi usado. Se sobrar, diga se devolve ou fica no estoque da
-                      equipe.
-                    </p>
-                    <div className="mt-sm space-y-sm">
-                      {selected.items
-                        .filter((i) =>
-                          ["campo", "extra", "aplicado", "separado", "recebido"].includes(
-                            i.status,
-                          ),
-                        )
-                        .map((it) => {
-                          const draft = matDisp[it.id] ?? {
-                            usado: String(it.qtd),
-                            sobraDestino: "" as const,
-                          };
-                          const usadoN = Number(String(draft.usado).replace(",", ".")) || 0;
-                          const sobra = Math.max(0, it.qtd - usadoN);
-                          return (
-                            <div
-                              key={it.id}
-                              className="rounded-lg border border-violet-200 bg-white p-sm"
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-sm">
-                                <span className="text-body-md font-medium">
-                                  {it.qtd}× {it.nome}
-                                  {it.productId ? (
-                                    <span className="ml-xs text-label-sm text-on-surface-variant">
-                                      · catálogo
-                                    </span>
-                                  ) : null}
-                                </span>
-                                <label className="flex items-center gap-xs text-label-md">
-                                  Usou
-                                  <input
-                                    value={draft.usado}
-                                    onChange={(e) =>
-                                      setMatDisp((prev) => ({
-                                        ...prev,
-                                        [it.id]: {
-                                          ...draft,
-                                          usado: e.target.value,
-                                        },
-                                      }))
-                                    }
-                                    className="w-20 rounded border border-outline-variant px-sm py-xs"
-                                  />
-                                </label>
+                  (() => {
+                    const matItems = selected.items.filter((i) =>
+                      ["campo", "extra", "aplicado", "separado", "recebido"].includes(
+                        i.status,
+                      ),
+                    );
+                    const needsDisp = osNeedsDisposition(selected);
+                    const pendingBaixa = osPendingBaixaItems(selected);
+                    const canBaixa =
+                      (boot.user.canEstoque || boot.user.isAdmin) &&
+                      !needsDisp &&
+                      pendingBaixa.length > 0;
+                    const step12Done = !needsDisp;
+                    const step3Done =
+                      step12Done &&
+                      (pendingBaixa.length === 0 ||
+                        matItems.every(
+                          (i) =>
+                            !i.productId ||
+                            !(i.usado ?? 0) ||
+                            i.baixaStatus === "feita" ||
+                            i.baixaStatus === "ignorada",
+                        ));
+                    const hasCatalogUsed = matItems.some(
+                      (i) => i.productId != null && (i.usado ?? 0) > 0,
+                    );
+
+                    return (
+                      <div className="rounded-xl border border-violet-300 bg-violet-50 p-md">
+                        <h3 className="text-title-md font-semibold text-violet-950">
+                          Fechar materiais desta O.S.
+                        </h3>
+                        <p className="mt-2xs text-label-md text-violet-900/80">
+                          Depois do check-out: diga o que foi usado, o que sobrou e (Estoque)
+                          confirme a baixa na empresa.
+                        </p>
+
+                        <ol className="mt-sm flex flex-wrap gap-xs text-label-sm">
+                          <li
+                            className={cn(
+                              "rounded-full px-sm py-2xs font-semibold",
+                              step12Done
+                                ? "bg-emerald-100 text-emerald-900"
+                                : "bg-violet-200 text-violet-950",
+                            )}
+                          >
+                            1–2. Uso e sobra {step12Done ? "✓" : "· falta"}
+                          </li>
+                          <li
+                            className={cn(
+                              "rounded-full px-sm py-2xs font-semibold",
+                              !step12Done
+                                ? "bg-white/60 text-violet-800/70"
+                                : step3Done
+                                  ? "bg-emerald-100 text-emerald-900"
+                                  : "bg-amber-100 text-amber-950",
+                            )}
+                          >
+                            3. Baixa empresa{" "}
+                            {!step12Done
+                              ? "· depois"
+                              : step3Done
+                                ? "✓"
+                                : canBaixa
+                                  ? "· sua vez"
+                                  : "· Estoque"}
+                          </li>
+                        </ol>
+
+                        {/* Passos 1 e 2 */}
+                        <div className="mt-md space-y-sm">
+                          <div>
+                            <p className="text-label-md font-semibold text-violet-950">
+                              Passo 1 — O que foi instalado / usado
+                            </p>
+                            <p className="text-label-sm text-violet-900/70">
+                              Quantidade enviada já vem preenchida. Ajuste se usou menos.
+                            </p>
+                          </div>
+
+                          {matItems.map((it) => {
+                            const draft = matDisp[it.id] ?? {
+                              usado: String(it.qtd),
+                              sobraDestino: "" as const,
+                            };
+                            const usadoN =
+                              Number(String(draft.usado).replace(",", ".")) || 0;
+                            const sobra = Math.max(0, it.qtd - usadoN);
+                            const err = matDispErrors[it.id];
+                            const savedOk =
+                              it.usado != null &&
+                              (sobra <= 0 ||
+                                it.sobraDestino === "devolver" ||
+                                it.sobraDestino === "equipe");
+
+                            return (
+                              <div
+                                key={it.id}
+                                className={cn(
+                                  "rounded-lg border bg-white p-sm",
+                                  err
+                                    ? "border-red-400 ring-1 ring-red-300"
+                                    : savedOk && !needsDisp
+                                      ? "border-emerald-200"
+                                      : "border-violet-200",
+                                )}
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-sm">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-body-md font-medium text-on-surface">
+                                      {it.nome}
+                                    </p>
+                                    <p className="text-label-sm text-on-surface-variant">
+                                      Enviado: {it.qtd}
+                                      {it.productId ? " · produto do catálogo" : ""}
+                                    </p>
+                                  </div>
+                                  <label className="flex flex-col gap-2xs text-label-sm font-semibold text-on-surface-variant">
+                                    Usou
+                                    <input
+                                      inputMode="decimal"
+                                      value={draft.usado}
+                                      disabled={busy}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        setMatDisp((prev) => {
+                                          const cur = prev[it.id] ?? draft;
+                                          const nextUsado =
+                                            Number(String(value).replace(",", ".")) || 0;
+                                          const nextSobra = Math.max(0, it.qtd - nextUsado);
+                                          return {
+                                            ...prev,
+                                            [it.id]: {
+                                              usado: value,
+                                              sobraDestino:
+                                                nextSobra <= 0
+                                                  ? ""
+                                                  : cur.sobraDestino === "devolver" ||
+                                                      cur.sobraDestino === "equipe"
+                                                    ? cur.sobraDestino
+                                                    : "",
+                                            },
+                                          };
+                                        });
+                                        setMatDispErrors((prev) => {
+                                          if (!prev[it.id]) return prev;
+                                          const copy = { ...prev };
+                                          delete copy[it.id];
+                                          return copy;
+                                        });
+                                      }}
+                                      className="w-24 rounded border border-outline-variant px-sm py-xs text-body-md font-normal text-on-surface"
+                                    />
+                                  </label>
+                                </div>
+
+                                <p className="mt-xs text-label-md text-on-surface">
+                                  Sobra:{" "}
+                                  <span className="font-semibold">
+                                    {sobra > 0 ? sobra : "nenhuma (usou tudo)"}
+                                  </span>
+                                </p>
+
+                                {sobra > 0 ? (
+                                  <div className="mt-sm space-y-xs">
+                                    <p className="text-label-md font-semibold text-violet-950">
+                                      Passo 2 — O que fazer com a sobra ({sobra})
+                                    </p>
+                                    <div className="flex flex-wrap gap-xs">
+                                      <button
+                                        type="button"
+                                        disabled={busy}
+                                        className={cn(
+                                          draft.sobraDestino === "devolver"
+                                            ? btnPrimary
+                                            : btnOutline,
+                                        )}
+                                        onClick={() => {
+                                          setMatDisp((prev) => ({
+                                            ...prev,
+                                            [it.id]: {
+                                              ...draft,
+                                              sobraDestino: "devolver",
+                                            },
+                                          }));
+                                          setMatDispErrors((prev) => {
+                                            if (!prev[it.id]) return prev;
+                                            const copy = { ...prev };
+                                            delete copy[it.id];
+                                            return copy;
+                                          });
+                                        }}
+                                      >
+                                        Devolver para a empresa
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={busy}
+                                        className={cn(
+                                          draft.sobraDestino === "equipe"
+                                            ? btnPrimary
+                                            : btnOutline,
+                                        )}
+                                        onClick={() => {
+                                          setMatDisp((prev) => ({
+                                            ...prev,
+                                            [it.id]: {
+                                              ...draft,
+                                              sobraDestino: "equipe",
+                                            },
+                                          }));
+                                          setMatDispErrors((prev) => {
+                                            if (!prev[it.id]) return prev;
+                                            const copy = { ...prev };
+                                            delete copy[it.id];
+                                            return copy;
+                                          });
+                                        }}
+                                      >
+                                        Fica com a equipe
+                                      </button>
+                                    </div>
+                                    <p className="text-label-sm text-on-surface-variant">
+                                      {draft.sobraDestino === "devolver"
+                                        ? "A sobra volta para o estoque da empresa."
+                                        : draft.sobraDestino === "equipe"
+                                          ? "A sobra permanece no estoque da equipe."
+                                          : "Escolha uma opção para a sobra."}
+                                    </p>
+                                  </div>
+                                ) : null}
+
+                                {err ? (
+                                  <p className="mt-xs text-label-sm font-medium text-red-700">
+                                    {err}
+                                  </p>
+                                ) : null}
+
+                                {it.baixaStatus === "pendente" ? (
+                                  <p className="mt-xs text-label-sm font-medium text-amber-800">
+                                    Aguardando Estoque confirmar baixa na empresa
+                                  </p>
+                                ) : null}
+                                {it.baixaStatus === "feita" ? (
+                                  <p className="mt-xs text-label-sm text-emerald-700">
+                                    Baixa na empresa confirmada
+                                  </p>
+                                ) : null}
+                                {it.baixaStatus === "ignorada" ? (
+                                  <p className="mt-xs text-label-sm text-on-surface-variant">
+                                    Baixa na empresa ignorada
+                                  </p>
+                                ) : null}
                               </div>
-                              {sobra > 0 ? (
-                                <div className="mt-xs flex flex-wrap gap-xs">
+                            );
+                          })}
+
+                          {needsDisp ||
+                          matItems.some(
+                            (i) =>
+                              i.usado == null ||
+                              (i.qtd - (i.usado ?? 0) > 0 && !i.sobraDestino),
+                          ) ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              className={cn(btnPrimary, "w-full justify-center sm:w-auto")}
+                              onClick={() => {
+                                const errors: Record<number, string> = {};
+                                const rows = matItems.map((i) => {
+                                  const draft = matDisp[i.id];
+                                  const usado =
+                                    Number(
+                                      String(draft?.usado ?? i.qtd).replace(",", "."),
+                                    ) || 0;
+                                  const clamped = Math.max(0, Math.min(i.qtd, usado));
+                                  const sobra = Math.max(0, i.qtd - clamped);
+                                  const destino =
+                                    sobra > 0
+                                      ? draft?.sobraDestino === "devolver" ||
+                                        draft?.sobraDestino === "equipe"
+                                        ? draft.sobraDestino
+                                        : null
+                                      : null;
+                                  if (sobra > 0 && !destino) {
+                                    errors[i.id] =
+                                      "Escolha: devolver para a empresa ou ficar com a equipe.";
+                                  }
+                                  if (usado > i.qtd) {
+                                    errors[i.id] =
+                                      `Não pode usar mais que o enviado (${i.qtd}).`;
+                                  }
+                                  return {
+                                    id: i.id,
+                                    nome: i.nome,
+                                    usado: clamped,
+                                    sobraDestino: destino,
+                                  };
+                                });
+                                setMatDispErrors(errors);
+                                if (Object.keys(errors).length) {
+                                  setFeedbackOk(false);
+                                  setFeedback(
+                                    "Revise os itens em destaque: falta informar a sobra ou a quantidade está inválida.",
+                                  );
+                                  return;
+                                }
+                                if (
+                                  !selected.teamId &&
+                                  rows.some((r) => r.usado > 0 || r.sobraDestino) &&
+                                  matItems.some((i) => i.productId != null)
+                                ) {
+                                  setFeedbackOk(false);
+                                  setFeedback(
+                                    "OS sem equipe — defina a equipe no agendamento antes de salvar materiais.",
+                                  );
+                                  return;
+                                }
+                                const willNeedBaixa = rows.some((r) => {
+                                  const item = matItems.find((i) => i.id === r.id);
+                                  return item?.productId != null && r.usado > 0;
+                                });
+                                void run(
+                                  () =>
+                                    saveOsMaterialDispositionFn({
+                                      data: {
+                                        osId: selected.id,
+                                        rows: rows.map(({ id, usado, sobraDestino }) => ({
+                                          id,
+                                          usado,
+                                          sobraDestino,
+                                        })),
+                                      },
+                                    }),
+                                  {
+                                    okMessage: willNeedBaixa
+                                      ? "Materiais salvos. Próximo: Estoque confirma a baixa na empresa."
+                                      : "Materiais salvos.",
+                                  },
+                                );
+                              }}
+                            >
+                              Salvar materiais
+                            </button>
+                          ) : (
+                            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-sm py-xs text-label-md text-emerald-900">
+                              Uso e sobra registrados
+                              {hasCatalogUsed
+                                ? pendingBaixa.length
+                                  ? " — falta Estoque confirmar a baixa."
+                                  : " — baixa da empresa ok."
+                                : "."}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Passo 3 — baixa */}
+                        {step12Done ? (
+                          <div className="mt-md rounded-lg border border-amber-300 bg-amber-50 p-sm">
+                            <p className="text-label-md font-semibold text-amber-950">
+                              Passo 3 — Baixa no estoque da empresa
+                            </p>
+                            {pendingBaixa.length === 0 ? (
+                              <p className="mt-2xs text-label-md text-amber-900/80">
+                                {hasCatalogUsed
+                                  ? "Nada pendente de baixa nesta O.S."
+                                  : "Sem itens de catálogo usados — não há baixa na empresa."}
+                              </p>
+                            ) : canBaixa ? (
+                              <>
+                                <p className="mt-2xs text-label-md text-amber-900/80">
+                                  Confirme se esses materiais saem do estoque físico da empresa.
+                                </p>
+                                <ul className="mt-sm space-y-2xs text-body-md">
+                                  {pendingBaixa.map((it) => (
+                                    <li key={it.id}>
+                                      <span className="font-semibold">
+                                        {it.baixaQtd ?? it.usado}×
+                                      </span>{" "}
+                                      {it.nome}
+                                    </li>
+                                  ))}
+                                </ul>
+                                <div className="mt-sm flex flex-wrap gap-xs">
                                   <button
                                     type="button"
-                                    className={cn(
-                                      draft.sobraDestino === "devolver"
-                                        ? btnPrimary
-                                        : btnOutline,
-                                    )}
+                                    disabled={busy}
+                                    className={btnPrimary}
                                     onClick={() =>
-                                      setMatDisp((prev) => ({
-                                        ...prev,
-                                        [it.id]: { ...draft, sobraDestino: "devolver" },
-                                      }))
+                                      run(
+                                        () =>
+                                          resolveOsMaterialBaixaFn({
+                                            data: {
+                                              osId: selected.id,
+                                              itemIds: pendingBaixa.map((i) => i.id),
+                                              action: "baixar",
+                                            },
+                                          }),
+                                        { okMessage: "Baixa no estoque da empresa confirmada." },
+                                      )
                                     }
                                   >
-                                    Devolver sobra ({sobra})
+                                    Confirmar baixa
                                   </button>
                                   <button
                                     type="button"
-                                    className={cn(
-                                      draft.sobraDestino === "equipe" ? btnPrimary : btnOutline,
-                                    )}
+                                    disabled={busy}
+                                    className={btnOutline}
                                     onClick={() =>
-                                      setMatDisp((prev) => ({
-                                        ...prev,
-                                        [it.id]: { ...draft, sobraDestino: "equipe" },
-                                      }))
+                                      run(
+                                        () =>
+                                          resolveOsMaterialBaixaFn({
+                                            data: {
+                                              osId: selected.id,
+                                              itemIds: pendingBaixa.map((i) => i.id),
+                                              action: "ignorar",
+                                            },
+                                          }),
+                                        {
+                                          okMessage:
+                                            "Baixa ignorada — estoque da empresa não foi alterado.",
+                                        },
+                                      )
                                     }
                                   >
-                                    Ficar na equipe ({sobra})
+                                    Não baixar agora
                                   </button>
                                 </div>
-                              ) : (
-                                <p className="mt-xs text-label-sm text-on-surface-variant">
-                                  Usou tudo — sem sobra.
-                                </p>
-                              )}
-                              {it.baixaStatus === "pendente" ? (
-                                <p className="mt-xs text-label-sm font-medium text-amber-800">
-                                  Baixa no estoque da empresa pendente
-                                </p>
-                              ) : null}
-                              {it.baixaStatus === "feita" ? (
-                                <p className="mt-xs text-label-sm text-emerald-700">
-                                  Baixa confirmada
-                                </p>
-                              ) : null}
-                            </div>
-                          );
-                        })}
-                    </div>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      className={cn(btnPrimary, "mt-sm")}
-                      onClick={() => {
-                        const sourceItems = selected.items.filter((i) =>
-                          ["campo", "extra", "aplicado", "separado", "recebido"].includes(
-                            i.status,
-                          ),
-                        );
-                        const rows = sourceItems.map((i) => {
-                          const draft = matDisp[i.id];
-                          const usado =
-                            Number(String(draft?.usado ?? i.qtd).replace(",", ".")) || 0;
-                          const sobra = Math.max(0, i.qtd - usado);
-                          return {
-                            id: i.id,
-                            nome: i.nome,
-                            usado,
-                            sobraDestino:
-                              sobra > 0
-                                ? draft?.sobraDestino === "devolver" ||
-                                  draft?.sobraDestino === "equipe"
-                                  ? draft.sobraDestino
-                                  : null
-                                : null,
-                          };
-                        });
-                        const missing = rows.find(
-                          (r) =>
-                            sourceItems.some((i) => i.id === r.id && i.qtd - r.usado > 0) &&
-                            !r.sobraDestino,
-                        );
-                        if (missing) {
-                          setFeedbackOk(false);
-                          setFeedback(
-                            `Informe o destino da sobra de “${missing.nome}” (devolver ou ficar na equipe).`,
-                          );
-                          return;
-                        }
-                        if (!selected.teamId && rows.some((r) => r.usado > 0 || r.sobraDestino)) {
-                          const needsCatalog = sourceItems.some((i) => i.productId != null);
-                          if (needsCatalog) {
-                            setFeedbackOk(false);
-                            setFeedback(
-                              "OS sem equipe — defina a equipe no agendamento antes de salvar materiais.",
-                            );
-                            return;
-                          }
-                        }
-                        void run(
-                          () =>
-                            saveOsMaterialDispositionFn({
-                              data: {
-                                osId: selected.id,
-                                rows: rows.map(({ id, usado, sobraDestino }) => ({
-                                  id,
-                                  usado,
-                                  sobraDestino,
-                                })),
-                              },
-                            }),
-                          { okMessage: "Uso e sobra dos materiais salvos." },
-                        );
-                      }}
-                    >
-                      Salvar uso / sobra
-                    </button>
-                  </div>
-                ) : null}
+                              </>
+                            ) : (
+                              <p className="mt-2xs text-label-md text-amber-900/80">
+                                Há {pendingBaixa.length} item(ns) aguardando o setor de Estoque
+                                confirmar a baixa.
+                              </p>
+                            )}
+                          </div>
+                        ) : null}
 
-                {selected.stage === 5 &&
-                selected.coAt &&
-                !osNeedsDisposition(selected) &&
-                selected.items.some((i) =>
-                  ["campo", "extra", "aplicado"].includes(i.status),
-                ) ? (
-                  <div className="rounded-lg border border-outline-variant/60 p-sm">
-                    <h3 className="text-label-md font-semibold">Conferência de estoque</h3>
-                    {selected.conf ? (
-                      <div className="mt-sm space-y-sm">
-                        <p className="text-body-md">
-                          Conferido por {selected.conf.estoque}. Aceitar ou contestar:
-                        </p>
-                        <div className="flex gap-sm">
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() =>
-                              run(() => acceptConferenceFn({ data: { osId: selected.id } }))
-                            }
-                            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
-                          >
-                            Aceitar
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={() => {
-                              const contest = window.prompt("Motivo da contestação");
-                              if (!contest?.trim()) return;
-                              void run(() =>
-                                acceptConferenceFn({
-                                  data: { osId: selected.id, contest },
-                                }),
-                              );
-                            }}
-                            className="rounded-lg border border-outline-variant px-md py-sm text-label-md"
-                          >
-                            Contestar
-                          </button>
-                        </div>
-                      </div>
-                    ) : boot.user.canEstoque || boot.user.isAdmin ? (
-                      <div className="mt-sm space-y-sm">
-                        {selected.items
-                          .filter((i) => ["campo", "extra", "aplicado"].includes(i.status))
-                          .map((it) => (
-                            <label
-                              key={it.id}
-                              className="flex items-center justify-between gap-sm text-body-md"
-                            >
-                              <span>
-                                {it.qtd}× {it.nome} (usou)
-                              </span>
-                              <input
-                                value={confQty[it.id] ?? String(it.usado ?? it.qtd)}
-                                onChange={(e) =>
-                                  setConfQty((prev) => ({ ...prev, [it.id]: e.target.value }))
-                                }
-                                className="w-20 rounded border border-outline-variant px-sm py-xs"
-                              />
-                            </label>
-                          ))}
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() =>
-                            run(() =>
-                              submitConferenceFn({
-                                data: {
-                                  osId: selected.id,
-                                  rows: selected.items
+                        {/* Conferência antiga — secundária */}
+                        {selected.stage === 5 &&
+                        step12Done &&
+                        selected.items.some((i) =>
+                          ["campo", "extra", "aplicado"].includes(i.status),
+                        ) ? (
+                          <details className="mt-md rounded-lg border border-outline-variant/60 bg-white p-sm">
+                            <summary className="cursor-pointer text-label-md font-semibold text-on-surface">
+                              Conferência avançada (opcional)
+                            </summary>
+                            <div className="mt-sm space-y-sm">
+                              {selected.conf ? (
+                                <>
+                                  <p className="text-body-md">
+                                    Conferido por {selected.conf.estoque}. Aceitar ou contestar:
+                                  </p>
+                                  <div className="flex gap-sm">
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() =>
+                                        run(() =>
+                                          acceptConferenceFn({ data: { osId: selected.id } }),
+                                        )
+                                      }
+                                      className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
+                                    >
+                                      Aceitar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={busy}
+                                      onClick={() => {
+                                        const contest = window.prompt("Motivo da contestação");
+                                        if (!contest?.trim()) return;
+                                        void run(() =>
+                                          acceptConferenceFn({
+                                            data: { osId: selected.id, contest },
+                                          }),
+                                        );
+                                      }}
+                                      className="rounded-lg border border-outline-variant px-md py-sm text-label-md"
+                                    >
+                                      Contestar
+                                    </button>
+                                  </div>
+                                </>
+                              ) : boot.user.canEstoque || boot.user.isAdmin ? (
+                                <>
+                                  {selected.items
                                     .filter((i) =>
                                       ["campo", "extra", "aplicado"].includes(i.status),
                                     )
-                                    .map((i) => ({
-                                      id: i.id,
-                                      usou: Number(confQty[i.id] ?? i.usado ?? i.qtd) || 0,
-                                    })),
-                                },
-                              }),
-                            )
-                          }
-                          className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
-                        >
-                          Enviar conferência
-                        </button>
+                                    .map((it) => (
+                                      <label
+                                        key={it.id}
+                                        className="flex items-center justify-between gap-sm text-body-md"
+                                      >
+                                        <span>
+                                          {it.qtd}× {it.nome} (usou)
+                                        </span>
+                                        <input
+                                          value={
+                                            confQty[it.id] ?? String(it.usado ?? it.qtd)
+                                          }
+                                          onChange={(e) =>
+                                            setConfQty((prev) => ({
+                                              ...prev,
+                                              [it.id]: e.target.value,
+                                            }))
+                                          }
+                                          className="w-20 rounded border border-outline-variant px-sm py-xs"
+                                        />
+                                      </label>
+                                    ))}
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={() =>
+                                      run(() =>
+                                        submitConferenceFn({
+                                          data: {
+                                            osId: selected.id,
+                                            rows: selected.items
+                                              .filter((i) =>
+                                                ["campo", "extra", "aplicado"].includes(
+                                                  i.status,
+                                                ),
+                                              )
+                                              .map((i) => ({
+                                                id: i.id,
+                                                usou:
+                                                  Number(
+                                                    confQty[i.id] ?? i.usado ?? i.qtd,
+                                                  ) || 0,
+                                              })),
+                                          },
+                                        }),
+                                      )
+                                    }
+                                    className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
+                                  >
+                                    Enviar conferência
+                                  </button>
+                                </>
+                              ) : (
+                                <p className="text-body-md text-on-surface-variant">
+                                  Aguardando Estoque conferir.
+                                </p>
+                              )}
+                            </div>
+                          </details>
+                        ) : null}
                       </div>
-                    ) : (
-                      <p className="mt-xs text-body-md text-on-surface-variant">
-                        Aguardando Estoque conferir.
-                      </p>
-                    )}
-                  </div>
-                ) : null}
-
-                {selected.stage === 5 &&
-                selected.coAt &&
-                osPendingBaixaItems(selected).length > 0 &&
-                (boot.user.canEstoque || boot.user.isAdmin) ? (
-                  <div className="rounded-lg border border-amber-300 bg-amber-50 p-sm">
-                    <h3 className="text-label-md font-semibold text-amber-950">
-                      Baixa no estoque da empresa
-                    </h3>
-                    <p className="mt-2xs text-label-md text-amber-900/80">
-                      Materiais usados com produto do catálogo. Deseja dar baixa no estoque físico?
-                    </p>
-                    <ul className="mt-sm space-y-2xs text-body-md">
-                      {osPendingBaixaItems(selected).map((it) => (
-                        <li key={it.id}>
-                          {it.baixaQtd ?? it.usado}× {it.nome}
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="mt-sm flex flex-wrap gap-xs">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        className={btnPrimary}
-                        onClick={() =>
-                          run(() =>
-                            resolveOsMaterialBaixaFn({
-                              data: {
-                                osId: selected.id,
-                                itemIds: osPendingBaixaItems(selected).map((i) => i.id),
-                                action: "baixar",
-                              },
-                            }),
-                          )
-                        }
-                      >
-                        Dar baixa
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        className={btnOutline}
-                        onClick={() =>
-                          run(() =>
-                            resolveOsMaterialBaixaFn({
-                              data: {
-                                osId: selected.id,
-                                itemIds: osPendingBaixaItems(selected).map((i) => i.id),
-                                action: "ignorar",
-                              },
-                            }),
-                          )
-                        }
-                      >
-                        Não baixar
-                      </button>
-                    </div>
-                  </div>
+                    );
+                  })()
                 ) : null}
 
                 {selected.stage === 5 &&
@@ -2244,10 +2472,10 @@ function AssistenciaPage() {
         {dispositionPendingOs.length > 0 ? (
           <PageSection className="border-violet-300 bg-violet-50">
             <p className="text-title-md font-semibold text-violet-950">
-              Pendente: uso / sobra de materiais ({dispositionPendingOs.length})
+              Informar materiais ({dispositionPendingOs.length})
             </p>
             <p className="text-label-md text-violet-900/80">
-              Após o check-out, informe o que foi usado e o destino da sobra.
+              Abra a OS e diga quanto usou e o que sobrou (devolver ou ficar com a equipe).
             </p>
             <div className="mt-sm flex flex-wrap gap-xs">
               {dispositionPendingOs.slice(0, 12).map((os) => (
@@ -2269,10 +2497,10 @@ function AssistenciaPage() {
         {baixaPendingOs.length > 0 ? (
           <PageSection className="border-amber-400 bg-amber-50">
             <p className="text-title-md font-semibold text-amber-950">
-              Pendente: baixa no estoque da empresa ({baixaPendingOs.length})
+              Confirmar baixa — Estoque ({baixaPendingOs.length})
             </p>
             <p className="text-label-md text-amber-900/80">
-              Materiais usados — confirmar se dá baixa no estoque físico ou não.
+              Materiais já informados. Confirme se saem do estoque físico da empresa.
             </p>
             <div className="mt-sm space-y-sm">
               {baixaPendingOs.slice(0, 8).map((os) => {
@@ -2676,12 +2904,12 @@ function AssistenciaPage() {
                             ) : null}
                             {osNeedsDisposition(os) ? (
                               <div className="mt-xs rounded bg-violet-100 px-xs py-2xs text-label-sm font-medium text-violet-900">
-                                Uso/sobra pendente
+                                Informar materiais
                               </div>
                             ) : null}
                             {osPendingBaixaItems(os).length ? (
                               <div className="mt-xs rounded bg-amber-100 px-xs py-2xs text-label-sm font-medium text-amber-950">
-                                Baixa pendente
+                                Confirmar baixa (Estoque)
                               </div>
                             ) : null}
                             {os.envio?.div ? (
