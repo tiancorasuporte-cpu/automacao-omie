@@ -759,13 +759,15 @@ export const requestReturnFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { user } = await auth();
     await boot();
+    const roles = roleFns(user);
     return requestReturnOs({
       osId: data.osId,
       toStage: data.toStage,
       motivo: data.motivo,
       quem: user.name,
       userId: user.id,
-      isAdmin: isAdmin(user),
+      // Admin ou Assistência aplica na hora para o app refletir; demais solicitam.
+      applyNow: roles.isAdmin || roles.canRole("assistencia"),
     });
   });
 

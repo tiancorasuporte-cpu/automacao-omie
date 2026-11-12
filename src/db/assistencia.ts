@@ -762,13 +762,14 @@ export async function moveOsOnKanban(input: {
   }
 
   if (input.toStage < os.stage) {
+    // Kanban: quem pode mover aplica na hora (admin ou papel da etapa).
     return requestReturnOs({
       osId: input.osId,
       toStage: input.toStage,
       motivo: "Movido no Kanban",
       quem: input.quem,
-      userId: input.userId,
-      isAdmin: input.isAdmin,
+      userId: input.userId ?? null,
+      applyNow: input.isAdmin || input.canRole("assistencia"),
     });
   }
 
@@ -1369,13 +1370,61 @@ export async function markExecutedManual(input: {
   return getOsById(os.id);
 }
 
+/**
+ * Ao voltar etapa, limpa estado de campo para o app refletir o retorno.
+ * Sem isso a OS pode continuar "em execução/finalizada" no app (ci/co/envio).
+ */
+async function applyReturnStageCleanup(
+  db: Awaited<ReturnType<typeof getDb>>,
+  os: AssistOs,
+  toStage: number,
+) {
+  if (toStage < 5) {
+    await db`
+      update assist_os
+      set ci_at = null,
+          co_at = null,
+          paused_at = null,
+          pause_motivo = null,
+          updated_at = now()
+      where id = ${os.id}
+    `;
+  }
+  if (toStage < 4) {
+    await db`
+      update assist_os
+      set envio_json = null,
+          updated_at = now()
+      where id = ${os.id}
+    `;
+    await db`
+      update assist_os_items
+      set status = 'separado',
+          updated_at = now()
+      where os_id = ${os.id}
+        and status in ('campo', 'aplicado', 'chegou')
+    `;
+  }
+  if (toStage < 3) {
+    await db`
+      update assist_os
+      set ag_date = null,
+          periodo = null,
+          hora = null,
+          updated_at = now()
+      where id = ${os.id}
+    `;
+  }
+}
+
 export async function requestReturnOs(input: {
   osId: number;
   toStage: number;
   motivo: string;
   quem: string;
   userId?: number | null;
-  isAdmin: boolean;
+  /** Admin ou Assistência aplica na hora; demais só solicitam. */
+  applyNow: boolean;
 }) {
   const os = await getOsById(input.osId);
   if (!os) throw new Error("OS não encontrada.");
@@ -1388,7 +1437,7 @@ export async function requestReturnOs(input: {
   if (!input.motivo.trim()) throw new Error("Informe o motivo.");
 
   const db = await getDb();
-  if (input.isAdmin) {
+  if (input.applyNow) {
     await db`
       update assist_os
       set stage = ${input.toStage},
@@ -1396,6 +1445,7 @@ export async function requestReturnOs(input: {
           updated_at = now()
       where id = ${os.id}
     `;
+    await applyReturnStageCleanup(db, os, input.toStage);
     await addOsEvent({
       osId: os.id,
       quem: input.quem,
@@ -1435,18 +1485,20 @@ export async function resolveReturnOs(input: {
   if (!os?.pending) throw new Error("Não há retorno pendente.");
   const db = await getDb();
   if (input.approve) {
+    const toStage = os.pending.to;
     await db`
       update assist_os
-      set stage = ${os.pending.to},
+      set stage = ${toStage},
           pending_json = null,
           updated_at = now()
       where id = ${os.id}
     `;
+    await applyReturnStageCleanup(db, os, toStage);
     await addOsEvent({
       osId: os.id,
       quem: input.quem,
       userId: input.userId,
-      acao: `Retorno aprovado → etapa ${os.pending.to}`,
+      acao: `Retorno aprovado → etapa ${toStage}`,
     });
   } else {
     await db`
@@ -1663,7 +1715,20 @@ export async function saveOsMaterialDisposition(input: {
   if ((os.stage !== 5 && os.stage !== 6) || !os.coAt) {
     throw new Error("Informe uso/sobra após o check-out.");
   }
-  if (!os.teamId) {
+
+  const needsTeamStock = input.rows.some((row) => {
+    const item = os.items.find((i) => i.id === row.id);
+    if (!item?.productId) return false;
+    const usado = Math.max(0, Math.min(item.qtd, Number(row.usado) || 0));
+    const sobra = Math.max(0, item.qtd - usado);
+    return (
+      usado > 0 ||
+      row.sobraDestino === "devolver" ||
+      row.sobraDestino === "equipe" ||
+      sobra > 0
+    );
+  });
+  if (needsTeamStock && !os.teamId) {
     throw new Error("OS sem equipe — defina a equipe antes de informar materiais.");
   }
 
@@ -1679,9 +1744,11 @@ export async function saveOsMaterialDisposition(input: {
       const usado = Math.max(0, Math.min(item.qtd, Number(row.usado) || 0));
       const sobra = Math.max(0, item.qtd - usado);
       const sobraDestino =
-        sobra <= 0 ? null : row.sobraDestino === "devolver" || row.sobraDestino === "equipe"
-          ? row.sobraDestino
-          : null;
+        sobra <= 0
+          ? null
+          : row.sobraDestino === "devolver" || row.sobraDestino === "equipe"
+            ? row.sobraDestino
+            : null;
       if (sobra > 0 && !sobraDestino) {
         throw new Error(`Informe o destino da sobra de ${item.nome}.`);
       }
@@ -1749,6 +1816,27 @@ export async function saveOsMaterialDisposition(input: {
             tecnicoNome: os.tecnicoNome,
             osId: os.id,
             motivo: `Sobra devolvida · OS ${os.num}`,
+            userId: input.userId ?? null,
+            userName: input.quem,
+          });
+        }
+      }
+
+      // Sobra fica na equipe: garante crédito quando o material não veio do estoque da equipe.
+      if (sobraDestino === "equipe" && sobra > 0) {
+        const prevEquipeSobra =
+          prevSobraDestino === "equipe" ? prevDevolvido : 0;
+        const creditDelta = Math.max(0, sobra - prevEquipeSobra);
+        if (creditDelta > 0 && !hasTeamStock) {
+          await creditTeamStock(tx, {
+            teamId: os.teamId,
+            productId: item.productId,
+            nome: item.nome,
+            quantidade: creditDelta,
+            tipo: "sobra_os",
+            tecnicoNome: os.tecnicoNome,
+            osId: os.id,
+            motivo: `Sobra na equipe · OS ${os.num}`,
             userId: input.userId ?? null,
             userName: input.quem,
           });

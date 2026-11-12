@@ -16,6 +16,7 @@ import {
   btnOutline,
   btnPrimary,
   feedbackErrClass,
+  feedbackOkClass,
   fieldClass,
   PageSection,
   PageTitle,
@@ -269,6 +270,7 @@ function AssistenciaPage() {
   const [histOpen, setHistOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedbackOk, setFeedbackOk] = useState(false);
   const [kanbanFilters, setKanbanFilters] = useState(emptyKanbanFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [openColFilter, setOpenColFilter] = useState<number | null>(null);
@@ -746,9 +748,13 @@ function AssistenciaPage() {
     setOsList(list);
   }
 
-  async function run(action: () => Promise<OsRow | null | undefined>) {
+  async function run(
+    action: () => Promise<OsRow | null | undefined>,
+    opts?: { okMessage?: string },
+  ) {
     setBusy(true);
     setFeedback(null);
+    setFeedbackOk(false);
     try {
       const updated = await action();
       if (updated) {
@@ -770,7 +776,12 @@ function AssistenciaPage() {
       } else {
         await reload();
       }
+      if (opts?.okMessage) {
+        setFeedbackOk(true);
+        setFeedback(opts.okMessage);
+      }
     } catch (e) {
+      setFeedbackOk(false);
       setFeedback(e instanceof Error ? e.message : "Falha na ação");
     } finally {
       setBusy(false);
@@ -959,6 +970,11 @@ function AssistenciaPage() {
     return (
       <>
         <div className="flex flex-col gap-md">
+                {feedback ? (
+                  <div className={feedbackOk ? feedbackOkClass : feedbackErrClass}>
+                    {feedback}
+                  </div>
+                ) : null}
                 {variant === "dialog" ? (
                   <div className="flex flex-wrap items-start justify-between gap-sm">
                     <div className="min-w-0 flex-1">{renderOsSummaryCard(selected)}</div>
@@ -1804,33 +1820,64 @@ function AssistenciaPage() {
                       disabled={busy}
                       className={cn(btnPrimary, "mt-sm")}
                       onClick={() => {
-                        const rows = selected.items
-                          .filter((i) =>
-                            ["campo", "extra", "aplicado", "separado", "recebido"].includes(
-                              i.status,
-                            ),
-                          )
-                          .map((i) => {
-                            const draft = matDisp[i.id];
-                            const usado =
-                              Number(String(draft?.usado ?? i.qtd).replace(",", ".")) || 0;
-                            const sobra = Math.max(0, i.qtd - usado);
-                            return {
-                              id: i.id,
-                              usado,
-                              sobraDestino:
-                                sobra > 0
-                                  ? draft?.sobraDestino === "devolver" ||
-                                    draft?.sobraDestino === "equipe"
-                                    ? draft.sobraDestino
-                                    : null
-                                  : null,
-                            };
-                          });
-                        void run(() =>
-                          saveOsMaterialDispositionFn({
-                            data: { osId: selected.id, rows },
-                          }),
+                        const sourceItems = selected.items.filter((i) =>
+                          ["campo", "extra", "aplicado", "separado", "recebido"].includes(
+                            i.status,
+                          ),
+                        );
+                        const rows = sourceItems.map((i) => {
+                          const draft = matDisp[i.id];
+                          const usado =
+                            Number(String(draft?.usado ?? i.qtd).replace(",", ".")) || 0;
+                          const sobra = Math.max(0, i.qtd - usado);
+                          return {
+                            id: i.id,
+                            nome: i.nome,
+                            usado,
+                            sobraDestino:
+                              sobra > 0
+                                ? draft?.sobraDestino === "devolver" ||
+                                  draft?.sobraDestino === "equipe"
+                                  ? draft.sobraDestino
+                                  : null
+                                : null,
+                          };
+                        });
+                        const missing = rows.find(
+                          (r) =>
+                            sourceItems.some((i) => i.id === r.id && i.qtd - r.usado > 0) &&
+                            !r.sobraDestino,
+                        );
+                        if (missing) {
+                          setFeedbackOk(false);
+                          setFeedback(
+                            `Informe o destino da sobra de “${missing.nome}” (devolver ou ficar na equipe).`,
+                          );
+                          return;
+                        }
+                        if (!selected.teamId && rows.some((r) => r.usado > 0 || r.sobraDestino)) {
+                          const needsCatalog = sourceItems.some((i) => i.productId != null);
+                          if (needsCatalog) {
+                            setFeedbackOk(false);
+                            setFeedback(
+                              "OS sem equipe — defina a equipe no agendamento antes de salvar materiais.",
+                            );
+                            return;
+                          }
+                        }
+                        void run(
+                          () =>
+                            saveOsMaterialDispositionFn({
+                              data: {
+                                osId: selected.id,
+                                rows: rows.map(({ id, usado, sobraDestino }) => ({
+                                  id,
+                                  usado,
+                                  sobraDestino,
+                                })),
+                              },
+                            }),
+                          { okMessage: "Uso e sobra dos materiais salvos." },
                         );
                       }}
                     >
@@ -2190,7 +2237,9 @@ function AssistenciaPage() {
           </PageSection>
         ) : null}
 
-        {feedback ? <div className={feedbackErrClass}>{feedback}</div> : null}
+        {feedback && !selectedId ? (
+          <div className={feedbackOk ? feedbackOkClass : feedbackErrClass}>{feedback}</div>
+        ) : null}
 
         {dispositionPendingOs.length > 0 ? (
           <PageSection className="border-violet-300 bg-violet-50">
