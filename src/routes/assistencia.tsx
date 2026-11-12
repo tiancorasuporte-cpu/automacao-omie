@@ -905,7 +905,7 @@ function AssistenciaPage() {
   }
 
 
-  function renderOsSummaryCard(os: OsRow) {
+  function renderOsSummaryCard(os: OsRow, opts?: { hideItemList?: boolean }) {
     return (
       <SoftSummaryCard>
         <div className="flex flex-wrap items-center gap-xs">
@@ -949,7 +949,7 @@ function AssistenciaPage() {
             <span>{osResponsavelLabel(os) ?? "Sem responsável"}</span>
           </div>
         </div>
-        {os.items.length ? (
+        {!opts?.hideItemList && os.items.length ? (
           <ul className="mt-sm space-y-xs border-t border-outline-variant pt-sm text-label-md text-on-surface">
             {os.items.map((it) => (
               <li key={it.id} className="flex items-start justify-between gap-sm">
@@ -980,7 +980,9 @@ function AssistenciaPage() {
                 ) : null}
                 {variant === "dialog" ? (
                   <div className="flex flex-wrap items-start justify-between gap-sm">
-                    <div className="min-w-0 flex-1">{renderOsSummaryCard(selected)}</div>
+                    <div className="min-w-0 flex-1">
+                      {renderOsSummaryCard(selected, { hideItemList: true })}
+                    </div>
                     <button
                       type="button"
                       className={cn(softCancelBtnClass, "shrink-0")}

@@ -449,8 +449,52 @@ export async function getOsById(id: number) {
     limit 1
   `) as Record<string, unknown>[];
   if (!row) return null;
-  const itemsMap = await loadItems([id]);
-  const os = mapOs(row, itemsMap.get(id) ?? []);
+  let itemsMap = await loadItems([id]);
+  let os = mapOs(row, itemsMap.get(id) ?? []);
+
+  // Consistência: antes de Em execução não pode ficar com item em campo/aplicado
+  // (ex.: OS retornada no kanban sem limpar status).
+  if (
+    os.stage < 5 &&
+    os.items.some((i) =>
+      ["campo", "aplicado", "chegou", "extra"].includes(i.status),
+    )
+  ) {
+    await db`
+      update assist_os
+      set ci_at = null,
+          co_at = null,
+          paused_at = null,
+          pause_motivo = null,
+          envio_json = null,
+          updated_at = now()
+      where id = ${os.id}
+    `;
+    await db`
+      update assist_os_items
+      set status = 'separado',
+          usado = null,
+          devolvido = null,
+          sobra_destino = null,
+          baixa_status = null,
+          baixa_qtd = null,
+          updated_at = now()
+      where os_id = ${os.id}
+        and status in ('campo', 'aplicado', 'chegou', 'extra')
+    `;
+    const [fresh] = (await db`
+      select o.*, t.name as team_name
+      from assist_os o
+      left join assist_teams t on t.id = o.team_id
+      where o.id = ${id}
+      limit 1
+    `) as Record<string, unknown>[];
+    if (fresh) {
+      itemsMap = await loadItems([id]);
+      os = mapOs(fresh, itemsMap.get(id) ?? []);
+    }
+  }
+
   const events = (await db`
     select * from assist_os_events where os_id = ${id} order by id asc
   `) as Record<string, unknown>[];
@@ -864,7 +908,7 @@ export async function startExecOs(input: {
       update assist_os_items
       set status = 'campo', updated_at = now()
       where os_id = ${os.id}
-        and status in ('separado', 'recebido', 'chegou', 'pendente')
+        and status in ('separado', 'recebido', 'chegou', 'pendente', 'aplicado')
     `;
   }
 
@@ -1380,29 +1424,28 @@ async function applyReturnStageCleanup(
   toStage: number,
 ) {
   if (toStage < 5) {
+    // Voltou de execução: limpa campo e devolve itens ao estado de separação.
     await db`
       update assist_os
       set ci_at = null,
           co_at = null,
           paused_at = null,
           pause_motivo = null,
-          updated_at = now()
-      where id = ${os.id}
-    `;
-  }
-  if (toStage < 4) {
-    await db`
-      update assist_os
-      set envio_json = null,
+          envio_json = null,
           updated_at = now()
       where id = ${os.id}
     `;
     await db`
       update assist_os_items
       set status = 'separado',
+          usado = null,
+          devolvido = null,
+          sobra_destino = null,
+          baixa_status = null,
+          baixa_qtd = null,
           updated_at = now()
       where os_id = ${os.id}
-        and status in ('campo', 'aplicado', 'chegou')
+        and status in ('campo', 'aplicado', 'chegou', 'extra')
     `;
   }
   if (toStage < 3) {
