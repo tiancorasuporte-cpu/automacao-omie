@@ -22,6 +22,7 @@ import {
   moveOsOnKanban,
   receivePurchaseItem,
   requestMaterialFromField,
+  reopenOs,
   requestReturnOs,
   resolveOsMaterialBaixa,
   resolveReturnOs,
@@ -787,6 +788,30 @@ export const resolveReturnFn = createServerFn({ method: "POST" })
     return resolveReturnOs({
       osId: data.osId,
       approve: data.approve,
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const reopenOsFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        motivo: z.string().min(1),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    if (!roles.isAdmin && !roles.canRole("assistencia")) {
+      throw new Error("Sem permissão para reabrir OS.");
+    }
+    return reopenOs({
+      osId: data.osId,
+      motivo: data.motivo,
       quem: user.name,
       userId: user.id,
     });

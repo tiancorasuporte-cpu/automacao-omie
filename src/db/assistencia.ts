@@ -1557,6 +1557,39 @@ export async function resolveReturnOs(input: {
   return getOsById(os.id);
 }
 
+/** Reabre OS finalizada → Executado (6), com evento destacado no histórico. */
+export async function reopenOs(input: {
+  osId: number;
+  motivo: string;
+  quem: string;
+  userId?: number | null;
+}) {
+  const os = await getOsById(input.osId);
+  if (!os) throw new Error("OS não encontrada.");
+  if (os.stage < OS_LAST_STAGE) {
+    throw new Error("Só é possível reabrir OS finalizada.");
+  }
+  const motivo = input.motivo.trim();
+  if (!motivo) throw new Error("Informe o motivo da reabertura.");
+
+  const db = await getDb();
+  await db`
+    update assist_os
+    set stage = 6,
+        fin_date = null,
+        pending_json = null,
+        updated_at = now()
+    where id = ${os.id}
+  `;
+  await addOsEvent({
+    osId: os.id,
+    quem: input.quem,
+    userId: input.userId,
+    acao: `Reabertura da OS: ${motivo}`,
+  });
+  return getOsById(os.id);
+}
+
 export async function receivePurchaseItem(input: {
   itemId: number;
   quem: string;

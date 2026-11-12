@@ -50,6 +50,7 @@ import {
   markExecutedFn,
   moveOsKanbanFn,
   receivePurchaseFn,
+  reopenOsFn,
   requestReturnFn,
   resolveOsMaterialBaixaFn,
   resolveReturnFn,
@@ -2331,6 +2332,56 @@ function AssistenciaPage() {
                   </div>
                 ) : null}
 
+                {selected.stage >= 7 &&
+                (boot.user.canAssistencia || boot.user.isAdmin) ? (
+                  <div className="rounded-lg border border-error/50 bg-error-container/15 p-sm">
+                    <h3 className="text-label-md font-semibold text-error">
+                      Reabrir O.S. finalizada
+                    </h3>
+                    <p className="mt-2xs text-label-md text-on-surface-variant">
+                      Volta para a etapa Executado. A reabertura fica registrada em vermelho no
+                      histórico.
+                    </p>
+                    <div className="mt-sm flex flex-wrap gap-sm">
+                      <input
+                        value={returnMotivo}
+                        onChange={(e) => setReturnMotivo(e.target.value)}
+                        placeholder="Motivo da reabertura"
+                        className="min-w-0 flex-1 rounded-lg border border-error/30 px-sm py-xs"
+                      />
+                      <button
+                        type="button"
+                        disabled={busy || !returnMotivo.trim()}
+                        onClick={() => {
+                          void (async () => {
+                            const ok = await askConfirm({
+                              title: "Reabrir OS",
+                              description: `Reabrir a OS ${selected.num}? Ela voltará para Executado.`,
+                              confirmLabel: "Reabrir",
+                              danger: true,
+                            });
+                            if (!ok) return;
+                            await run(
+                              () =>
+                                reopenOsFn({
+                                  data: {
+                                    osId: selected.id,
+                                    motivo: returnMotivo.trim(),
+                                  },
+                                }),
+                              { okMessage: `OS ${selected.num} reaberta · Executado.` },
+                            );
+                            setReturnMotivo("");
+                          })();
+                        }}
+                        className="rounded-lg bg-red-600 px-md py-xs text-label-md font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                      >
+                        Reabrir OS
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
         </div>
       </>
     );
@@ -3616,15 +3667,39 @@ function AssistenciaPage() {
                   </h3>
                   {(selected.events ?? []).length ? (
                     <ul className="space-y-sm border-l border-outline-variant pl-md">
-                      {(selected.events ?? []).map((ev) => (
-                        <li key={ev.id} className="relative">
-                          <span className="absolute -left-[1.15rem] top-1.5 size-2 rounded-full bg-[#F5C518]" />
-                          <div className="text-label-sm text-on-surface-variant">
-                            {new Date(ev.quando).toLocaleString("pt-BR")} · {ev.quem}
-                          </div>
-                          <div className="text-body-md text-on-surface">{ev.acao}</div>
-                        </li>
-                      ))}
+                      {(selected.events ?? []).map((ev) => {
+                        const isReopen = /^reabertura\b/i.test(ev.acao);
+                        return (
+                          <li key={ev.id} className="relative">
+                            <span
+                              className={cn(
+                                "absolute -left-[1.15rem] top-1.5 size-2 rounded-full",
+                                isReopen ? "bg-red-600" : "bg-[#F5C518]",
+                              )}
+                            />
+                            <div
+                              className={cn(
+                                "text-label-sm",
+                                isReopen
+                                  ? "font-semibold text-red-700"
+                                  : "text-on-surface-variant",
+                              )}
+                            >
+                              {new Date(ev.quando).toLocaleString("pt-BR")} · {ev.quem}
+                            </div>
+                            <div
+                              className={cn(
+                                "text-body-md",
+                                isReopen
+                                  ? "font-semibold text-red-700"
+                                  : "text-on-surface",
+                              )}
+                            >
+                              {ev.acao}
+                            </div>
+                          </li>
+                        );
+                      })}
                     </ul>
                   ) : (
                     <p className="text-body-md text-on-surface-variant">

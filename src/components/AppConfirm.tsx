@@ -60,7 +60,7 @@ export function useAppConfirm() {
     pending && typeof document !== "undefined"
       ? createPortal(
           <div
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
+            className="ancora-confirm-overlay"
             role="presentation"
             onClick={() => finish(false)}
           >
