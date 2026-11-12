@@ -1784,50 +1784,67 @@ export async function saveOsMaterialDisposition(input: {
         where team_id = ${os.teamId} and product_id = ${item.productId}
         limit 1
       `;
-      const hasTeamStock = Boolean((stockRows as unknown[]).length);
+      const stockRow = (stockRows as Record<string, unknown>[])[0];
+      const hasTeamStock = Boolean(stockRow);
+      const available = stockRow ? num(stockRow["quantidade"]) : 0;
 
-      // Debita do estoque da equipe o que foi usado nesta declaração (delta).
+      // Item "extra" já saiu do estoque da equipe ao ser aplicado na OS.
+      const alreadyDebitedFromTeam = item.status === "extra";
+
+      // Debita só o que ainda há saldo — nunca bloqueia o salvamento de uso/sobra.
       const usadoDelta = Math.max(0, usado - prevUsado);
-      if (usadoDelta > 0 && hasTeamStock) {
-        await debitTeamStock(tx, {
-          teamId: os.teamId,
-          productId: item.productId,
-          quantidade: usadoDelta,
-          tipo: "aplicado_os",
-          tecnicoNome: os.tecnicoNome,
-          osId: os.id,
-          motivo: `Usado na OS ${os.num}`,
-          userId: input.userId ?? null,
-          userName: input.quem,
-        });
-      }
-
-      // Sobra para devolver: sai do estoque da equipe.
-      if (sobraDestino === "devolver" && sobra > 0 && hasTeamStock) {
-        const alreadyReturned =
-          prevSobraDestino === "devolver" ? prevDevolvido : 0;
-        const returnDelta = Math.max(0, sobra - alreadyReturned);
-        if (returnDelta > 0) {
+      if (usadoDelta > 0 && hasTeamStock && !alreadyDebitedFromTeam) {
+        const debitQty = Math.min(usadoDelta, available);
+        if (debitQty > 0) {
           await debitTeamStock(tx, {
             teamId: os.teamId,
             productId: item.productId,
-            quantidade: returnDelta,
-            tipo: "devolvido_empresa",
+            quantidade: debitQty,
+            tipo: "aplicado_os",
             tecnicoNome: os.tecnicoNome,
             osId: os.id,
-            motivo: `Sobra devolvida · OS ${os.num}`,
+            motivo: `Usado na OS ${os.num}`,
             userId: input.userId ?? null,
             userName: input.quem,
           });
         }
       }
 
-      // Sobra fica na equipe: garante crédito quando o material não veio do estoque da equipe.
+      // Sobra para devolver: sai do estoque da equipe (se houver saldo).
+      if (sobraDestino === "devolver" && sobra > 0 && hasTeamStock) {
+        const alreadyReturned =
+          prevSobraDestino === "devolver" ? prevDevolvido : 0;
+        const returnDelta = Math.max(0, sobra - alreadyReturned);
+        if (returnDelta > 0) {
+          const balRows = await tx`
+            select quantidade from team_stock
+            where team_id = ${os.teamId} and product_id = ${item.productId}
+            limit 1
+          `;
+          const bal = num((balRows as Record<string, unknown>[])[0]?.["quantidade"]);
+          const debitQty = Math.min(returnDelta, Math.max(0, bal));
+          if (debitQty > 0) {
+            await debitTeamStock(tx, {
+              teamId: os.teamId,
+              productId: item.productId,
+              quantidade: debitQty,
+              tipo: "devolvido_empresa",
+              tecnicoNome: os.tecnicoNome,
+              osId: os.id,
+              motivo: `Sobra devolvida · OS ${os.num}`,
+              userId: input.userId ?? null,
+              userName: input.quem,
+            });
+          }
+        }
+      }
+
+      // Sobra fica na equipe: credita quando o material não está no estoque da equipe.
       if (sobraDestino === "equipe" && sobra > 0) {
         const prevEquipeSobra =
           prevSobraDestino === "equipe" ? prevDevolvido : 0;
         const creditDelta = Math.max(0, sobra - prevEquipeSobra);
-        if (creditDelta > 0 && !hasTeamStock) {
+        if (creditDelta > 0 && (!hasTeamStock || available <= 0)) {
           await creditTeamStock(tx, {
             teamId: os.teamId,
             productId: item.productId,
