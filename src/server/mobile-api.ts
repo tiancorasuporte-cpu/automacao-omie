@@ -86,6 +86,8 @@ function serializeOs(
     pausedAt: os.pausedAt,
     pauseMotivo: os.pauseMotivo,
     resolucao: os.resolucao,
+    problemTypeId: os.problemTypeId ?? null,
+    problemTypeName: os.problemTypeName ?? null,
     fotosCount: os.rel?.fotos.length ?? 0,
     anexosCount: os.rel?.anexos.length ?? 0,
     hasAssinatura: Boolean(os.rel?.assinatura),
@@ -407,7 +409,49 @@ export async function handleMobileGetOs(request: Request, osId: number) {
   if (!auth.ok) return auth.response;
   const owned = await assertOsOwnedByTecnico(osId, auth.user);
   if (!owned.ok) return jsonError(owned.error, 404);
-  return jsonOk({ ok: true, os: serializeOs(owned.os, { includeRel: true }) });
+  const { listOsChecklists } = await import("@/db/assistencia-checklists");
+  const checklists = await listOsChecklists(osId);
+  return jsonOk({
+    ok: true,
+    os: serializeOs(owned.os, { includeRel: true }),
+    checklists,
+  });
+}
+
+export async function handleMobileSaveOsChecklist(request: Request, osId: number) {
+  return withOwnedOs(request, osId, async (user) => {
+    const body = await readJsonBody<{
+      osChecklistId?: number;
+      answers?: Array<{ itemId: number; result: "ok" | "nok"; note?: string | null }>;
+    }>(request);
+    const osChecklistId = Number(body?.osChecklistId);
+    if (!Number.isFinite(osChecklistId) || osChecklistId <= 0) {
+      return jsonError("Checklist inválido.");
+    }
+    const answers = Array.isArray(body?.answers) ? body!.answers! : [];
+    if (!answers.length) return jsonError("Informe as respostas do checklist.");
+    const { getDb } = await import("@/db/schema");
+    const db = await getDb();
+    const ownedCl = (await db`
+      select id from assist_os_checklists
+      where id = ${osChecklistId} and os_id = ${osId}
+      limit 1
+    `) as Array<{ id: number }>;
+    if (!ownedCl[0]) return jsonError("Checklist não pertence a esta OS.");
+
+    const { saveOsChecklistAnswers } = await import("@/db/assistencia-checklists");
+    const checklists = await saveOsChecklistAnswers({
+      osChecklistId,
+      answers: answers.map((a) => ({
+        itemId: Number(a.itemId),
+        result: a.result,
+        note: a.note,
+      })),
+      quem: user.name,
+      userId: user.id,
+    });
+    return jsonOk({ ok: true, checklists });
+  });
 }
 
 async function withOwnedOs(
@@ -652,6 +696,7 @@ export async function handleMobileFrotaAbastecimento(request: Request) {
       station?: string;
       paymentMethod?: string;
       notes?: string;
+      photos?: Array<{ foto?: string; thumb?: string }>;
       clientActionId?: string;
     }>(request);
     const vehicle = await requireDefaultVehicle(auth.user);
@@ -664,6 +709,16 @@ export async function handleMobileFrotaAbastecimento(request: Request) {
         : liters > 0
           ? totalAmount / liters
           : 0;
+    const photos = (Array.isArray(body?.photos) ? body!.photos! : [])
+      .filter((p) => typeof p?.foto === "string" && p.foto.length > 16)
+      .slice(0, 6)
+      .map((p) => ({
+        foto: String(p.foto),
+        thumb:
+          typeof p.thumb === "string" && p.thumb.length > 16
+            ? String(p.thumb)
+            : String(p.foto),
+      }));
     const id = await createRefueling({
       vehicleId: vehicle.id,
       driverId: driver.id,
@@ -680,7 +735,7 @@ export async function handleMobileFrotaAbastecimento(request: Request) {
       discount: 0,
       previousMissing: false,
       notes: body?.notes ?? null,
-      photos: [],
+      photos,
       createdBy: auth.user.id,
     });
     return jsonOk({ ok: true, id, clientActionId: body?.clientActionId ?? null });
@@ -911,7 +966,23 @@ async function applySyncAction(
         discount: 0,
         previousMissing: false,
         notes: payload.notes == null ? null : String(payload.notes),
-        photos: [],
+        photos: (Array.isArray(payload.photos) ? payload.photos : [])
+          .filter(
+            (p): p is { foto: string; thumb: string } =>
+              !!p &&
+              typeof p === "object" &&
+              typeof (p as { foto?: string }).foto === "string" &&
+              String((p as { foto: string }).foto).length > 16,
+          )
+          .slice(0, 6)
+          .map((p) => ({
+            foto: String(p.foto),
+            thumb:
+              typeof (p as { thumb?: string }).thumb === "string" &&
+              String((p as { thumb: string }).thumb).length > 16
+                ? String((p as { thumb: string }).thumb)
+                : String(p.foto),
+          })),
         createdBy: user.id,
       });
       return { id };

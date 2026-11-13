@@ -1468,6 +1468,113 @@ export async function ensureSchema() {
     await sql.unsafe("alter table assist_os add column pause_motivo text");
   }
 
+  if (!(await tableExists("assist_problem_types"))) {
+    await sql`
+      create table assist_problem_types (
+        id serial primary key,
+        name varchar(160) not null,
+        active boolean not null default true,
+        sort_order integer not null default 0,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("assist_checklists"))) {
+    await sql`
+      create table assist_checklists (
+        id serial primary key,
+        name varchar(160) not null,
+        active boolean not null default true,
+        sort_order integer not null default 0,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("assist_checklist_items"))) {
+    await sql`
+      create table assist_checklist_items (
+        id serial primary key,
+        checklist_id integer not null references assist_checklists(id) on delete cascade,
+        label varchar(240) not null,
+        sort_order integer not null default 0,
+        required boolean not null default true,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("assist_checklist_items_cl_idx"))) {
+    await sql.unsafe(
+      "create index assist_checklist_items_cl_idx on assist_checklist_items (checklist_id, sort_order, id)",
+    );
+  }
+
+  if (!(await tableExists("assist_checklist_problems"))) {
+    await sql`
+      create table assist_checklist_problems (
+        checklist_id integer not null references assist_checklists(id) on delete cascade,
+        problem_type_id integer not null references assist_problem_types(id) on delete cascade,
+        primary key (checklist_id, problem_type_id)
+      )
+    `;
+  }
+  if (!(await indexExists("assist_checklist_problems_pt_idx"))) {
+    await sql.unsafe(
+      "create index assist_checklist_problems_pt_idx on assist_checklist_problems (problem_type_id)",
+    );
+  }
+
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "problem_type_id"))) {
+    await sql.unsafe(
+      "alter table assist_os add column problem_type_id integer references assist_problem_types(id) on delete set null",
+    );
+  }
+  if (!(await indexExists("assist_os_problem_type_idx"))) {
+    await sql.unsafe(
+      "create index assist_os_problem_type_idx on assist_os (problem_type_id) where problem_type_id is not null",
+    );
+  }
+
+  if (!(await tableExists("assist_os_checklists"))) {
+    await sql`
+      create table assist_os_checklists (
+        id serial primary key,
+        os_id integer not null references assist_os(id) on delete cascade,
+        checklist_id integer not null references assist_checklists(id) on delete restrict,
+        problem_type_id integer references assist_problem_types(id) on delete set null,
+        status varchar(16) not null default 'pending',
+        filled_by varchar(120),
+        filled_at timestamptz,
+        created_at timestamptz not null default now(),
+        unique (os_id, checklist_id)
+      )
+    `;
+  }
+  if (!(await indexExists("assist_os_checklists_os_idx"))) {
+    await sql.unsafe("create index assist_os_checklists_os_idx on assist_os_checklists (os_id)");
+  }
+
+  if (!(await tableExists("assist_os_checklist_answers"))) {
+    await sql`
+      create table assist_os_checklist_answers (
+        id serial primary key,
+        os_checklist_id integer not null references assist_os_checklists(id) on delete cascade,
+        item_id integer not null references assist_checklist_items(id) on delete cascade,
+        result varchar(8) not null,
+        note text,
+        unique (os_checklist_id, item_id)
+      )
+    `;
+  }
+  if (!(await indexExists("assist_os_checklist_answers_oc_idx"))) {
+    await sql.unsafe(
+      "create index assist_os_checklist_answers_oc_idx on assist_os_checklist_answers (os_checklist_id)",
+    );
+  }
+
   if (!(await tableExists("assist_os_items"))) {
     await sql`
       create table assist_os_items (

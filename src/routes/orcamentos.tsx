@@ -27,6 +27,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { APP_NAME } from "@/lib/brand";
 import {
   createMonthlyServiceFn,
@@ -151,6 +158,12 @@ type QuoteServicoMensal = {
 
 function formatMoney(value: number) {
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function formatStockQty(value: number | null | undefined) {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return "0";
+  return n.toLocaleString("pt-BR", { maximumFractionDigits: 3 });
 }
 
 function todayIso() {
@@ -326,6 +339,7 @@ function OrcamentosPage() {
       precoSugerido: number | null;
       ncm: string | null;
       codigoInterno: string | null;
+      quantidadeFisica?: number;
     }>
   >([]);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -1242,6 +1256,92 @@ function OrcamentosPage() {
       return;
     }
     setDeleteTarget(quote);
+  }
+
+  function quoteActionsMenu(quote: (typeof quotes)[number]) {
+    const omieLabel = omieCodigoLabel(quote);
+    return (
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-outline-variant bg-surface text-on-surface hover:bg-surface-container-high disabled:opacity-50"
+            aria-label={`Ações do orçamento ${quote.numeroInterno || quote.id}`}
+          >
+            <Icon name="more_vert" className="text-[20px]" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[12rem]">
+          <DropdownMenuItem
+            disabled={loadingQuote}
+            onSelect={() => void handleLoadQuote(quote.id)}
+          >
+            <Icon
+              name={quote.status === "sent" ? "visibility" : "edit"}
+              className="text-[16px]"
+            />
+            {quote.status === "sent" ? "Ver" : "Editar"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={duplicatingQuoteId === quote.id || loadingQuote}
+            onSelect={() => void handleDuplicateQuote(quote.id)}
+          >
+            <Icon
+              name={duplicatingQuoteId === quote.id ? "hourglass_empty" : "file_copy"}
+              className="text-[16px]"
+            />
+            {duplicatingQuoteId === quote.id ? "Duplicando…" : "Duplicar"}
+          </DropdownMenuItem>
+          {quote.status !== "sent" ? (
+            <DropdownMenuItem
+              disabled={sending}
+              onSelect={() => void handleSendSaved(quote.id)}
+            >
+              <Icon name={sending ? "hourglass_empty" : "send"} className="text-[16px]" />
+              Enviar Omie
+            </DropdownMenuItem>
+          ) : omieLabel ? (
+            <DropdownMenuItem onSelect={() => void copyOmieCodigo(omieLabel)}>
+              <Icon name="content_copy" className="text-[16px]" />
+              Copiar Omie {omieLabel}
+            </DropdownMenuItem>
+          ) : null}
+          {quote.assistOsNum ? (
+            <DropdownMenuItem disabled>
+              <Icon name="handyman" className="text-[16px]" />
+              Pedido OS {quote.assistOsNum}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              disabled={sendingPedido}
+              onSelect={() => openPedidoAprovacao(quote.id)}
+            >
+              <Icon
+                name={sendingPedido ? "hourglass_empty" : "handyman"}
+                className="text-[16px]"
+              />
+              Enviar pedido
+            </DropdownMenuItem>
+          )}
+          {canDeleteQuotes ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={deletingQuoteId === quote.id}
+                className="text-destructive focus:text-destructive"
+                onSelect={() => handleDeleteQuote(quote)}
+              >
+                <Icon
+                  name={deletingQuoteId === quote.id ? "hourglass_empty" : "delete"}
+                  className="text-[16px]"
+                />
+                {deletingQuoteId === quote.id ? "Excluindo…" : "Excluir"}
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
   }
 
   async function confirmDeleteQuote(alsoDeleteOmie: boolean) {
@@ -2668,96 +2768,16 @@ function OrcamentosPage() {
                         </p>
                         {quoteCotacaoBadges(quote)}
                       </div>
-                      <p className="shrink-0 text-title-md font-semibold text-primary">
-                        {quote.total != null ? formatMoney(quote.total) : "—"}
-                      </p>
+                      <div className="flex shrink-0 items-start gap-xs">
+                        <p className="text-title-md font-semibold text-primary">
+                          {quote.total != null ? formatMoney(quote.total) : "—"}
+                        </p>
+                        {quoteActionsMenu(quote)}
+                      </div>
                     </div>
                     <p className="mt-xs text-label-md text-on-surface-variant">
                       {quote.createdAt ? new Date(quote.createdAt).toLocaleString("pt-BR") : "—"}
                     </p>
-                    <div className="mt-sm flex flex-wrap gap-xs">
-                      <button
-                        type="button"
-                        disabled={loadingQuote}
-                        onClick={() => void handleLoadQuote(quote.id)}
-                        className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary disabled:opacity-50"
-                      >
-                        <Icon
-                          name={quote.status === "sent" ? "visibility" : "edit"}
-                          className="text-[16px]"
-                        />
-                        {quote.status === "sent" ? "Ver" : "Editar"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={duplicatingQuoteId === quote.id || loadingQuote}
-                        onClick={() => void handleDuplicateQuote(quote.id)}
-                        className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary disabled:opacity-50"
-                      >
-                        <Icon
-                          name={duplicatingQuoteId === quote.id ? "hourglass_empty" : "file_copy"}
-                          className="text-[16px]"
-                        />
-                        Duplicar
-                      </button>
-                      {quote.status !== "sent" ? (
-                        <button
-                          type="button"
-                          disabled={sending}
-                          onClick={() => void handleSendSaved(quote.id)}
-                          className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md text-on-secondary-container disabled:opacity-50"
-                        >
-                          <Icon name={sending ? "hourglass_empty" : "send"} className="text-[16px]" />
-                          Omie
-                        </button>
-                      ) : omieCodigoLabel(quote) ? (
-                        <button
-                          type="button"
-                          onClick={() => copyOmieCodigo(omieCodigoLabel(quote)!)}
-                          className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary"
-                        >
-                          <Icon name="content_copy" className="text-[16px]" />
-                          Omie {omieCodigoLabel(quote)}
-                        </button>
-                      ) : null}
-                      {quote.assistOsNum ? (
-                        <span
-                          className="inline-flex items-center gap-xs rounded-lg border border-indigo-200 bg-indigo-50 px-sm py-xs text-label-md font-semibold text-indigo-950"
-                          title="Já enviado ao Kanban da Assistência"
-                        >
-                          <Icon name="handyman" className="text-[16px]" />
-                          Pedido OS {quote.assistOsNum}
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={sendingPedido}
-                          onClick={() => openPedidoAprovacao(quote.id)}
-                          className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
-                          title="Enviar pedido ao Kanban da Assistência"
-                        >
-                          <Icon
-                            name={sendingPedido ? "hourglass_empty" : "handyman"}
-                            className="text-[16px]"
-                          />
-                          Enviar pedido
-                        </button>
-                      )}
-                      {canDeleteQuotes ? (
-                        <button
-                          type="button"
-                          disabled={deletingQuoteId === quote.id}
-                          onClick={() => handleDeleteQuote(quote)}
-                          className="inline-flex items-center gap-xs rounded-lg border border-red-200 bg-red-50 px-sm py-xs text-label-md text-red-700 disabled:opacity-50"
-                        >
-                          <Icon
-                            name={deletingQuoteId === quote.id ? "hourglass_empty" : "delete"}
-                            className="text-[16px]"
-                          />
-                          Excluir
-                        </button>
-                      ) : null}
-                    </div>
                   </article>
                 ))}
               </div>
@@ -2793,93 +2813,7 @@ function OrcamentosPage() {
                       <td className="px-sm py-xs">
                         {quote.createdAt ? new Date(quote.createdAt).toLocaleString("pt-BR") : "—"}
                       </td>
-                      <td className="px-sm py-xs">
-                        <div className="flex flex-wrap items-center gap-xs">
-                          <button
-                            type="button"
-                            disabled={loadingQuote}
-                            onClick={() => handleLoadQuote(quote.id)}
-                            className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
-                          >
-                            <Icon
-                              name={quote.status === "sent" ? "visibility" : "edit"}
-                              className="text-[16px]"
-                            />
-                            {quote.status === "sent" ? "Ver" : "Editar"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={duplicatingQuoteId === quote.id || loadingQuote}
-                            onClick={() => handleDuplicateQuote(quote.id)}
-                            className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50"
-                            title="Duplicar orçamento"
-                          >
-                            <Icon
-                              name={duplicatingQuoteId === quote.id ? "hourglass_empty" : "file_copy"}
-                              className="text-[16px]"
-                            />
-                            {duplicatingQuoteId === quote.id ? "..." : "Duplicar"}
-                          </button>
-                          {quote.status !== "sent" ? (
-                            <button
-                              type="button"
-                              disabled={sending}
-                              onClick={() => handleSendSaved(quote.id)}
-                              className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md text-on-secondary-container disabled:opacity-50"
-                            >
-                              <Icon name={sending ? "hourglass_empty" : "send"} className="text-[16px]" />
-                              Omie
-                            </button>
-                          ) : omieCodigoLabel(quote) ? (
-                            <button
-                              type="button"
-                              onClick={() => copyOmieCodigo(omieCodigoLabel(quote)!)}
-                              className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high"
-                              title="Copiar código Omie"
-                            >
-                              <Icon name="content_copy" className="text-[16px]" />
-                              Omie {omieCodigoLabel(quote)}
-                            </button>
-                          ) : null}
-                          {quote.assistOsNum ? (
-                            <span
-                              className="inline-flex items-center gap-xs rounded-lg border border-indigo-200 bg-indigo-50 px-sm py-xs text-label-md font-semibold text-indigo-950"
-                              title="Já enviado ao Kanban da Assistência"
-                            >
-                              <Icon name="handyman" className="text-[16px]" />
-                              Pedido OS {quote.assistOsNum}
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={sendingPedido}
-                              onClick={() => openPedidoAprovacao(quote.id)}
-                              className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
-                              title="Enviar pedido ao Kanban da Assistência"
-                            >
-                              <Icon
-                                name={sendingPedido ? "hourglass_empty" : "handyman"}
-                                className="text-[16px]"
-                              />
-                              Enviar pedido
-                            </button>
-                          )}
-                          {canDeleteQuotes ? (
-                            <button
-                              type="button"
-                              disabled={deletingQuoteId === quote.id}
-                              onClick={() => handleDeleteQuote(quote)}
-                              className="inline-flex items-center gap-xs rounded-lg border border-red-200 bg-red-50 px-sm py-xs text-label-md text-red-700 hover:bg-red-100 disabled:opacity-50"
-                            >
-                              <Icon
-                                name={deletingQuoteId === quote.id ? "hourglass_empty" : "delete"}
-                                className="text-[16px]"
-                              />
-                              {deletingQuoteId === quote.id ? "..." : "Excluir"}
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
+                      <td className="px-sm py-xs">{quoteActionsMenu(quote)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -2995,6 +2929,17 @@ function OrcamentosPage() {
                         {product.cmcEfetivo != null
                           ? ` · CMC ${formatMoney(product.cmcEfetivo)}`
                           : ""}
+                      </p>
+                      <p
+                        className={
+                          Number(product.quantidadeFisica ?? 0) > 0
+                            ? "text-label-md font-semibold text-emerald-800"
+                            : "text-label-md font-semibold text-red-700"
+                        }
+                      >
+                        Estoque físico: {formatStockQty(product.quantidadeFisica)}
+                        {product.unidade ? ` ${product.unidade}` : ""}
+                        {Number(product.quantidadeFisica ?? 0) <= 0 ? " · sem saldo" : ""}
                       </p>
                       {product.valorUnitario != null &&
                       isUnitBelowCmc(product.valorUnitario, product.cmcEfetivo) ? (

@@ -148,6 +148,8 @@ export type AssistOs = {
   items: AssistOsItem[];
   events: AssistOsEvent[];
   teamName: string | null;
+  problemTypeId: number | null;
+  problemTypeName: string | null;
 };
 
 function iso(v: unknown) {
@@ -296,6 +298,8 @@ function mapOs(row: Record<string, unknown>, items: AssistOsItem[] = []): Assist
     items,
     events: [],
     teamName: nullableStr(row["team_name"]),
+    problemTypeId: row["problem_type_id"] == null ? null : num(row["problem_type_id"]),
+    problemTypeName: nullableStr(row["problem_type_name"]),
   };
 }
 
@@ -426,9 +430,10 @@ export async function saveAssistTeamMember(input: {
 export async function getOsByQuoteId(quoteId: number) {
   const db = await getDb();
   const [row] = (await db`
-    select o.*, t.name as team_name
+    select o.*, t.name as team_name, p.name as problem_type_name
     from assist_os o
     left join assist_teams t on t.id = o.team_id
+    left join assist_problem_types p on p.id = o.problem_type_id
     where o.quote_id = ${quoteId}
     order by o.id desc
     limit 1
@@ -442,9 +447,10 @@ export async function getOsByQuoteId(quoteId: number) {
 export async function getOsById(id: number) {
   const db = await getDb();
   const [row] = (await db`
-    select o.*, t.name as team_name
+    select o.*, t.name as team_name, p.name as problem_type_name
     from assist_os o
     left join assist_teams t on t.id = o.team_id
+    left join assist_problem_types p on p.id = o.problem_type_id
     where o.id = ${id}
     limit 1
   `) as Record<string, unknown>[];
@@ -483,9 +489,10 @@ export async function getOsById(id: number) {
         and status in ('campo', 'aplicado', 'chegou', 'extra')
     `;
     const [fresh] = (await db`
-      select o.*, t.name as team_name
+      select o.*, t.name as team_name, p.name as problem_type_name
       from assist_os o
       left join assist_teams t on t.id = o.team_id
+      left join assist_problem_types p on p.id = o.problem_type_id
       where o.id = ${id}
       limit 1
     `) as Record<string, unknown>[];
@@ -511,9 +518,10 @@ export async function listOs(input?: {
   const like = q ? `%${q}%` : null;
   const stage = input?.stage ?? null;
   const rows = (await db`
-    select o.*, t.name as team_name
+    select o.*, t.name as team_name, p.name as problem_type_name
     from assist_os o
     left join assist_teams t on t.id = o.team_id
+    left join assist_problem_types p on p.id = o.problem_type_id
     where (${stage}::int is null or o.stage = ${stage})
       and (
         ${like}::text is null
@@ -533,6 +541,8 @@ export async function listOs(input?: {
 export async function createOs(input: {
   tipo: OsTipo;
   subtipo?: string | null | undefined;
+  problemTypeId?: number | null | undefined;
+  checklistIds?: number[] | undefined;
   clientName: string;
   clientCity?: string | null | undefined;
   clientAddress?: string | null | undefined;
@@ -551,11 +561,25 @@ export async function createOs(input: {
   if (input.tipo === "pedido" && !input.quoteId && !input.quoteNumero) {
     throw new Error("Pedido aprovado exige vínculo com orçamento.");
   }
-  if ((input.tipo === "manut" || input.tipo === "monit") && !input.subtipo?.trim()) {
-    throw new Error("Informe o subtipo.");
+  const db = await getDb();
+  let problemTypeId =
+    input.problemTypeId != null && Number.isFinite(input.problemTypeId) && input.problemTypeId > 0
+      ? Number(input.problemTypeId)
+      : null;
+  let problemName: string | null = null;
+  if (problemTypeId != null) {
+    const ptRows = (await db`
+      select id, name, active from assist_problem_types where id = ${problemTypeId} limit 1
+    `) as Array<{ id: number; name: string; active: boolean }>;
+    if (!ptRows[0]) throw new Error("Tipo de problema não encontrado.");
+    if (!ptRows[0].active) throw new Error("Tipo de problema inativo.");
+    problemName = str(ptRows[0].name).trim() || null;
+  }
+  const subtipo = nullableStr(problemName ?? input.subtipo);
+  if ((input.tipo === "manut" || input.tipo === "monit") && !subtipo) {
+    throw new Error("Informe o subtipo (problema).");
   }
   const stage = entryStageForTipo(input.tipo);
-  const db = await getDb();
   const numOs = await nextOsNum();
   const aprovadoPor = nullableStr(input.aprovadoPor);
   const anexo = input.aprovacaoAnexo?.name?.trim() && input.aprovacaoAnexo?.data
@@ -570,11 +594,11 @@ export async function createOs(input: {
       num, tipo, subtipo, stage, omie_app_id, client_code, client_name, client_city,
       client_address, servico, quote_id, quote_numero, ticket_id,
       aprovado_por, aprovado_em, aprovacao_anexo_json,
-      created_by, created_by_name
+      created_by, created_by_name, problem_type_id
     ) values (
       ${numOs},
       ${input.tipo},
-      ${nullableStr(input.subtipo)},
+      ${subtipo},
       ${stage},
       ${nullableStr(input.omieAppId)},
       ${input.clientCode ?? null},
@@ -589,7 +613,8 @@ export async function createOs(input: {
       ${aprovadoPor ? new Date() : null},
       ${anexo ? JSON.stringify(anexo) : null},
       ${input.createdBy},
-      ${input.createdByName}
+      ${input.createdByName},
+      ${problemTypeId}
     )
     returning id
   `) as Array<{ id: number }>;
@@ -611,7 +636,7 @@ export async function createOs(input: {
     osId,
     quem: input.createdByName,
     userId: input.createdBy,
-    acao: `OS criada (${input.tipo}${input.subtipo ? ` · ${input.subtipo}` : ""})`,
+    acao: `OS criada (${input.tipo}${subtipo ? ` · ${subtipo}` : ""})`,
   });
   if (aprovadoPor) {
     await addOsEvent({
@@ -621,6 +646,44 @@ export async function createOs(input: {
       acao: `Pedido aprovado por ${aprovadoPor}${anexo ? ` · anexo ${anexo.name}` : ""}`,
     });
   }
+
+  const checklistIds = [
+    ...new Set(
+      (input.checklistIds ?? [])
+        .filter((id) => Number.isFinite(id) && id > 0)
+        .map(Number),
+    ),
+  ];
+  if (problemTypeId != null || checklistIds.length) {
+    const { attachOsChecklist, listChecklistsForProblem } = await import(
+      "@/db/assistencia-checklists"
+    );
+    const toAttach =
+      checklistIds.length > 0
+        ? checklistIds
+        : problemTypeId != null
+          ? (await listChecklistsForProblem(problemTypeId)).map((c) => c.id)
+          : [];
+    for (const checklistId of toAttach) {
+      await attachOsChecklist({
+        osId,
+        checklistId,
+        problemTypeId,
+        quem: input.createdByName,
+        userId: input.createdBy,
+        silent: true,
+      });
+    }
+    if (problemName && toAttach.length) {
+      await addOsEvent({
+        osId,
+        quem: input.createdByName,
+        userId: input.createdBy,
+        acao: `Checklists vinculados (${toAttach.length}) · ${problemName}`,
+      });
+    }
+  }
+
   return getOsById(osId);
 }
 
@@ -1127,6 +1190,8 @@ export async function checkOutOs(input: {
   if (!os.ciAt) throw new Error("Faça check-in antes.");
   if (os.pausedAt) throw new Error("OS pausada. Retome a execução antes do check-out.");
   if (!input.resolucao.trim()) throw new Error("Informe a resolução.");
+  const { assertOsChecklistsComplete } = await import("@/db/assistencia-checklists");
+  await assertOsChecklistsComplete(os.id);
   const rel = buildOsRel({
     texto: input.resolucao,
     fotos: input.fotos,
@@ -1403,6 +1468,8 @@ export async function markExecutedManual(input: {
     throw new Error("Há material em campo — use conferência.");
   }
   assertCanMoveStage(5, input.canRole, input.isAdmin);
+  const { assertOsChecklistsComplete } = await import("@/db/assistencia-checklists");
+  await assertOsChecklistsComplete(os.id);
   const db = await getDb();
   await db`update assist_os set stage = 6, updated_at = now() where id = ${os.id}`;
   await addOsEvent({

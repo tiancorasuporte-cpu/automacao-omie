@@ -98,10 +98,13 @@ function roleFns(user: Parameters<typeof canOsWorkflow>[0]) {
 export const getAssistenciaBootstrapFn = createServerFn({ method: "GET" }).handler(async () => {
   const { user } = await auth();
   await boot();
-  const [osList, teams, materialPendencias] = await Promise.all([
+  const { listProblemTypes, listChecklists } = await import("@/db/assistencia-checklists");
+  const [osList, teams, materialPendencias, problemTypes, checklists] = await Promise.all([
     listOs(),
     listAssistTeams(true),
     listMaterialPendencias(),
+    listProblemTypes(),
+    listChecklists(),
   ]);
   const roles = roleFns(user);
   const { listOmieApps, requireOrcamentosOmieApp } = await import("@/server/omie/client");
@@ -136,6 +139,8 @@ export const getAssistenciaBootstrapFn = createServerFn({ method: "GET" }).handl
     teams,
     osList,
     materialPendencias,
+    problemTypes,
+    checklists,
   };
 });
 
@@ -231,6 +236,8 @@ export const createOsFn = createServerFn({ method: "POST" })
       .object({
         tipo: z.enum(["pedido", "manut", "monit", "visita"]),
         subtipo: z.string().optional().nullable(),
+        problemTypeId: z.number().int().positive().optional().nullable(),
+        checklistIds: z.array(z.number().int().positive()).optional(),
         clientName: z.string().min(1),
         clientCity: z.string().optional().nullable(),
         clientAddress: z.string().optional().nullable(),
@@ -261,6 +268,8 @@ export const createOsFn = createServerFn({ method: "POST" })
     return createOs({
       tipo: data.tipo as OsTipo,
       subtipo: data.subtipo,
+      problemTypeId: data.problemTypeId,
+      checklistIds: data.checklistIds,
       clientName: data.clientName,
       clientCity: data.clientCity,
       clientAddress: data.clientAddress,
@@ -983,3 +992,198 @@ export const listMaterialPendenciasFn = createServerFn({ method: "GET" }).handle
   await boot();
   return listMaterialPendencias();
 });
+
+export const listAssistProblemTypesFn = createServerFn({ method: "GET" }).handler(async () => {
+  await auth();
+  await boot();
+  const { listProblemTypes } = await import("@/db/assistencia-checklists");
+  return listProblemTypes();
+});
+
+export const saveAssistProblemTypeFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive().optional().nullable(),
+        name: z.string().trim().min(1).max(160),
+        active: z.boolean().optional(),
+        sortOrder: z.number().int().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (!isAdmin(user) && !canOsWorkflow(user, "assistencia")) {
+      throw new Error("Sem permissão para configurar problemas.");
+    }
+    const { saveProblemType, listProblemTypes } = await import("@/db/assistencia-checklists");
+    await saveProblemType(data);
+    return listProblemTypes();
+  });
+
+export const listAssistChecklistsFn = createServerFn({ method: "GET" }).handler(async () => {
+  await auth();
+  await boot();
+  const { listChecklists } = await import("@/db/assistencia-checklists");
+  return listChecklists();
+});
+
+export const saveAssistChecklistFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive().optional().nullable(),
+        name: z.string().trim().min(1).max(160),
+        active: z.boolean().optional(),
+        sortOrder: z.number().int().optional(),
+        problemTypeIds: z.array(z.number().int().positive()).optional(),
+        items: z
+          .array(
+            z.object({
+              id: z.number().int().positive().optional().nullable(),
+              label: z.string().trim().min(1).max(240),
+              required: z.boolean().optional(),
+              sortOrder: z.number().int().optional(),
+            }),
+          )
+          .optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (!isAdmin(user) && !canOsWorkflow(user, "assistencia")) {
+      throw new Error("Sem permissão para configurar checklists.");
+    }
+    const { saveChecklist, listChecklists } = await import("@/db/assistencia-checklists");
+    await saveChecklist(data);
+    return listChecklists();
+  });
+
+export const deleteAssistChecklistFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z.object({ id: z.number().int().positive() }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (!isAdmin(user) && !canOsWorkflow(user, "assistencia")) {
+      throw new Error("Sem permissão para configurar checklists.");
+    }
+    const { deleteChecklist, listChecklists } = await import("@/db/assistencia-checklists");
+    await deleteChecklist(data.id);
+    return listChecklists();
+  });
+
+export const listOsChecklistsFn = createServerFn({ method: "GET" })
+  .validator((input) => z.object({ osId: z.coerce.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    const { listOsChecklists } = await import("@/db/assistencia-checklists");
+    return listOsChecklists(data.osId);
+  });
+
+export const setOsProblemTypeFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        problemTypeId: z.number().int().positive().nullable(),
+        attachSuggested: z.boolean().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const { setOsProblemType, listOsChecklists } = await import("@/db/assistencia-checklists");
+    await setOsProblemType({
+      osId: data.osId,
+      problemTypeId: data.problemTypeId,
+      attachSuggested: data.attachSuggested,
+      quem: user.name,
+      userId: user.id,
+    });
+    return {
+      os: await getOsById(data.osId),
+      checklists: await listOsChecklists(data.osId),
+    };
+  });
+
+export const attachOsChecklistFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        checklistId: z.number().int().positive(),
+        problemTypeId: z.number().int().positive().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const { attachOsChecklist, listOsChecklists } = await import("@/db/assistencia-checklists");
+    await attachOsChecklist({
+      osId: data.osId,
+      checklistId: data.checklistId,
+      problemTypeId: data.problemTypeId,
+      quem: user.name,
+      userId: user.id,
+    });
+    return listOsChecklists(data.osId);
+  });
+
+export const detachOsChecklistFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z.object({ osChecklistId: z.number().int().positive() }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const { detachOsChecklist, listOsChecklists } = await import("@/db/assistencia-checklists");
+    const { getDb } = await import("@/db/schema");
+    const db = await getDb();
+    const rows = (await db`
+      select os_id from assist_os_checklists where id = ${data.osChecklistId} limit 1
+    `) as Array<{ os_id: number }>;
+    await detachOsChecklist({
+      osChecklistId: data.osChecklistId,
+      quem: user.name,
+      userId: user.id,
+    });
+    const osId = Number(rows[0]?.os_id);
+    return osId > 0 ? listOsChecklists(osId) : [];
+  });
+
+export const saveOsChecklistAnswersFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osChecklistId: z.number().int().positive(),
+        answers: z
+          .array(
+            z.object({
+              itemId: z.number().int().positive(),
+              result: z.enum(["ok", "nok"]),
+              note: z.string().max(2000).optional().nullable(),
+            }),
+          )
+          .min(1),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const { saveOsChecklistAnswers } = await import("@/db/assistencia-checklists");
+    return saveOsChecklistAnswers({
+      osChecklistId: data.osChecklistId,
+      answers: data.answers,
+      quem: user.name,
+      userId: user.id,
+    });
+  });

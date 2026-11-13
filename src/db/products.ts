@@ -33,6 +33,8 @@ export type OmieProduct = {
   ncm: string | null;
   inactive: boolean;
   syncedAt: string;
+  /** Saldo físico local (módulo Estoque / product_stock). */
+  quantidadeFisica: number;
   /** Vínculos com códigos de fornecedor (quando carregados). */
   supplierCodes?: OmieProductSupplierLink[];
 };
@@ -82,7 +84,33 @@ function toProduct(row: ProductRow): OmieProduct {
     ncm: row.ncm,
     inactive: row.inactive,
     syncedAt: row.synced_at instanceof Date ? row.synced_at.toISOString() : String(row.synced_at),
+    quantidadeFisica: 0,
   };
+}
+
+async function attachPhysicalStock(products: OmieProduct[]) {
+  if (!products.length) return products;
+  try {
+    const db = await getDb();
+    const ids = products.map((p) => p.id);
+    const rows = await db<{ product_id: number; quantidade_fisica: string | number | null }[]>`
+      select product_id, quantidade_fisica
+      from product_stock
+      where product_id in ${db(ids)}
+    `;
+    const byId = new Map(
+      rows.map((r) => {
+        const qty = Number(r.quantidade_fisica);
+        return [Number(r.product_id), Number.isFinite(qty) ? qty : 0] as const;
+      }),
+    );
+    for (const product of products) {
+      product.quantidadeFisica = byId.get(product.id) ?? 0;
+    }
+  } catch {
+    // product_stock pode não existir em ambientes antigos
+  }
+  return products;
 }
 
 export async function upsertOmieProduct(input: {
@@ -280,7 +308,7 @@ export async function listOmieProducts(input?: {
     limit ${limit}
     offset ${offset}
   `;
-  const products = rows.map(toProduct);
+  const products = await attachPhysicalStock(rows.map(toProduct));
   if (!includeSupplierCodes || !products.length) return products;
 
   const { listProductSupplierCodesForProducts } = await import("@/db/suppliers");

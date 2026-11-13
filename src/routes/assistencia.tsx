@@ -9,6 +9,8 @@ import {
 } from "@/components/ActivitiesCalendar";
 import { useAppConfirm } from "@/components/AppConfirm";
 import { AppShell, useShellSearch } from "@/components/AppShell";
+import { AssistChecklistConfig } from "@/components/AssistChecklistConfig";
+import { AssistOsChecklistPanel } from "@/components/AssistOsChecklistPanel";
 import { Icon } from "@/components/Icon";
 import { PhotoCapture, type CapturedPhoto } from "@/components/PhotoCapture";
 import {
@@ -69,8 +71,6 @@ import {
   OS_ITEM_STATUS_CLASS,
   OS_ITEM_STATUS_LABEL,
   OS_STAGES,
-  OS_SUBTIPOS_MANUT,
-  OS_SUBTIPOS_MONIT,
   OS_TIPOS,
   osKanbanColumnStyle,
   osStageMoverLabel,
@@ -94,10 +94,16 @@ import {
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 
-type TabId = "kanban" | "agenda" | "conf" | "rel";
+type TabId = "kanban" | "agenda" | "conf" | "rel" | "config";
 
 function parseAssistView(raw: unknown): TabId {
-  if (raw === "agenda" || raw === "conf" || raw === "rel" || raw === "kanban") {
+  if (
+    raw === "agenda" ||
+    raw === "conf" ||
+    raw === "rel" ||
+    raw === "kanban" ||
+    raw === "config"
+  ) {
     return raw;
   }
   return "kanban";
@@ -267,6 +273,8 @@ function AssistenciaPage() {
   const [calMonth, setCalMonth] = useState(() => new Date());
   const [calSheetOpen, setCalSheetOpen] = useState(false);
   const [osList, setOsList] = useState<OsRow[]>(boot.osList);
+  const [problemTypes, setProblemTypes] = useState(boot.problemTypes ?? []);
+  const [checklistsCatalog, setChecklistsCatalog] = useState(boot.checklists ?? []);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [histOpen, setHistOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -309,6 +317,9 @@ function AssistenciaPage() {
   const [newOpen, setNewOpen] = useState(false);
   const [tipo, setTipo] = useState<"pedido" | "manut" | "monit" | "visita">("manut");
   const [subtipo, setSubtipo] = useState("");
+  const [newProblemTypeId, setNewProblemTypeId] = useState<number | null>(null);
+  const [newChecklistIds, setNewChecklistIds] = useState<number[]>([]);
+  const [addChecklistIdDraft, setAddChecklistIdDraft] = useState("");
   const [omieAppId, setOmieAppId] = useState(boot.omieAppId);
   const [clientQuery, setClientQuery] = useState("");
   const [selectedClient, setSelectedClient] = useState<{
@@ -642,6 +653,9 @@ function AssistenciaPage() {
   function openNewOs() {
     setTipo("manut");
     setSubtipo("");
+    setNewProblemTypeId(null);
+    setNewChecklistIds([]);
+    setAddChecklistIdDraft("");
     setOmieAppId(boot.omieAppId);
     setClientQuery("");
     setSelectedClient(null);
@@ -653,6 +667,42 @@ function AssistenciaPage() {
     setItems([]);
     setItemDraft("");
     setNewOpen(true);
+  }
+
+  const activeProblemTypes = useMemo(
+    () => problemTypes.filter((p) => p.active),
+    [problemTypes],
+  );
+
+  const linkedChecklistsForNew = useMemo(() => {
+    if (!newProblemTypeId) return [];
+    return checklistsCatalog.filter(
+      (c) => c.active && c.problemTypeIds.includes(newProblemTypeId),
+    );
+  }, [checklistsCatalog, newProblemTypeId]);
+
+  const extraChecklistsForNew = useMemo(() => {
+    const selected = new Set(newChecklistIds);
+    return checklistsCatalog.filter((c) => c.active && !selected.has(c.id));
+  }, [checklistsCatalog, newChecklistIds]);
+
+  function selectNewProblemType(idRaw: string) {
+    const id = idRaw ? Number(idRaw) : NaN;
+    if (!Number.isFinite(id) || id <= 0) {
+      setNewProblemTypeId(null);
+      setSubtipo("");
+      setNewChecklistIds([]);
+      setAddChecklistIdDraft("");
+      return;
+    }
+    const problem = problemTypes.find((p) => p.id === id);
+    setNewProblemTypeId(id);
+    setSubtipo(problem?.name ?? "");
+    const linked = checklistsCatalog
+      .filter((c) => c.active && c.problemTypeIds.includes(id))
+      .map((c) => c.id);
+    setNewChecklistIds(linked);
+    setAddChecklistIdDraft("");
   }
 
   const confOs = useMemo(
@@ -1475,6 +1525,37 @@ function AssistenciaPage() {
                     </p>
                   </div>
                 ) : null}
+
+                <AssistOsChecklistPanel
+                  osId={selected.id}
+                  problemTypeId={selected.problemTypeId ?? null}
+                  problemTypeName={selected.problemTypeName ?? null}
+                  problemTypes={problemTypes}
+                  checklistCatalog={checklistsCatalog}
+                  canEdit={
+                    (boot.user.canAssistencia || boot.user.isAdmin) && selected.stage < 7
+                  }
+                  canFill={
+                    (boot.user.canAssistencia || boot.user.isAdmin) &&
+                    selected.stage === 5 &&
+                    Boolean(selected.ciAt) &&
+                    !selected.coAt
+                  }
+                  busy={busy}
+                  setBusy={setBusy}
+                  setFeedback={(v) => {
+                    if (!v) {
+                      setFeedback(null);
+                      return;
+                    }
+                    setFeedback(v.text);
+                    setFeedbackOk(v.type === "ok");
+                  }}
+                  onOsUpdated={(os) => {
+                    const row = os as OsRow;
+                    setOsList((prev) => prev.map((o) => (o.id === row.id ? { ...o, ...row } : o)));
+                  }}
+                />
 
                 {selected.stage === 5 ? (
                   <div
@@ -2409,6 +2490,7 @@ function AssistenciaPage() {
               ["agenda", "Agenda"],
               ["conf", "Conferência"],
               ["rel", "Relatório"],
+              ["config", "Config"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -3237,6 +3319,28 @@ function AssistenciaPage() {
           </div>
         ) : null}
 
+        {tab === "config" ? (
+          <AssistChecklistConfig
+            problemTypes={problemTypes}
+            checklists={checklistsCatalog}
+            canEdit={boot.user.canAssistencia || boot.user.isAdmin}
+            busy={busy}
+            setBusy={setBusy}
+            setFeedback={(v) => {
+              if (!v) {
+                setFeedback(null);
+                return;
+              }
+              setFeedback(v.text);
+              setFeedbackOk(v.type === "ok");
+            }}
+            onRefresh={(next) => {
+              setProblemTypes(next.problemTypes);
+              setChecklistsCatalog(next.checklists);
+            }}
+          />
+        ) : null}
+
         {tab === "conf" ? (
           <div className="grid gap-md md:grid-cols-2">
             {confOs.map((os) => (
@@ -3772,6 +3876,9 @@ function AssistenciaPage() {
                 onChange={(e) => {
                   setTipo(e.target.value as typeof tipo);
                   setSubtipo("");
+                  setNewProblemTypeId(null);
+                  setNewChecklistIds([]);
+                  setAddChecklistIdDraft("");
                 }}
                 className={softInputClass}
               >
@@ -3783,21 +3890,107 @@ function AssistenciaPage() {
               </select>
             </label>
             {tipo === "manut" || tipo === "monit" ? (
-              <label className="block text-label-md text-on-surface-variant sm:col-span-2">
-                Subtipo
-                <select
-                  value={subtipo}
-                  onChange={(e) => setSubtipo(e.target.value)}
-                  className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
-                >
-                  <option value="">Selecione...</option>
-                  {(tipo === "manut" ? OS_SUBTIPOS_MANUT : OS_SUBTIPOS_MONIT).map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="space-y-sm sm:col-span-2">
+                <label className="block text-label-md text-on-surface-variant">
+                  Subtipo (problema)
+                  <select
+                    value={newProblemTypeId ?? ""}
+                    onChange={(e) => selectNewProblemType(e.target.value)}
+                    className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
+                  >
+                    <option value="">Selecione...</option>
+                    {activeProblemTypes.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {!activeProblemTypes.length ? (
+                  <p className="text-label-md text-on-surface-variant">
+                    Nenhum problema cadastrado. Cadastre em Config → Checklists.
+                  </p>
+                ) : null}
+                {newProblemTypeId ? (
+                  <div className="rounded-lg border border-outline-variant bg-surface-container-low p-md">
+                    <p className="text-label-md font-semibold text-on-surface">Checklists</p>
+                    <p className="mb-sm text-label-sm text-on-surface-variant">
+                      Vinculados ao problema e extras que quiser incluir nesta OS.
+                    </p>
+                    {newChecklistIds.length ? (
+                      <ul className="mb-sm space-y-xs">
+                        {newChecklistIds.map((id) => {
+                          const cl = checklistsCatalog.find((c) => c.id === id);
+                          const linked = linkedChecklistsForNew.some((c) => c.id === id);
+                          return (
+                            <li
+                              key={id}
+                              className="flex items-center justify-between gap-sm rounded-md border border-outline-variant bg-surface px-sm py-xs"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-body-md text-on-surface">
+                                  {cl?.name ?? `Checklist #${id}`}
+                                </p>
+                                <p className="text-label-sm text-on-surface-variant">
+                                  {linked ? "Vinculado ao problema" : "Adicional"}
+                                  {cl ? ` · ${cl.items.length} item(ns)` : ""}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className="shrink-0 rounded-lg border border-outline-variant px-sm py-xs text-label-md"
+                                onClick={() =>
+                                  setNewChecklistIds((prev) => prev.filter((x) => x !== id))
+                                }
+                              >
+                                Remover
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <p className="mb-sm text-label-md text-on-surface-variant">
+                        Nenhum checklist selecionado
+                        {linkedChecklistsForNew.length === 0
+                          ? " (este problema ainda não tem checklist vinculado)."
+                          : "."}
+                      </p>
+                    )}
+                    {extraChecklistsForNew.length ? (
+                      <div className="flex flex-wrap items-center gap-sm">
+                        <select
+                          value={addChecklistIdDraft}
+                          onChange={(e) => setAddChecklistIdDraft(e.target.value)}
+                          className="min-w-[12rem] flex-1 rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+                        >
+                          <option value="">Adicionar outro checklist…</option>
+                          {extraChecklistsForNew.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name} ({c.items.length} itens)
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold disabled:opacity-50"
+                          disabled={!addChecklistIdDraft}
+                          onClick={() => {
+                            const id = Number(addChecklistIdDraft);
+                            if (!Number.isFinite(id) || id <= 0) return;
+                            setNewChecklistIds((prev) =>
+                              prev.includes(id) ? prev : [...prev, id],
+                            );
+                            setAddChecklistIdDraft("");
+                          }}
+                        >
+                          Adicionar
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             ) : null}
             {tipo === "pedido" ? (
               <label className="block text-label-md text-on-surface-variant sm:col-span-2">
@@ -3996,7 +4189,7 @@ function AssistenciaPage() {
               disabled={
                 busy ||
                 !selectedClient?.nome.trim() ||
-                ((tipo === "manut" || tipo === "monit") && !subtipo) ||
+                ((tipo === "manut" || tipo === "monit") && !newProblemTypeId) ||
                 (tipo === "pedido" && !quoteId && !quoteNumero.trim())
               }
               onClick={async () => {
@@ -4006,6 +4199,9 @@ function AssistenciaPage() {
                     data: {
                       tipo,
                       subtipo: subtipo || null,
+                      problemTypeId: newProblemTypeId,
+                      checklistIds:
+                        tipo === "manut" || tipo === "monit" ? newChecklistIds : undefined,
                       clientName: selectedClient.nome,
                       clientCode: selectedClient.codigo > 0 ? selectedClient.codigo : null,
                       omieAppId: omieAppId || null,
