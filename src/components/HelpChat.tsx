@@ -13,7 +13,13 @@ type ChatMessage = {
   text: string;
 };
 
-const QUICK_PROMPTS = ["Quero consultar boleto", "Há títulos em aberto?", "Como funciona?"];
+const QUICK_PROMPTS = [
+  "Consultar boleto por CNPJ",
+  "Localizar boleto ou NF",
+  "Como funciona?",
+];
+
+type AssistantMode = "menu" | "boleto" | "locate" | "human";
 
 function newId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -28,6 +34,7 @@ export function HelpChat() {
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiStatusReady, setAiStatusReady] = useState(false);
   const [pending, setPending] = useState(false);
+  const [mode, setMode] = useState<AssistantMode>("menu");
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -52,12 +59,12 @@ export function HelpChat() {
       if (prev.length > 0) return prev;
       const extra = aiEnabled
         ? " Estou com IA Groq ligada."
-        : " Configure GROQ_API_KEY em Configurações (ou no .env) para respostas com IA; mesmo sem chave eu consulto boleto por CNPJ.";
+        : " Configure GROQ_API_KEY em Configurações (ou no .env) para respostas com IA.";
       return [
         {
           id: newId(),
           role: "bot",
-          text: `Olá! Sou o assistente da ${APP_NAME}. O que deseja?${extra}\n\nSe quiser boleto, eu peço o CNPJ e consulto os títulos em aberto.`,
+          text: `Olá! Sou o assistente da ${APP_NAME}.${extra}\n\nPosso:\n1 — Consultar boleto por CNPJ/CPF\n2 — Encaminhar a um atendente\n3 — Localizar boleto ou NF (número/cliente)\n\nEx.: "boleto 1675821 Lampa" ou "nf 6410".`,
         },
       ];
     });
@@ -111,11 +118,15 @@ export function HelpChat() {
           message: text,
           pathname,
           history: historyForApi(messages),
+          mode,
         },
       });
       if (!result.ok) {
         setMessages((prev) => [...prev, { id: newId(), role: "bot", text: result.error }]);
         return;
+      }
+      if ("mode" in result && result.mode) {
+        setMode(result.mode as AssistantMode);
       }
       setMessages((prev) => [...prev, { id: newId(), role: "bot", text: result.answer }]);
     } catch {
@@ -146,7 +157,9 @@ export function HelpChat() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-label-md font-bold">Assistente Omie</p>
               <p className="truncate text-[0.7rem] text-on-primary/75">
-                {aiEnabled ? "IA Groq · consulta de boletos" : "Consulta de boletos por CNPJ"}
+                {aiEnabled
+                  ? "IA Groq · boletos e localização de NF"
+                  : "Boletos por CNPJ · localizar NF/boleto"}
               </p>
             </div>
             <button
@@ -211,7 +224,7 @@ export function HelpChat() {
                 ref={inputRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                placeholder="Digite ou informe o CNPJ…"
+                placeholder="CNPJ, boleto 1675821, nf 6410…"
                 disabled={pending}
                 className="input-glow min-w-0 flex-1 rounded-full border border-outline-variant bg-surface-container-low px-md py-sm text-body-md outline-none focus:border-primary disabled:opacity-70"
               />
@@ -230,7 +243,7 @@ export function HelpChat() {
 
       {!open && !hintSeen ? (
         <div className="pointer-events-auto relative mb-1 max-w-[14rem] rounded-2xl rounded-br-md bg-primary px-md py-sm text-label-md text-on-primary shadow-elevation-1 animate-[login-rise_0.45s_ease-out_both]">
-          Precisa consultar boleto? É só clicar.
+          Não achou boleto ou NF? Posso localizar.
           <button
             type="button"
             aria-label="Dispensar dica"

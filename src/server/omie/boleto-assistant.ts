@@ -9,6 +9,12 @@ import {
   parseBoletoSelection,
   type OpenBoletoHit,
 } from "@/server/omie/boleto-lookup";
+import {
+  extractDocumentQuery,
+  formatDocumentSearchAnswer,
+  locateModePrompt,
+  searchDueDocuments,
+} from "@/server/omie/document-search";
 import { formatDisplayDate } from "@/server/omie/client";
 import { APP_NAME } from "@/lib/brand";
 
@@ -17,7 +23,7 @@ export type ChatHistoryItem = {
   content: string;
 };
 
-export type ConversationMode = "menu" | "boleto" | "human";
+export type ConversationMode = "menu" | "boleto" | "locate" | "human";
 
 export function welcomeMenuMessage() {
   return [
@@ -27,8 +33,9 @@ export function welcomeMenuMessage() {
     "",
     "*1* — Solicitar boleto (CNPJ/CPF)",
     "*2* — Falar com um atendente",
+    "*3* — Localizar boleto ou NF (número/cliente)",
     "",
-    "Responda com *1* ou *2*.",
+    "Responda com *1*, *2* ou *3* — ou mande direto: *boleto 1675821 Lampa*.",
   ].join("\n");
 }
 
@@ -55,11 +62,22 @@ function wantsMainMenu(text: string) {
 
 function parseMenuSelection(text: string): ConversationMode | null {
   const normalized = text.trim().toLowerCase();
-  if (/^(1|boleto|boletos|solicitar boleto|quero boleto|meu boleto)$/.test(normalized)) {
+  if (
+    /^(1|boleto|boletos|solicitar boleto|quero boleto|meu boleto|consultar boleto por cnpj)$/.test(
+      normalized,
+    )
+  ) {
     return "boleto";
   }
   if (/^(2|atendente|humano|atendimento|falar com atendente|quero atendente)$/.test(normalized)) {
     return "human";
+  }
+  if (
+    /^(3|localizar|localiza|encontrar|procurar|buscar)$/.test(normalized) ||
+    /^localizar\b/.test(normalized) ||
+    /^(nao|não)\s+(acho|encont|consigo\s+local)/.test(normalized)
+  ) {
+    return "locate";
   }
   return null;
 }
@@ -86,6 +104,28 @@ function formatSelectionAnswer(hit: OpenBoletoHit, index: number) {
   ].join("\n");
 }
 
+async function runDocumentLocate(message: string) {
+  const query = extractDocumentQuery(message);
+  try {
+    const result = await searchDueDocuments({
+      numbers: query.numbers,
+      clientHint: query.clientHint,
+    });
+    return {
+      ok: true as const,
+      source: "locate" as const,
+      answer: formatDocumentSearchAnswer(result),
+      mode: "locate" as const,
+      pendingBoletos: undefined,
+    };
+  } catch (error) {
+    return {
+      ok: false as const,
+      error: error instanceof Error ? error.message : "Falha ao localizar documento.",
+    };
+  }
+}
+
 export async function answerBoletoAssistant(input: {
   message: string;
   history?: ChatHistoryItem[];
@@ -96,6 +136,7 @@ export async function answerBoletoAssistant(input: {
   const mode = input.mode ?? "menu";
   const documento = extractDocumento(input.message);
   const menuChoice = parseMenuSelection(input.message);
+  const docQuery = extractDocumentQuery(input.message);
 
   if (wantsMainMenu(input.message)) {
     return {
@@ -123,6 +164,16 @@ export async function answerBoletoAssistant(input: {
       source: "menu" as const,
       answer: boletoModePrompt(),
       mode: "boleto" as const,
+      pendingBoletos: undefined,
+    };
+  }
+
+  if (menuChoice === "locate") {
+    return {
+      ok: true as const,
+      source: "menu" as const,
+      answer: locateModePrompt(),
+      mode: "locate" as const,
       pendingBoletos: undefined,
     };
   }
@@ -164,6 +215,27 @@ export async function answerBoletoAssistant(input: {
     }
   }
 
+  // Localizar por número de boleto/NF (+ cliente) — prioriza sobre o fluxo de CNPJ quando há nº curto.
+  if (
+    mode === "locate" ||
+    (docQuery.numbers.length > 0 && !documento) ||
+    (docQuery.wantsLocate && docQuery.numbers.length > 0)
+  ) {
+    // Em modo locate sem número ainda, só pede o prompt.
+    if (mode === "locate" && docQuery.numbers.length === 0 && !docQuery.clientHint) {
+      return {
+        ok: true as const,
+        source: "locate" as const,
+        answer: locateModePrompt(),
+        mode: "locate" as const,
+        pendingBoletos: undefined,
+      };
+    }
+    if (docQuery.numbers.length > 0 || docQuery.clientHint) {
+      return runDocumentLocate(input.message);
+    }
+  }
+
   if (documento) {
     try {
       const result = await lookupBoletosByDocumento(documento);
@@ -189,6 +261,16 @@ export async function answerBoletoAssistant(input: {
     }
   }
 
+  if (mode === "locate") {
+    return {
+      ok: true as const,
+      source: "locate" as const,
+      answer: locateModePrompt(),
+      mode: "locate" as const,
+      pendingBoletos: undefined,
+    };
+  }
+
   if (mode === "menu" || isGreeting(input.message) || !input.history?.length) {
     return {
       ok: true as const,
@@ -200,6 +282,7 @@ export async function answerBoletoAssistant(input: {
   }
 
   if (mode === "boleto" || wantsBoleto(input.message)) {
+    // Frases do tipo "não acho o boleto 123" já caíram no locate acima.
     return {
       ok: true as const,
       source: "faq" as const,
@@ -209,7 +292,7 @@ export async function answerBoletoAssistant(input: {
     };
   }
 
-  // Sem Groq para mensagens aleatórias — só menu/boleto.
+  // Sem Groq para mensagens aleatórias — só menu/boleto/locate.
   return {
     ok: true as const,
     source: "menu" as const,

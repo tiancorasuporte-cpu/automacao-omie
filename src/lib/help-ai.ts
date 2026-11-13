@@ -10,6 +10,7 @@ const askSchema = z.object({
   message: z.string().trim().min(1).max(1000),
   pathname: z.string().max(200).optional(),
   history: z.array(historyItemSchema).max(12).optional(),
+  mode: z.enum(["menu", "boleto", "locate", "human"]).optional(),
 });
 
 export const getHelpAiStatusFn = createServerFn({ method: "GET" }).handler(async () => {
@@ -34,5 +35,6 @@ export const askHelpChatFn = createServerFn({ method: "POST" })
       message: data.message,
       pathname: data.pathname,
       history: data.history,
+      mode: data.mode,
     });
   });
