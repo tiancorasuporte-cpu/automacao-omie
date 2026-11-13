@@ -96,3 +96,59 @@ export async function findTecnicoUserIdsByNome(tecnicoNome: string | null | unde
   `;
   return rows.map((r) => Number(r.id));
 }
+
+/** Resolve destinatários do push: usuário por nome e/ou membros da equipe com user_id. */
+export async function findTecnicoUserIdsForAssignment(input: {
+  tecnicoNome?: string | null;
+  teamId?: number | null;
+}) {
+  const db = await getDb();
+  const ids = new Set<number>();
+  const name = (input.tecnicoNome ?? "").trim();
+  const teamId =
+    input.teamId != null && Number.isFinite(Number(input.teamId))
+      ? Number(input.teamId)
+      : null;
+
+  if (name) {
+    for (const id of await findTecnicoUserIdsByNome(name)) {
+      ids.add(id);
+    }
+
+    const members = teamId
+      ? await db<{ user_id: number }[]>`
+          select user_id
+          from assist_team_members
+          where coalesce(active, true) = true
+            and user_id is not null
+            and team_id = ${teamId}
+            and lower(trim(name)) = lower(${name})
+        `
+      : await db<{ user_id: number }[]>`
+          select user_id
+          from assist_team_members
+          where coalesce(active, true) = true
+            and user_id is not null
+            and lower(trim(name)) = lower(${name})
+        `;
+    for (const row of members) {
+      if (row.user_id != null) ids.add(Number(row.user_id));
+    }
+  }
+
+  // Sem técnico nomeado (ou nome sem user): avisa a equipe inteira vinculada.
+  if (teamId != null && (!name || ids.size === 0)) {
+    const members = await db<{ user_id: number }[]>`
+      select user_id
+      from assist_team_members
+      where team_id = ${teamId}
+        and coalesce(active, true) = true
+        and user_id is not null
+    `;
+    for (const row of members) {
+      if (row.user_id != null) ids.add(Number(row.user_id));
+    }
+  }
+
+  return [...ids];
+}

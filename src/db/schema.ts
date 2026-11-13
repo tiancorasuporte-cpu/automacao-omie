@@ -143,6 +143,17 @@ export async function ensureSchema() {
   if (!(await columnExists("users", "default_vehicle_id"))) {
     await sql.unsafe("alter table users add column default_vehicle_id integer");
   }
+  if (!(await columnExists("users", "last_lat"))) {
+    await sql.unsafe("alter table users add column last_lat numeric(10, 7)");
+  }
+  if (!(await columnExists("users", "last_lng"))) {
+    await sql.unsafe("alter table users add column last_lng numeric(10, 7)");
+  }
+  if (!(await columnExists("users", "last_location_at"))) {
+    await sql.unsafe(
+      "alter table users add column last_location_at timestamptz",
+    );
+  }
 
   if (!(await tableExists("due_items"))) {
     await sql`

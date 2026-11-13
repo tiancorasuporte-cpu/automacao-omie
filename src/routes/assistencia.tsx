@@ -39,6 +39,7 @@ import {
   acceptConferenceFn,
   addOsItemFn,
   advanceOsFn,
+  backfillOsClientLocationsFn,
   checkInOsFn,
   checkOutOsFn,
   createOsFn,
@@ -49,6 +50,7 @@ import {
   getAssistenciaBootstrapFn,
   getOsFn,
   listOsFn,
+  listTecnicosProximosFn,
   markExecutedFn,
   moveOsKanbanFn,
   receivePurchaseFn,
@@ -316,6 +318,13 @@ function AssistenciaPage() {
 
   useEffect(() => {
     void listOsFn({ data: {} }).then(setOsList).catch(() => undefined);
+    void backfillOsClientLocationsFn({ data: { limit: 10 } })
+      .then((res) => {
+        if (res.updated.length > 0) {
+          void listOsFn({ data: {} }).then(setOsList).catch(() => undefined);
+        }
+      })
+      .catch(() => undefined);
     const onVis = () => {
       if (document.visibilityState === "visible") {
         void listOsFn({ data: {} }).then(setOsList).catch(() => undefined);
@@ -403,6 +412,18 @@ function AssistenciaPage() {
   const [hora, setHora] = useState("");
   const [teamId, setTeamId] = useState<number | "">("");
   const [tecnicoNome, setTecnicoNome] = useState("");
+  const [tecnicosProximos, setTecnicosProximos] = useState<
+    Array<{
+      userId: number | null;
+      name: string;
+      distanceKm: number | null;
+      locationAt: string | null;
+      stale: boolean;
+      hasGps: boolean;
+    }>
+  >([]);
+  const [tecnicosProximosLoading, setTecnicosProximosLoading] = useState(false);
+  const geoTriedOsIdsRef = useRef<Set<number>>(new Set());
   const [pauseOpen, setPauseOpen] = useState(false);
   const [pauseMotivo, setPauseMotivo] = useState("");
 
@@ -568,11 +589,11 @@ function AssistenciaPage() {
   /** Sem pendentes na agenda — só entram OS agendadas. */
   const agendaPendingItems = useMemo(() => [], []);
 
-  /** Cronograma estratégico: aguardando agendamento + agendadas, por região e distância. */
+  /** Cronograma: só aguardando agendamento + agendadas, por região e distância. */
   const cronogramaGroups = useMemo(() => {
     const tecQ = agendaTecnico.trim().toLowerCase();
     const rows = filtered
-      .filter((o) => o.stage >= 3 && o.stage < 7)
+      .filter((o) => o.stage === 3 || o.stage === 4)
       .filter((o) => {
         if (!tecQ) return true;
         const tec = (o.tecnicoNome ?? "").trim().toLowerCase();
@@ -584,6 +605,8 @@ function AssistenciaPage() {
         const da = a.distanceKm == null ? Number.POSITIVE_INFINITY : a.distanceKm;
         const db = b.distanceKm == null ? Number.POSITIVE_INFINITY : b.distanceKm;
         if (da !== db) return da - db;
+        const dateCmp = (a.agDate ?? "9999").localeCompare(b.agDate ?? "9999");
+        if (dateCmp !== 0) return dateCmp;
         return a.clientName.localeCompare(b.clientName, "pt-BR");
       });
 
@@ -613,6 +636,11 @@ function AssistenciaPage() {
         return a.region.localeCompare(b.region, "pt-BR");
       });
   }, [filtered, agendaTecnico]);
+
+  const cronogramaTotal = useMemo(
+    () => cronogramaGroups.reduce((n, g) => n + g.items.length, 0),
+    [cronogramaGroups],
+  );
 
   function isMySectorStage(stageIdx: number) {
     if (boot.user.isAdmin) return true;
@@ -929,7 +957,26 @@ function AssistenciaPage() {
     if (!opts?.fromCalendar) setCalSheetOpen(false);
     applyOsDetailState(os);
     try {
-      const full = await getOsFn({ data: { id: os.id } });
+      let full = await getOsFn({ data: { id: os.id } });
+      const needsGeo =
+        full &&
+        full.clientLat == null &&
+        Boolean(
+          (full.clientAddress && full.clientAddress.trim()) ||
+            (full.clientCep && full.clientCep.replace(/\D/g, "").length >= 8) ||
+            full.clientCode,
+        ) &&
+        !geoTriedOsIdsRef.current.has(full.id);
+      if (needsGeo && full) {
+        geoTriedOsIdsRef.current.add(full.id);
+        try {
+          full = await syncOsClientLocationFn({
+            data: { osId: full.id, fromOmie: Boolean(full.clientCode) },
+          });
+        } catch {
+          // best-effort
+        }
+      }
       if (full) {
         setOsList((prev) => {
           const idx = prev.findIndex((o) => o.id === full.id);
@@ -942,6 +989,45 @@ function AssistenciaPage() {
       }
     } catch {
       // lista parcial já cobre
+    }
+  }
+
+  function tecnicoProximidadeLabel(name: string) {
+    const row = tecnicosProximos.find(
+      (t) => t.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (!row) return name;
+    if (row.distanceKm != null) {
+      return `${name} · ${formatDistanceKm(row.distanceKm)}`;
+    }
+    if (row.hasGps && row.stale) return `${name} · GPS antigo`;
+    return `${name} · sem GPS`;
+  }
+
+  async function loadTecnicosProximos(
+    osId: number,
+    nextTeamId: number | "",
+    preferNome?: string,
+  ) {
+    setTecnicosProximosLoading(true);
+    try {
+      const res = await listTecnicosProximosFn({
+        data: {
+          osId,
+          teamId: nextTeamId === "" ? null : nextTeamId,
+        },
+      });
+      setTecnicosProximos(res.items);
+      const closest = res.items.find((t) => t.distanceKm != null && !t.stale);
+      if (preferNome && res.items.some((t) => t.name === preferNome)) {
+        setTecnicoNome(preferNome);
+      } else if (closest) {
+        setTecnicoNome(closest.name);
+      }
+    } catch {
+      setTecnicosProximos([]);
+    } finally {
+      setTecnicosProximosLoading(false);
     }
   }
 
@@ -975,8 +1061,11 @@ function AssistenciaPage() {
     setHoraEspecifica(Boolean(os.hora));
     const nextTeam = os.teamId ?? "";
     setTeamId(nextTeam);
-    setTecnicoNome(resolveTecnicoForTeam(nextTeam, os.tecnicoNome ?? ""));
+    const resolved = resolveTecnicoForTeam(nextTeam, os.tecnicoNome ?? "");
+    setTecnicoNome(resolved);
+    setTecnicosProximos([]);
     setSchedOpen(true);
+    void loadTecnicosProximos(os.id, nextTeam, resolved || undefined);
   }
 
   async function onOsCardCta(os: OsRow, cta: OsCardCta) {
@@ -1137,9 +1226,9 @@ function AssistenciaPage() {
                               setFeedback(
                                 next.distanceKm != null
                                   ? `Localização atualizada · ${formatDistanceKm(next.distanceKm)} da base`
-                                  : "Endereço atualizado (distância pendente — confira a base em Configurações).",
+                                  : "Endereço salvo, mas não achamos coords no mapa. Confira rua/número/CEP no Omie.",
                               );
-                              setFeedbackOk(true);
+                              setFeedbackOk(next.distanceKm != null);
                             })
                           }
                         >
@@ -3338,76 +3427,87 @@ function AssistenciaPage() {
 
             {agendaView === "cronograma" ? (
               <div className="space-y-md">
-                <PageSection>
+                <div>
                   <h2 className="text-title-md font-semibold text-on-surface">
-                    Cronograma por distância e região
+                    Roteiro de despacho
                   </h2>
                   <p className="text-label-md text-on-surface-variant">
-                    Ordem sugerida para despacho: regiões mais próximas da base primeiro; dentro de
-                    cada região, do mais perto ao mais longe.
+                    Só OS a agendar ou agendadas · {cronogramaTotal} no roteiro · região mais perto
+                    primeiro.
                   </p>
-                </PageSection>
+                </div>
                 {cronogramaGroups.length ? (
                   cronogramaGroups.map((group) => (
                     <section
                       key={group.region}
-                      className="rounded-xl border border-outline-variant bg-surface-container-lowest"
+                      className="overflow-hidden rounded-xl border border-outline-variant bg-white"
                     >
-                      <header className="flex flex-wrap items-center justify-between gap-sm border-b border-outline-variant px-md py-sm">
-                        <div>
-                          <h3 className="text-label-md font-bold uppercase tracking-wide text-on-surface">
+                      <header className="flex flex-wrap items-center justify-between gap-sm bg-neutral-900 px-md py-sm text-white">
+                        <div className="flex items-center gap-xs">
+                          <Icon name="location_on" className="text-[18px] text-amber-300" />
+                          <h3 className="text-label-md font-bold uppercase tracking-wide">
                             {group.region}
                           </h3>
-                          <p className="text-label-sm text-on-surface-variant">
-                            {group.items.length} OS
-                            {group.avgKm != null
-                              ? ` · média ${formatDistanceKm(group.avgKm)} da base`
-                              : " · sem distância calculada"}
-                          </p>
                         </div>
+                        <p className="text-label-sm text-white/75">
+                          {group.items.length} OS
+                          {group.avgKm != null
+                            ? ` · média ${formatDistanceKm(group.avgKm)}`
+                            : ""}
+                        </p>
                       </header>
                       <ol className="divide-y divide-outline-variant">
                         {group.items.map((os, idx) => (
                           <li
                             key={os.id}
-                            className="flex flex-wrap items-start justify-between gap-sm px-md py-sm"
+                            className="flex flex-wrap items-center gap-sm px-md py-sm hover:bg-surface-container-low"
                           >
+                            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-label-sm font-bold text-white">
+                              {idx + 1}
+                            </span>
                             <button
                               type="button"
                               className="min-w-0 flex-1 text-left"
                               onClick={() => void openDetail(os)}
                             >
                               <div className="flex flex-wrap items-center gap-xs">
-                                <span className="inline-flex size-6 items-center justify-center rounded-full bg-neutral-900 text-label-sm font-bold text-white">
-                                  {idx + 1}
-                                </span>
                                 <span className="font-semibold text-on-surface">
                                   {os.num} · {os.clientName}
                                 </span>
-                                <span className="rounded-full bg-surface-container px-xs py-2xs text-[10px] font-bold uppercase">
-                                  {osStageName(os.stage)}
+                                <span
+                                  className={cn(
+                                    "rounded-full px-xs py-2xs text-[10px] font-bold uppercase",
+                                    os.stage === 3
+                                      ? "bg-amber-100 text-amber-950"
+                                      : "bg-sky-100 text-sky-950",
+                                  )}
+                                >
+                                  {os.stage === 3 ? "A agendar" : "Agendada"}
                                 </span>
                               </div>
-                              <p className="mt-2xs text-label-sm text-on-surface-variant">
+                              <p className="mt-2xs line-clamp-1 text-label-sm text-on-surface-variant">
                                 {os.clientAddress || os.clientCity || "Endereço pendente"}
+                              </p>
+                              <p className="mt-2xs text-label-sm text-on-surface-variant">
                                 {os.agDate
-                                  ? ` · ${formatOsDateBr(os.agDate)}${os.periodo ? ` · ${os.periodo}` : ""}`
-                                  : " · aguardando agendamento"}
+                                  ? `${formatOsDateBr(os.agDate)}${os.periodo ? ` · ${os.periodo}` : ""}${os.hora ? ` · ${os.hora}` : ""}`
+                                  : "Sem data ainda"}
+                                {osResponsavelLabel(os)
+                                  ? ` · ${osResponsavelLabel(os)}`
+                                  : " · sem técnico"}
                               </p>
                             </button>
                             <div className="flex shrink-0 flex-col items-end gap-2xs">
                               <span className="rounded-full bg-amber-100 px-sm py-2xs text-label-sm font-semibold text-amber-950">
                                 {formatDistanceKm(os.distanceKm)}
                               </span>
-                              {os.stage === 3 || os.stage === 4 ? (
-                                <button
-                                  type="button"
-                                  className={btnOutline}
-                                  onClick={() => openSchedule(os)}
-                                >
-                                  {os.stage === 3 ? "Agendar" : "Reagendar"}
-                                </button>
-                              ) : null}
+                              <button
+                                type="button"
+                                className={btnOutline}
+                                onClick={() => openSchedule(os)}
+                              >
+                                {os.stage === 3 ? "Agendar" : "Reagendar"}
+                              </button>
                             </div>
                           </li>
                         ))}
@@ -3415,9 +3515,11 @@ function AssistenciaPage() {
                     </section>
                   ))
                 ) : (
-                  <p className="text-body-md text-on-surface-variant">
-                    Nenhuma OS em aguardando/agendado para montar o roteiro.
-                  </p>
+                  <PageSection>
+                    <p className="text-body-md text-on-surface-variant">
+                      Nenhuma OS aguardando agendamento ou agendada para montar o roteiro.
+                    </p>
+                  </PageSection>
                 )}
               </div>
             ) : null}
@@ -3530,7 +3632,9 @@ function AssistenciaPage() {
                   </p>
                 ) : null}
               </div>
-            ) : (
+            ) : null}
+
+            {agendaView === "calendario" ? (
               <div
                 className={cn(
                   "grid gap-md",
@@ -3600,7 +3704,7 @@ function AssistenciaPage() {
                   </aside>
                 ) : null}
               </div>
-            )}
+            ) : null}
           </div>
         ) : null}
 
@@ -4610,7 +4714,15 @@ function AssistenciaPage() {
                 onChange={(e) => {
                   const next = e.target.value ? Number(e.target.value) : "";
                   setTeamId(next);
-                  setTecnicoNome(resolveTecnicoForTeam(next, ""));
+                  const resolved = resolveTecnicoForTeam(next, "");
+                  setTecnicoNome(resolved);
+                  if (selected) {
+                    void loadTecnicosProximos(
+                      selected.id,
+                      next,
+                      resolved || undefined,
+                    );
+                  }
                 }}
                 className={softInputClass}
               >
@@ -4629,16 +4741,19 @@ function AssistenciaPage() {
 
             <label className={softFieldLabelClass}>
               Técnico / responsável (opcional)
-              {membersOfTeam(teamId).length > 0 ? (
+              {membersOfTeam(teamId).length > 0 || tecnicosProximos.length > 0 ? (
                 <select
                   value={tecnicoNome}
                   onChange={(e) => setTecnicoNome(e.target.value)}
                   className={softInputClass}
                 >
                   <option value="">Selecionar técnico da equipe</option>
-                  {membersOfTeam(teamId).map((m) => (
-                    <option key={m.id} value={m.name}>
-                      {m.name}
+                  {(membersOfTeam(teamId).length > 0
+                    ? membersOfTeam(teamId).map((m) => m.name)
+                    : tecnicosProximos.map((t) => t.name)
+                  ).map((name) => (
+                    <option key={name} value={name}>
+                      {tecnicoProximidadeLabel(name)}
                     </option>
                   ))}
                 </select>
@@ -4656,6 +4771,15 @@ function AssistenciaPage() {
                 />
               )}
             </label>
+            <p className="text-label-sm text-on-surface-variant">
+              {tecnicosProximosLoading
+                ? "Calculando proximidade dos técnicos…"
+                : selected?.clientLat == null
+                  ? "Sem coords do cliente ainda — proximidade indisponível."
+                  : tecnicosProximos.some((t) => t.distanceKm != null)
+                    ? "Ordenado pelo GPS do app (atualizado há menos de 45 min)."
+                    : "Nenhum técnico com GPS fresco no app SGO."}{" "}
+            </p>
           </SoftDialogBody>
 
           <SoftDialogFooter>

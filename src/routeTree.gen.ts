@@ -35,6 +35,7 @@ import { Route as DTokenRouteImport } from './routes/d.$token'
 import { Route as TerceirosTerceiroIdRouteImport } from './routes/terceiros_.$terceiroId'
 import { Route as ApiInteggriWebhookRouteImport } from './routes/api/integgri/webhook'
 import { Route as ApiMobileDeviceTokenRouteImport } from './routes/api/mobile/device-token'
+import { Route as ApiMobileLocationRouteImport } from './routes/api/mobile/location'
 import { Route as ApiMobileLoginRouteImport } from './routes/api/mobile/login'
 import { Route as ApiMobileLogoutRouteImport } from './routes/api/mobile/logout'
 import { Route as ApiMobileMeRouteImport } from './routes/api/mobile/me'
@@ -186,6 +187,11 @@ const ApiMobileDeviceTokenRoute = ApiMobileDeviceTokenRouteImport.update({
   path: '/api/mobile/device-token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMobileLocationRoute = ApiMobileLocationRouteImport.update({
+  id: '/api/mobile/location',
+  path: '/api/mobile/location',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiMobileLoginRoute = ApiMobileLoginRouteImport.update({
   id: '/api/mobile/login',
   path: '/api/mobile/login',
@@ -317,6 +323,7 @@ export interface FileRoutesByFullPath {
   '/terceiros/$terceiroId': typeof TerceirosTerceiroIdRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
   '/api/mobile/device-token': typeof ApiMobileDeviceTokenRoute
+  '/api/mobile/location': typeof ApiMobileLocationRoute
   '/api/mobile/login': typeof ApiMobileLoginRoute
   '/api/mobile/logout': typeof ApiMobileLogoutRoute
   '/api/mobile/me': typeof ApiMobileMeRoute
@@ -365,6 +372,7 @@ export interface FileRoutesByTo {
   '/terceiros/$terceiroId': typeof TerceirosTerceiroIdRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
   '/api/mobile/device-token': typeof ApiMobileDeviceTokenRoute
+  '/api/mobile/location': typeof ApiMobileLocationRoute
   '/api/mobile/login': typeof ApiMobileLoginRoute
   '/api/mobile/logout': typeof ApiMobileLogoutRoute
   '/api/mobile/me': typeof ApiMobileMeRoute
@@ -414,6 +422,7 @@ export interface FileRoutesById {
   '/terceiros_/$terceiroId': typeof TerceirosTerceiroIdRoute
   '/api/integgri/webhook': typeof ApiInteggriWebhookRoute
   '/api/mobile/device-token': typeof ApiMobileDeviceTokenRoute
+  '/api/mobile/location': typeof ApiMobileLocationRoute
   '/api/mobile/login': typeof ApiMobileLoginRoute
   '/api/mobile/logout': typeof ApiMobileLogoutRoute
   '/api/mobile/me': typeof ApiMobileMeRoute
@@ -464,6 +473,7 @@ export interface FileRouteTypes {
     | '/terceiros/$terceiroId'
     | '/api/integgri/webhook'
     | '/api/mobile/device-token'
+    | '/api/mobile/location'
     | '/api/mobile/login'
     | '/api/mobile/logout'
     | '/api/mobile/me'
@@ -512,6 +522,7 @@ export interface FileRouteTypes {
     | '/terceiros/$terceiroId'
     | '/api/integgri/webhook'
     | '/api/mobile/device-token'
+    | '/api/mobile/location'
     | '/api/mobile/login'
     | '/api/mobile/logout'
     | '/api/mobile/me'
@@ -560,6 +571,7 @@ export interface FileRouteTypes {
     | '/terceiros_/$terceiroId'
     | '/api/integgri/webhook'
     | '/api/mobile/device-token'
+    | '/api/mobile/location'
     | '/api/mobile/login'
     | '/api/mobile/logout'
     | '/api/mobile/me'
@@ -609,6 +621,7 @@ export interface RootRouteChildren {
   TerceirosTerceiroIdRoute: typeof TerceirosTerceiroIdRoute
   ApiInteggriWebhookRoute: typeof ApiInteggriWebhookRoute
   ApiMobileDeviceTokenRoute: typeof ApiMobileDeviceTokenRoute
+  ApiMobileLocationRoute: typeof ApiMobileLocationRoute
   ApiMobileLoginRoute: typeof ApiMobileLoginRoute
   ApiMobileLogoutRoute: typeof ApiMobileLogoutRoute
   ApiMobileMeRoute: typeof ApiMobileMeRoute
@@ -815,6 +828,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMobileDeviceTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mobile/location': {
+      id: '/api/mobile/location'
+      path: '/api/mobile/location'
+      fullPath: '/api/mobile/location'
+      preLoaderRoute: typeof ApiMobileLocationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/mobile/login': {
       id: '/api/mobile/login'
       path: '/api/mobile/login'
@@ -985,6 +1005,7 @@ const rootRouteChildren: RootRouteChildren = {
   TerceirosTerceiroIdRoute: TerceirosTerceiroIdRoute,
   ApiInteggriWebhookRoute: ApiInteggriWebhookRoute,
   ApiMobileDeviceTokenRoute: ApiMobileDeviceTokenRoute,
+  ApiMobileLocationRoute: ApiMobileLocationRoute,
   ApiMobileLoginRoute: ApiMobileLoginRoute,
   ApiMobileLogoutRoute: ApiMobileLogoutRoute,
   ApiMobileMeRoute: ApiMobileMeRoute,

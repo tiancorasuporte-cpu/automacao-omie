@@ -200,3 +200,34 @@ export async function setUserPasswordByAdmin(id: number, password: string) {
   `;
   return findUserById(id, { includeInactive: true });
 }
+
+export async function updateTecnicoLocation(
+  userId: number,
+  input: { lat: number; lng: number; at?: Date | string | null },
+) {
+  const lat = Number(input.lat);
+  const lng = Number(input.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new Error("Coordenadas inválidas.");
+  }
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    throw new Error("Coordenadas fora do intervalo.");
+  }
+  const at =
+    input.at != null && input.at !== ""
+      ? new Date(input.at)
+      : new Date();
+  if (Number.isNaN(at.getTime())) {
+    throw new Error("Timestamp de localização inválido.");
+  }
+  const db = await getDb();
+  await db`
+    update users
+    set last_lat = ${lat},
+        last_lng = ${lng},
+        last_location_at = ${at},
+        updated_at = now()
+    where id = ${userId}
+  `;
+  return { lat, lng, at: at.toISOString() };
+}

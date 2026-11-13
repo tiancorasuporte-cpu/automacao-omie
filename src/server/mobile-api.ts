@@ -1,4 +1,4 @@
-import { authenticateUser } from "@/db/users";
+import { authenticateUser, updateTecnicoLocation } from "@/db/users";
 import {
   createMobileSession,
   revokeMobileSession,
@@ -383,6 +383,44 @@ export async function handleMobileDeviceToken(request: Request) {
     platform: body.platform,
   });
   return jsonOk({ ok: true });
+}
+
+export async function handleMobileLocation(request: Request) {
+  await ensureSchema();
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const body = await readJsonBody<{
+    lat?: number;
+    lng?: number;
+    accuracy?: number;
+    at?: string;
+  }>(request);
+  const lat = Number(body?.lat);
+  const lng = Number(body?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return jsonError("lat e lng obrigatórios.");
+  }
+  try {
+    const loc = await updateTecnicoLocation(auth.user.id, {
+      lat,
+      lng,
+      at: body?.at ?? null,
+    });
+    return jsonOk({
+      ok: true,
+      location: {
+        ...loc,
+        accuracy:
+          body?.accuracy != null && Number.isFinite(Number(body.accuracy))
+            ? Number(body.accuracy)
+            : null,
+      },
+    });
+  } catch (error) {
+    return jsonError(
+      error instanceof Error ? error.message : "Falha ao gravar localização.",
+    );
+  }
 }
 
 export async function handleMobileListOs(request: Request) {

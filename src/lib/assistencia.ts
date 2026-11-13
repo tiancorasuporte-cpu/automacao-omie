@@ -5,6 +5,7 @@ import {
   acceptConference,
   addOsItem,
   advanceOs,
+  backfillOsClientLocations,
   checkInOs,
   checkOutOs,
   createOs,
@@ -18,6 +19,7 @@ import {
   listAssistTeams,
   listMaterialPendencias,
   listOs,
+  listTecnicosProximos,
   saveCompanyLocation,
   syncOsClientLocation,
   markExecutedManual,
@@ -345,6 +347,41 @@ export const syncOsClientLocationFn = createServerFn({ method: "POST" })
     return os;
   });
 
+export const listTecnicosProximosFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.coerce.number().int().positive(),
+        teamId: z.coerce.number().int().positive().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    return listTecnicosProximos({
+      osId: data.osId,
+      teamId: data.teamId ?? null,
+    });
+  });
+
+export const backfillOsClientLocationsFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        limit: z.number().int().min(1).max(20).optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (!isAdmin(user) && !canOsWorkflow(user, "assistencia")) {
+      throw new Error("Sem permissão.");
+    }
+    return backfillOsClientLocations(data.limit ?? 10);
+  });
+
 export const advanceOsFn = createServerFn({ method: "POST" })
   .validator((input) => z.object({ osId: z.number().int().positive() }).parse(input ?? {}))
   .handler(async ({ data }) => {
@@ -422,11 +459,12 @@ export const scheduleOsFn = createServerFn({ method: "POST" })
       isAdmin: roles.isAdmin,
       canRole: roles.canRole,
     });
-    if (os && data.tecnicoNome?.trim()) {
+    if (os && (data.tecnicoNome?.trim() || data.teamId)) {
       try {
         const { notifyTecnicoOsAssigned } = await import("@/server/mobile-push");
         await notifyTecnicoOsAssigned({
           tecnicoNome: data.tecnicoNome,
+          teamId: data.teamId ?? os.teamId,
           osId: os.id,
           osNum: os.num,
           clientName: os.clientName,

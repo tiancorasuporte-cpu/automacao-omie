@@ -823,16 +823,21 @@ export async function syncOsClientLocation(
   }
 
   const region = buildRegionLabel({ city, uf });
-  let lat = os.clientLat;
-  let lng = os.clientLng;
-  const geo = await geocodeBrazilAddress({ address, city, uf, cep });
-  if (geo) {
-    lat = geo.lat;
-    lng = geo.lng;
-  }
+  const company = await getCompanyLocation();
+  const near =
+    companyHasCoords(company) ? { lat: company.lat, lng: company.lng } : null;
+
+  const geo = await geocodeBrazilAddress({ address, city, uf, cep, near });
+  // Rua/bairro = ideal. CEP = ok entre cidades (evita só o centro genérico sem CEP).
+  const usable =
+    geo &&
+    (geo.precision === "street" ||
+      geo.precision === "neighborhood" ||
+      geo.precision === "cep");
+  const lat = usable ? geo!.lat : null;
+  const lng = usable ? geo!.lng : null;
 
   let distanceKm: number | null = null;
-  const company = await getCompanyLocation();
   if (companyHasCoords(company) && lat != null && lng != null) {
     distanceKm = Math.round(haversineKm(company, { lat, lng }) * 100) / 100;
   }
@@ -1068,6 +1073,179 @@ export async function moveOsOnKanban(input: {
     );
   }
   return advanceOs(input);
+}
+
+const TECNICO_GPS_FRESH_MS = 45 * 60 * 1000;
+
+export type TecnicoProximo = {
+  userId: number | null;
+  name: string;
+  distanceKm: number | null;
+  locationAt: string | null;
+  stale: boolean;
+  hasGps: boolean;
+};
+
+export async function listTecnicosProximos(input: {
+  osId: number;
+  teamId?: number | null;
+}) {
+  const { haversineKm } = await import("@/lib/geo");
+  const os = await getOsById(input.osId);
+  if (!os) throw new Error("OS não encontrada.");
+
+  const clientLat = os.clientLat;
+  const clientLng = os.clientLng;
+  const hasClient =
+    clientLat != null &&
+    clientLng != null &&
+    Number.isFinite(clientLat) &&
+    Number.isFinite(clientLng);
+
+  const db = await getDb();
+  const teamId = input.teamId ?? null;
+
+  type LocRow = {
+    id: number | null;
+    name: string;
+    last_lat: number | string | null;
+    last_lng: number | string | null;
+    last_location_at: Date | string | null;
+  };
+
+  let rows: LocRow[];
+  if (teamId != null) {
+    rows = (await db`
+      select
+        coalesce(u.id, m.user_id) as id,
+        m.name as name,
+        u.last_lat,
+        u.last_lng,
+        u.last_location_at
+      from assist_team_members m
+      left join users u
+        on (
+          (m.user_id is not null and u.id = m.user_id)
+          or (m.user_id is null and lower(u.name) = lower(m.name) and coalesce(u.is_tecnico, false) = true)
+        )
+      where m.team_id = ${teamId}
+        and m.active = true
+      order by m.name asc
+    `) as LocRow[];
+  } else {
+    rows = (await db`
+      select
+        id,
+        name,
+        last_lat,
+        last_lng,
+        last_location_at
+      from users
+      where coalesce(is_tecnico, false) = true
+        and active = true
+      order by name asc
+    `) as LocRow[];
+  }
+
+  const now = Date.now();
+  const seen = new Set<string>();
+  const result: TecnicoProximo[] = [];
+
+  for (const row of rows) {
+    const name = String(row.name ?? "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    const lat =
+      row.last_lat == null || row.last_lat === ""
+        ? null
+        : Number(row.last_lat);
+    const lng =
+      row.last_lng == null || row.last_lng === ""
+        ? null
+        : Number(row.last_lng);
+    const locationAt =
+      row.last_location_at == null
+        ? null
+        : new Date(row.last_location_at).toISOString();
+    const hasGps =
+      lat != null &&
+      lng != null &&
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      locationAt != null;
+    const ageMs =
+      locationAt != null ? now - new Date(locationAt).getTime() : Number.POSITIVE_INFINITY;
+    const stale = !hasGps || ageMs > TECNICO_GPS_FRESH_MS;
+    let distanceKm: number | null = null;
+    if (hasClient && hasGps && !stale) {
+      distanceKm =
+        Math.round(
+          haversineKm(
+            { lat: clientLat!, lng: clientLng! },
+            { lat: lat!, lng: lng! },
+          ) * 100,
+        ) / 100;
+    }
+
+    result.push({
+      userId: row.id == null ? null : Number(row.id),
+      name,
+      distanceKm,
+      locationAt,
+      stale: Boolean(stale),
+      hasGps: Boolean(hasGps),
+    });
+  }
+
+  result.sort((a, b) => {
+    if (a.distanceKm != null && b.distanceKm != null) {
+      return a.distanceKm - b.distanceKm;
+    }
+    if (a.distanceKm != null) return -1;
+    if (b.distanceKm != null) return 1;
+    if (a.hasGps !== b.hasGps) return a.hasGps ? -1 : 1;
+    return a.name.localeCompare(b.name, "pt-BR");
+  });
+
+  return {
+    osId: os.id,
+    clientHasCoords: hasClient,
+    items: result,
+  };
+}
+
+export async function backfillOsClientLocations(limit = 10) {
+  const db = await getDb();
+  const rows = (await db`
+    select id, client_code
+    from assist_os
+    where stage < 7
+      and client_lat is null
+      and (
+        coalesce(nullif(trim(client_address), ''), null) is not null
+        or coalesce(nullif(regexp_replace(coalesce(client_cep, ''), '\\D', '', 'g'), ''), null) is not null
+        or client_code is not null
+      )
+    order by updated_at desc nulls last, id desc
+    limit ${Math.max(1, Math.min(limit, 20))}
+  `) as Array<{ id: number; client_code: number | string | null }>;
+
+  const updated: number[] = [];
+  for (const row of rows) {
+    const osId = num(row.id);
+    try {
+      const next = await syncOsClientLocation(osId, {
+        fromOmie: row.client_code != null,
+      });
+      if (next?.clientLat != null) updated.push(osId);
+    } catch {
+      // best-effort
+    }
+  }
+  return { attempted: rows.length, updated };
 }
 
 export async function scheduleOs(input: {
