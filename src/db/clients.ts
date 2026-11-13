@@ -21,8 +21,25 @@ export type OmieClientSearchResult = {
   nome: string;
   cnpjCpf: string | null;
   endereco: string | null;
+  cidade: string | null;
+  estado: string | null;
+  cep: string | null;
   contato: string | null;
 };
+
+/** Extrai cidade/UF/CEP de string formatada Omie ("… - Cidade/UF - CEP 00000-000"). */
+function parseEnderecoParts(endereco: string | null | undefined) {
+  const raw = String(endereco ?? "").trim();
+  if (!raw) return { cidade: null as string | null, estado: null as string | null, cep: null as string | null };
+  const cepMatch = raw.match(/CEP\s*(\d{5}-?\d{3})/i);
+  const cep = cepMatch?.[1]?.replace(/\D/g, "") ?? null;
+  const cidadeUf = raw.match(/-\s*([^/-]+)\s*\/\s*([A-Za-z]{2})\s*(?:-|CEP|$)/);
+  return {
+    cidade: cidadeUf?.[1]?.trim() || null,
+    estado: cidadeUf?.[2]?.trim().toUpperCase() || null,
+    cep,
+  };
+}
 
 type ClientRow = {
   id: number;
@@ -147,11 +164,15 @@ export async function searchOmieClientsLocal(input: {
 
   return rows.map((row) => {
     const client = toClient(row);
+    const parts = parseEnderecoParts(client.endereco);
     return {
       codigo: client.codigoCliente,
       nome: client.razaoSocial || client.nomeFantasia || `Cliente ${client.codigoCliente}`,
       cnpjCpf: client.cnpjCpf,
       endereco: client.endereco,
+      cidade: parts.cidade,
+      estado: parts.estado,
+      cep: parts.cep,
       contato: client.contato,
     };
   });

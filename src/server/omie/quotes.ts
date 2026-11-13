@@ -96,6 +96,9 @@ export async function searchOmieClients(app: OmieAppConfig, query: string) {
     nome: string;
     cnpjCpf: string | null;
     endereco: string | null;
+    cidade: string | null;
+    estado: string | null;
+    cep: string | null;
     contato: string | null;
   }> = [];
   const seen = new Set<number>();
@@ -119,6 +122,9 @@ export async function searchOmieClients(app: OmieAppConfig, query: string) {
           nome: client.razao_social || clientDisplayName(client) || `Cliente ${client.codigo_cliente_omie}`,
           cnpjCpf: client.cnpj_cpf,
           endereco: client.endereco,
+          cidade: client.cidade,
+          estado: client.estado,
+          cep: client.cep,
           contato: client.contato,
         });
       }

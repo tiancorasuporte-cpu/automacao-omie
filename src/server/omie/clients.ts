@@ -14,6 +14,9 @@ export type ClienteResumo = {
   telefone2_numero: string;
   celular: string;
   endereco: string | null;
+  cidade: string | null;
+  estado: string | null;
+  cep: string | null;
   contato: string | null;
 };
 
@@ -53,6 +56,10 @@ export function normalizeCliente(raw: Record<string, unknown>, fallbackCode?: nu
   const razaoSocial = String(root["razao_social"] ?? root["cRazaoSocial"] ?? nomeFantasia).trim();
   const cnpjCpf = String(root["cnpj_cpf"] ?? root["cnpj"] ?? root["cpf_cnpj"] ?? "").trim() || null;
 
+  const cidade = text(root["cidade"]) || null;
+  const estado = text(root["estado"]).toUpperCase().slice(0, 2) || null;
+  const cepDigits = text(root["cep"]).replace(/\D/g, "").slice(0, 8);
+
   return {
     codigo_cliente_omie: code,
     razao_social: razaoSocial,
@@ -64,6 +71,9 @@ export function normalizeCliente(raw: Record<string, unknown>, fallbackCode?: nu
     telefone2_numero: String(root["telefone2_numero"] ?? ""),
     celular: String(root["celular"] ?? root["telefone_celular"] ?? root["fone"] ?? root["cTel"] ?? ""),
     endereco: formatClienteEndereco(root),
+    cidade,
+    estado,
+    cep: cepDigits || null,
     contato: text(root["contato"]) || null,
   };
 }

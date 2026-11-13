@@ -1,9 +1,13 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
 import { PageTitle } from "@/components/PageChrome";
+import {
+  getCompanyLocationFn,
+  saveCompanyLocationFn,
+} from "@/lib/assistencia";
 import {
   getNotificationSettingsFn,
   getOmieAppsFn,
@@ -16,6 +20,10 @@ import {
 } from "@/lib/groq-settings";
 import { getWahaSettingsFn, saveWahaSettingsFn, testWahaFn, registerWahaWebhookFn, restartWahaBotFn, stopWahaBotFn } from "@/lib/waha";
 import { getInteggriSettingsFn, saveInteggriSettingsFn, testInteggriFn } from "@/lib/integgri";
+import {
+  companyHasCoords,
+  type CompanyLocation,
+} from "@/lib/geo";
 import { isSuperadmin, requireAdmin } from "@/lib/require-auth";
 import { APP_NAME } from "@/lib/brand";
 import { Route as RootRoute } from "@/routes/__root";
@@ -23,14 +31,16 @@ import { Route as RootRoute } from "@/routes/__root";
 export const Route = createFileRoute("/settings")({
   beforeLoad: requireAdmin,
   loader: async () => {
-    const [waha, integgri, notifications, apps, groq] = await Promise.all([
-      getWahaSettingsFn(),
-      getInteggriSettingsFn(),
-      getNotificationSettingsFn(),
-      getOmieAppsFn(),
-      getGroqSettingsFn().catch(() => null),
-    ]);
-    return { waha, integgri, notifications, apps, groq };
+    const [waha, integgri, notifications, apps, groq, companyLocation] =
+      await Promise.all([
+        getWahaSettingsFn(),
+        getInteggriSettingsFn(),
+        getNotificationSettingsFn(),
+        getOmieAppsFn(),
+        getGroqSettingsFn().catch(() => null),
+        getCompanyLocationFn(),
+      ]);
+    return { waha, integgri, notifications, apps, groq, companyLocation };
   },
   head: () => ({
     meta: [{ title: `Configurações — ${APP_NAME}` }],
@@ -39,7 +49,8 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPage() {
-  const { waha, integgri, notifications, apps, groq } = Route.useLoaderData();
+  const { waha, integgri, notifications, apps, groq, companyLocation } =
+    Route.useLoaderData();
   const { user } = RootRoute.useRouteContext();
   const router = useRouter();
 
@@ -49,7 +60,12 @@ function SettingsPage() {
         <div className="mx-auto max-w-3xl space-y-lg">
           <PageTitle
             title="Configurações"
-            subtitle="WAHA, Integgri Chat, alertas, Groq e apps Omie do .env."
+            subtitle="Base da empresa, WAHA, Integgri Chat, alertas, Groq e apps Omie."
+          />
+
+          <CompanyLocationSettings
+            initial={companyLocation}
+            onSaved={() => router.invalidate()}
           />
 
           <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
@@ -87,6 +103,144 @@ function SettingsPage() {
         </div>
       </main>
     </AppShell>
+  );
+}
+
+function CompanyLocationSettings({
+  initial,
+  onSaved,
+}: {
+  initial: CompanyLocation;
+  onSaved: () => void;
+}) {
+  const [draft, setDraft] = useState(initial);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(initial);
+  }, [initial]);
+
+  return (
+    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+      <h3 className="mb-sm flex items-center gap-xs text-title-lg text-primary">
+        <Icon name="location_on" className="text-secondary" />
+        Localização da empresa (base)
+      </h3>
+      <p className="mb-md text-body-md text-on-surface-variant">
+        Usada na Assistência para calcular a distância até o cliente e ordenar o cronograma de
+        técnicos por região.
+      </p>
+      <form
+        className="space-y-md"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setPending(true);
+          setMessage(null);
+          try {
+            const next = await saveCompanyLocationFn({
+              data: {
+                label: draft.label,
+                address: draft.address,
+                city: draft.city,
+                uf: draft.uf,
+                cep: draft.cep,
+                geocode: true,
+              },
+            });
+            setDraft(next);
+            setMessage(
+              next.lat != null
+                ? `Base salva · ${next.lat.toFixed(5)}, ${next.lng?.toFixed(5)}`
+                : "Base salva, mas não foi possível geocodificar. Confira CEP/endereço.",
+            );
+            onSaved();
+          } catch (error) {
+            setMessage(
+              error instanceof Error ? error.message : "Falha ao salvar a base.",
+            );
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        <div className="grid gap-md sm:grid-cols-2">
+          <label className="flex flex-col gap-2xs text-label-md text-on-surface-variant">
+            Nome da base
+            <input
+              value={draft.label}
+              onChange={(e) => setDraft((prev) => ({ ...prev, label: e.target.value }))}
+              className="rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50"
+            />
+          </label>
+          <label className="flex flex-col gap-2xs text-label-md text-on-surface-variant">
+            CEP
+            <input
+              value={draft.cep}
+              onChange={(e) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  cep: e.target.value.replace(/\D/g, "").slice(0, 8),
+                }))
+              }
+              placeholder="00000000"
+              className="rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50"
+            />
+          </label>
+          <label className="flex flex-col gap-2xs text-label-md text-on-surface-variant sm:col-span-2">
+            Endereço
+            <input
+              value={draft.address}
+              onChange={(e) => setDraft((prev) => ({ ...prev, address: e.target.value }))}
+              className="rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50"
+            />
+          </label>
+          <label className="flex flex-col gap-2xs text-label-md text-on-surface-variant">
+            Cidade
+            <input
+              value={draft.city}
+              onChange={(e) => setDraft((prev) => ({ ...prev, city: e.target.value }))}
+              className="rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50"
+            />
+          </label>
+          <label className="flex flex-col gap-2xs text-label-md text-on-surface-variant">
+            UF
+            <input
+              value={draft.uf}
+              onChange={(e) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  uf: e.target.value.toUpperCase().slice(0, 2),
+                }))
+              }
+              maxLength={2}
+              className="rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50"
+            />
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-sm">
+          <button
+            type="submit"
+            disabled={pending}
+            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+          >
+            {pending ? "Salvando…" : "Salvar e geocodificar base"}
+          </button>
+          {companyHasCoords(draft) ? (
+            <span className="text-label-sm text-emerald-800">
+              Ativa: {draft.lat!.toFixed(5)}, {draft.lng!.toFixed(5)}
+            </span>
+          ) : (
+            <span className="text-label-sm text-amber-900">
+              Sem coordenadas ainda — salve com CEP válido.
+            </span>
+          )}
+        </div>
+        {message ? (
+          <p className="text-label-md text-on-surface-variant">{message}</p>
+        ) : null}
+      </form>
+    </section>
   );
 }
 

@@ -10,6 +10,7 @@ import {
   createOs,
   deleteOs,
   finishVisita,
+  getCompanyLocation,
   pauseOs,
   resumeOs,
   getOsById,
@@ -17,6 +18,8 @@ import {
   listAssistTeams,
   listMaterialPendencias,
   listOs,
+  saveCompanyLocation,
+  syncOsClientLocation,
   markExecutedManual,
   markMaterialDivergence,
   moveOsOnKanban,
@@ -99,13 +102,15 @@ export const getAssistenciaBootstrapFn = createServerFn({ method: "GET" }).handl
   const { user } = await auth();
   await boot();
   const { listProblemTypes, listChecklists } = await import("@/db/assistencia-checklists");
-  const [osList, teams, materialPendencias, problemTypes, checklists] = await Promise.all([
-    listOs(),
-    listAssistTeams(true),
-    listMaterialPendencias(),
-    listProblemTypes(),
-    listChecklists(),
-  ]);
+  const [osList, teams, materialPendencias, problemTypes, checklists, companyLocation] =
+    await Promise.all([
+      listOs(),
+      listAssistTeams(true),
+      listMaterialPendencias(),
+      listProblemTypes(),
+      listChecklists(),
+      getCompanyLocation(),
+    ]);
   const roles = roleFns(user);
   const { listOmieApps, requireOrcamentosOmieApp } = await import("@/server/omie/client");
   const apps = listOmieApps().map((a) => ({ id: a.id, name: a.name }));
@@ -141,6 +146,7 @@ export const getAssistenciaBootstrapFn = createServerFn({ method: "GET" }).handl
     materialPendencias,
     problemTypes,
     checklists,
+    companyLocation,
   };
 });
 
@@ -241,6 +247,8 @@ export const createOsFn = createServerFn({ method: "POST" })
         clientName: z.string().min(1),
         clientCity: z.string().optional().nullable(),
         clientAddress: z.string().optional().nullable(),
+        clientUf: z.string().optional().nullable(),
+        clientCep: z.string().optional().nullable(),
         omieAppId: z.string().optional().nullable(),
         clientCode: z.number().optional().nullable(),
         servico: z.string().optional(),
@@ -273,6 +281,8 @@ export const createOsFn = createServerFn({ method: "POST" })
       clientName: data.clientName,
       clientCity: data.clientCity,
       clientAddress: data.clientAddress,
+      clientUf: data.clientUf,
+      clientCep: data.clientCep,
       omieAppId: data.omieAppId,
       clientCode: data.clientCode,
       servico: data.servico,
@@ -283,6 +293,56 @@ export const createOsFn = createServerFn({ method: "POST" })
       createdBy: user.id,
       createdByName: user.name,
     });
+  });
+
+export const getCompanyLocationFn = createServerFn({ method: "GET" }).handler(async () => {
+  await auth();
+  await boot();
+  return getCompanyLocation();
+});
+
+export const saveCompanyLocationFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        label: z.string().trim().max(120).optional(),
+        address: z.string().trim().max(400).optional(),
+        city: z.string().trim().max(120).optional(),
+        uf: z.string().trim().max(2).optional(),
+        cep: z.string().trim().max(12).optional(),
+        lat: z.number().nullable().optional(),
+        lng: z.number().nullable().optional(),
+        geocode: z.boolean().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (!isAdmin(user)) {
+      throw new Error("Somente administradores podem salvar a base da empresa.");
+    }
+    return saveCompanyLocation(data);
+  });
+
+export const syncOsClientLocationFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        fromOmie: z.boolean().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    if (!isAdmin(user) && !canOsWorkflow(user, "assistencia")) {
+      throw new Error("Sem permissão.");
+    }
+    const os = await syncOsClientLocation(data.osId, { fromOmie: data.fromOmie !== false });
+    if (!os) throw new Error("OS não encontrada.");
+    return os;
   });
 
 export const advanceOsFn = createServerFn({ method: "POST" })

@@ -1527,6 +1527,35 @@ export async function ensureSchema() {
     );
   }
 
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "client_uf"))) {
+    await sql.unsafe("alter table assist_os add column client_uf varchar(2)");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "client_cep"))) {
+    await sql.unsafe("alter table assist_os add column client_cep varchar(12)");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "client_lat"))) {
+    await sql.unsafe("alter table assist_os add column client_lat numeric(10, 7)");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "client_lng"))) {
+    await sql.unsafe("alter table assist_os add column client_lng numeric(10, 7)");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "client_region"))) {
+    await sql.unsafe("alter table assist_os add column client_region varchar(160)");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "distance_km"))) {
+    await sql.unsafe("alter table assist_os add column distance_km numeric(10, 2)");
+  }
+  if (!(await indexExists("assist_os_distance_idx"))) {
+    await sql.unsafe(
+      "create index assist_os_distance_idx on assist_os (distance_km) where distance_km is not null",
+    );
+  }
+  if (!(await indexExists("assist_os_region_idx"))) {
+    await sql.unsafe(
+      "create index assist_os_region_idx on assist_os (client_region) where client_region is not null",
+    );
+  }
+
   if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "problem_type_id"))) {
     await sql.unsafe(
       "alter table assist_os add column problem_type_id integer references assist_problem_types(id) on delete set null",

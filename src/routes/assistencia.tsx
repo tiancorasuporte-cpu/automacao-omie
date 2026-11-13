@@ -65,6 +65,7 @@ import {
   searchQuotesFn,
   startExecOsFn,
   submitConferenceFn,
+  syncOsClientLocationFn,
   updateOsItemFn,
 } from "@/lib/assistencia";
 import { notifyComprasUnreadChanged } from "@/lib/compras";
@@ -92,6 +93,11 @@ import {
   resolveDatePreset,
   type DatePreset,
 } from "@/lib/date-filters";
+import {
+  companyHasCoords,
+  formatDistanceKm,
+  type CompanyLocation,
+} from "@/lib/geo";
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 
@@ -124,7 +130,7 @@ export const Route = createFileRoute("/assistencia")({
 
 type OsRow = Awaited<ReturnType<typeof listOsFn>>[number];
 
-type AgendaView = "lista" | "calendario";
+type AgendaView = "lista" | "calendario" | "cronograma";
 type KanbanColFilter = { name: string; dateFrom: string; dateTo: string };
 
 function emptyKanbanFilters(): Record<number, KanbanColFilter> {
@@ -305,6 +311,10 @@ function AssistenciaPage() {
   }, [boot.osList]);
 
   useEffect(() => {
+    if (boot.companyLocation) setCompanyLocation(boot.companyLocation);
+  }, [boot.companyLocation]);
+
+  useEffect(() => {
     void listOsFn({ data: {} }).then(setOsList).catch(() => undefined);
     const onVis = () => {
       if (document.visibilityState === "visible") {
@@ -334,11 +344,28 @@ function AssistenciaPage() {
       nome: string;
       cnpjCpf: string | null;
       endereco: string | null;
+      cidade: string | null;
+      estado: string | null;
+      cep: string | null;
       contato: string | null;
     }>
   >([]);
   const [searchingClients, setSearchingClients] = useState(false);
   const [clientCity, setClientCity] = useState("");
+  const [clientAddress, setClientAddress] = useState("");
+  const [clientUf, setClientUf] = useState("");
+  const [clientCep, setClientCep] = useState("");
+  const [companyLocation, setCompanyLocation] = useState<CompanyLocation>(
+    boot.companyLocation ?? {
+      label: "Base Âncora",
+      address: "",
+      city: "",
+      uf: "",
+      cep: "",
+      lat: null,
+      lng: null,
+    },
+  );
   const [servico, setServico] = useState("");
   const [quoteNumero, setQuoteNumero] = useState("");
   const [quoteId, setQuoteId] = useState<number | null>(null);
@@ -540,6 +567,52 @@ function AssistenciaPage() {
 
   /** Sem pendentes na agenda — só entram OS agendadas. */
   const agendaPendingItems = useMemo(() => [], []);
+
+  /** Cronograma estratégico: aguardando agendamento + agendadas, por região e distância. */
+  const cronogramaGroups = useMemo(() => {
+    const tecQ = agendaTecnico.trim().toLowerCase();
+    const rows = filtered
+      .filter((o) => o.stage >= 3 && o.stage < 7)
+      .filter((o) => {
+        if (!tecQ) return true;
+        const tec = (o.tecnicoNome ?? "").trim().toLowerCase();
+        const team = (o.teamName ?? "").trim().toLowerCase();
+        return tec === tecQ || tec.includes(tecQ) || team.includes(tecQ);
+      })
+      .slice()
+      .sort((a, b) => {
+        const da = a.distanceKm == null ? Number.POSITIVE_INFINITY : a.distanceKm;
+        const db = b.distanceKm == null ? Number.POSITIVE_INFINITY : b.distanceKm;
+        if (da !== db) return da - db;
+        return a.clientName.localeCompare(b.clientName, "pt-BR");
+      });
+
+    const map = new Map<string, OsRow[]>();
+    for (const os of rows) {
+      const key =
+        os.clientRegion?.trim() ||
+        [os.clientCity, os.clientUf].filter(Boolean).join("/") ||
+        "Sem região";
+      const list = map.get(key) ?? [];
+      list.push(os);
+      map.set(key, list);
+    }
+    return [...map.entries()]
+      .map(([region, items]) => {
+        const withDist = items.filter((i) => i.distanceKm != null);
+        const avg =
+          withDist.length > 0
+            ? withDist.reduce((s, i) => s + (i.distanceKm ?? 0), 0) / withDist.length
+            : null;
+        return { region, items, avgKm: avg };
+      })
+      .sort((a, b) => {
+        const aa = a.avgKm == null ? Number.POSITIVE_INFINITY : a.avgKm;
+        const bb = b.avgKm == null ? Number.POSITIVE_INFINITY : b.avgKm;
+        if (aa !== bb) return aa - bb;
+        return a.region.localeCompare(b.region, "pt-BR");
+      });
+  }, [filtered, agendaTecnico]);
 
   function isMySectorStage(stageIdx: number) {
     if (boot.user.isAdmin) return true;
@@ -1000,7 +1073,21 @@ function AssistenciaPage() {
             )}
             <span>{osResponsavelLabel(os) ?? "Sem responsável"}</span>
           </div>
+          {(os.clientAddress || os.clientCity || os.distanceKm != null) && (
+            <div className="flex items-center gap-xs">
+              <Icon name="location_on" className="text-[15px]" />
+              <span>
+                {os.clientRegion || os.clientCity || "Local"}
+                {os.distanceKm != null ? ` · ${formatDistanceKm(os.distanceKm)} da base` : ""}
+              </span>
+            </div>
+          )}
         </div>
+        {os.clientAddress ? (
+          <p className="mt-2xs line-clamp-2 text-label-sm text-on-surface-variant">
+            {os.clientAddress}
+          </p>
+        ) : null}
         {!opts?.hideItemList && os.items.length ? (
           <ul className="mt-sm space-y-xs border-t border-outline-variant pt-sm text-label-md text-on-surface">
             {os.items.map((it) => (
@@ -1034,6 +1121,32 @@ function AssistenciaPage() {
                   <div className="flex flex-wrap items-start justify-between gap-sm">
                     <div className="min-w-0 flex-1">
                       {renderOsSummaryCard(selected, { hideItemList: true })}
+                      <div className="mt-sm flex flex-wrap gap-xs">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className={btnOutline}
+                          onClick={() =>
+                            void run(async () => {
+                              const next = await syncOsClientLocationFn({
+                                data: { osId: selected.id, fromOmie: true },
+                              });
+                              setOsList((prev) =>
+                                prev.map((o) => (o.id === next.id ? next : o)),
+                              );
+                              setFeedback(
+                                next.distanceKm != null
+                                  ? `Localização atualizada · ${formatDistanceKm(next.distanceKm)} da base`
+                                  : "Endereço atualizado (distância pendente — confira a base em Configurações).",
+                              );
+                              setFeedbackOk(true);
+                            })
+                          }
+                        >
+                          <Icon name="my_location" className="text-[16px]" />
+                          Atualizar localização Omie
+                        </button>
+                      </div>
                     </div>
                     <button
                       type="button"
@@ -2474,14 +2587,8 @@ function AssistenciaPage() {
     <AppShell
       mobileTitle="Assistência"
       searchPlaceholder="Buscar OS, cliente, orçamento..."
-      fullHeight={tab === "kanban"}
     >
-      <div
-        className={cn(
-          "flex min-h-0 flex-1 flex-col gap-md px-margin-mobile py-md md:px-margin-desktop md:py-lg",
-          tab === "kanban" && "overflow-hidden",
-        )}
-      >
+      <div className="flex flex-col gap-md px-margin-mobile py-md md:px-margin-desktop md:py-lg">
         <PageTitle
           title="Assistência"
           subtitle="Quadro de O.S, agenda, conferência e relatório."
@@ -2818,7 +2925,7 @@ function AssistenciaPage() {
         ) : null}
 
         {tab === "kanban" ? (
-          <div className="flex min-h-0 flex-1 gap-md overflow-x-auto pb-md">
+          <div className="flex min-h-[70vh] gap-md overflow-x-auto pb-md">
             {OS_STAGES.map((stage) => {
               const mine = isMySectorStage(stage.idx);
               const style = osKanbanColumnStyle(mine);
@@ -2847,7 +2954,7 @@ function AssistenciaPage() {
                 <div
                   key={stage.idx}
                   className={cn(
-                    "flex h-full min-h-0 min-w-[15.5rem] flex-1 flex-col overflow-hidden rounded-2xl border shadow-sm transition",
+                    "flex max-h-[75vh] min-h-[70vh] w-[min(22rem,88vw)] shrink-0 flex-col overflow-hidden rounded-2xl border shadow-sm transition",
                     style.column,
                     dropActive && "ring-2 ring-amber-500 ring-offset-2",
                   )}
@@ -3055,6 +3162,17 @@ function AssistenciaPage() {
                                 — {os.servico}
                               </div>
                             ) : null}
+                            {(os.clientRegion || os.distanceKm != null) && (
+                              <div className="mt-2xs flex items-center gap-xs text-label-sm text-on-surface-variant">
+                                <Icon name="location_on" className="text-[15px]" />
+                                <span>
+                                  {os.clientRegion || os.clientCity || "Local"}
+                                  {os.distanceKm != null
+                                    ? ` · ${formatDistanceKm(os.distanceKm)}`
+                                    : ""}
+                                </span>
+                              </div>
+                            )}
                             <div className="mt-sm flex flex-col gap-2xs text-label-sm text-on-surface-variant">
                               <div className="flex items-center gap-xs">
                                 <Icon
@@ -3170,13 +3288,19 @@ function AssistenciaPage() {
                 [
                   ["lista", "Lista"],
                   ["calendario", "Calendário"],
+                  ["cronograma", "Cronograma"],
                 ] as const
               ).map(([id, label]) => (
                 <button
                   key={id}
                   type="button"
                   onClick={() => setAgendaView(id)}
-                  className={cn(agendaView === id ? btnPrimary : btnOutline)}
+                  className={cn(
+                    "inline-flex items-center gap-xs rounded-lg px-sm py-xs text-label-md font-semibold",
+                    agendaView === id
+                      ? "bg-neutral-900 text-white"
+                      : "bg-surface text-on-surface-variant hover:bg-surface-container",
+                  )}
                 >
                   {label}
                 </button>
@@ -3205,7 +3329,98 @@ function AssistenciaPage() {
                   Limpar técnico
                 </button>
               ) : null}
+              {!companyHasCoords(companyLocation) ? (
+                <p className="text-label-sm text-amber-900">
+                  Defina a base da empresa em Configurações do sistema para calcular distâncias.
+                </p>
+              ) : null}
             </div>
+
+            {agendaView === "cronograma" ? (
+              <div className="space-y-md">
+                <PageSection>
+                  <h2 className="text-title-md font-semibold text-on-surface">
+                    Cronograma por distância e região
+                  </h2>
+                  <p className="text-label-md text-on-surface-variant">
+                    Ordem sugerida para despacho: regiões mais próximas da base primeiro; dentro de
+                    cada região, do mais perto ao mais longe.
+                  </p>
+                </PageSection>
+                {cronogramaGroups.length ? (
+                  cronogramaGroups.map((group) => (
+                    <section
+                      key={group.region}
+                      className="rounded-xl border border-outline-variant bg-surface-container-lowest"
+                    >
+                      <header className="flex flex-wrap items-center justify-between gap-sm border-b border-outline-variant px-md py-sm">
+                        <div>
+                          <h3 className="text-label-md font-bold uppercase tracking-wide text-on-surface">
+                            {group.region}
+                          </h3>
+                          <p className="text-label-sm text-on-surface-variant">
+                            {group.items.length} OS
+                            {group.avgKm != null
+                              ? ` · média ${formatDistanceKm(group.avgKm)} da base`
+                              : " · sem distância calculada"}
+                          </p>
+                        </div>
+                      </header>
+                      <ol className="divide-y divide-outline-variant">
+                        {group.items.map((os, idx) => (
+                          <li
+                            key={os.id}
+                            className="flex flex-wrap items-start justify-between gap-sm px-md py-sm"
+                          >
+                            <button
+                              type="button"
+                              className="min-w-0 flex-1 text-left"
+                              onClick={() => void openDetail(os)}
+                            >
+                              <div className="flex flex-wrap items-center gap-xs">
+                                <span className="inline-flex size-6 items-center justify-center rounded-full bg-neutral-900 text-label-sm font-bold text-white">
+                                  {idx + 1}
+                                </span>
+                                <span className="font-semibold text-on-surface">
+                                  {os.num} · {os.clientName}
+                                </span>
+                                <span className="rounded-full bg-surface-container px-xs py-2xs text-[10px] font-bold uppercase">
+                                  {osStageName(os.stage)}
+                                </span>
+                              </div>
+                              <p className="mt-2xs text-label-sm text-on-surface-variant">
+                                {os.clientAddress || os.clientCity || "Endereço pendente"}
+                                {os.agDate
+                                  ? ` · ${formatOsDateBr(os.agDate)}${os.periodo ? ` · ${os.periodo}` : ""}`
+                                  : " · aguardando agendamento"}
+                              </p>
+                            </button>
+                            <div className="flex shrink-0 flex-col items-end gap-2xs">
+                              <span className="rounded-full bg-amber-100 px-sm py-2xs text-label-sm font-semibold text-amber-950">
+                                {formatDistanceKm(os.distanceKm)}
+                              </span>
+                              {os.stage === 3 || os.stage === 4 ? (
+                                <button
+                                  type="button"
+                                  className={btnOutline}
+                                  onClick={() => openSchedule(os)}
+                                >
+                                  {os.stage === 3 ? "Agendar" : "Reagendar"}
+                                </button>
+                              ) : null}
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+                    </section>
+                  ))
+                ) : (
+                  <p className="text-body-md text-on-surface-variant">
+                    Nenhuma OS em aguardando/agendado para montar o roteiro.
+                  </p>
+                )}
+              </div>
+            ) : null}
 
             {agendaView === "lista" ? (
               <div className="grid gap-md sm:grid-cols-2 xl:grid-cols-3">
@@ -4180,12 +4395,18 @@ function AssistenciaPage() {
                                 cnpjCpf: client.cnpjCpf,
                               });
                               setClientQuery(client.nome);
+                              setClientCity(client.cidade ?? "");
+                              setClientAddress(client.endereco ?? "");
+                              setClientUf(client.estado ?? "");
+                              setClientCep(client.cep ?? "");
                               setClientResults([]);
                             }}
                           >
                             {client.nome}
                             <span className="ml-xs text-label-md text-on-surface-variant">
                               #{client.codigo}
+                              {client.cidade ? ` · ${client.cidade}` : ""}
+                              {client.estado ? `/${client.estado}` : ""}
                             </span>
                           </button>
                         </li>
@@ -4196,11 +4417,36 @@ function AssistenciaPage() {
               )}
             </div>
 
+            <label className="block text-label-md text-on-surface-variant sm:col-span-2">
+              Endereço (Omie)
+              <input
+                value={clientAddress}
+                onChange={(e) => setClientAddress(e.target.value)}
+                className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
+              />
+            </label>
             <label className="block text-label-md text-on-surface-variant">
               Cidade
               <input
                 value={clientCity}
                 onChange={(e) => setClientCity(e.target.value)}
+                className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
+              />
+            </label>
+            <label className="block text-label-md text-on-surface-variant">
+              UF
+              <input
+                value={clientUf}
+                onChange={(e) => setClientUf(e.target.value.toUpperCase().slice(0, 2))}
+                maxLength={2}
+                className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
+              />
+            </label>
+            <label className="block text-label-md text-on-surface-variant">
+              CEP
+              <input
+                value={clientCep}
+                onChange={(e) => setClientCep(e.target.value.replace(/\D/g, "").slice(0, 8))}
                 className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
               />
             </label>
@@ -4275,7 +4521,10 @@ function AssistenciaPage() {
                       clientName: selectedClient.nome,
                       clientCode: selectedClient.codigo > 0 ? selectedClient.codigo : null,
                       omieAppId: omieAppId || null,
-                      clientCity,
+                      clientCity: clientCity || null,
+                      clientAddress: clientAddress || null,
+                      clientUf: clientUf || null,
+                      clientCep: clientCep || null,
                       servico,
                       quoteId,
                       quoteNumero: quoteNumero || null,

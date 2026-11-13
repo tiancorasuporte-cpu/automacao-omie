@@ -102,6 +102,12 @@ export type AssistOs = {
   clientName: string;
   clientCity: string | null;
   clientAddress: string | null;
+  clientUf: string | null;
+  clientCep: string | null;
+  clientLat: number | null;
+  clientLng: number | null;
+  clientRegion: string | null;
+  distanceKm: number | null;
   servico: string;
   quoteId: number | null;
   quoteNumero: string | null;
@@ -211,6 +217,12 @@ function mapOs(row: Record<string, unknown>, items: AssistOsItem[] = []): Assist
     clientName: str(row["client_name"]),
     clientCity: nullableStr(row["client_city"]),
     clientAddress: nullableStr(row["client_address"]),
+    clientUf: nullableStr(row["client_uf"])?.toUpperCase().slice(0, 2) ?? null,
+    clientCep: nullableStr(row["client_cep"]),
+    clientLat: row["client_lat"] == null ? null : num(row["client_lat"]),
+    clientLng: row["client_lng"] == null ? null : num(row["client_lng"]),
+    clientRegion: nullableStr(row["client_region"]),
+    distanceKm: row["distance_km"] == null ? null : num(row["distance_km"]),
     servico: str(row["servico"]),
     quoteId: row["quote_id"] == null ? null : num(row["quote_id"]),
     quoteNumero: nullableStr(row["quote_numero"]),
@@ -546,6 +558,8 @@ export async function createOs(input: {
   clientName: string;
   clientCity?: string | null | undefined;
   clientAddress?: string | null | undefined;
+  clientUf?: string | null | undefined;
+  clientCep?: string | null | undefined;
   omieAppId?: string | null | undefined;
   clientCode?: number | null | undefined;
   servico?: string | undefined;
@@ -592,7 +606,7 @@ export async function createOs(input: {
   const [row] = (await db`
     insert into assist_os (
       num, tipo, subtipo, stage, omie_app_id, client_code, client_name, client_city,
-      client_address, servico, quote_id, quote_numero, ticket_id,
+      client_address, client_uf, client_cep, servico, quote_id, quote_numero, ticket_id,
       aprovado_por, aprovado_em, aprovacao_anexo_json,
       created_by, created_by_name, problem_type_id
     ) values (
@@ -605,6 +619,8 @@ export async function createOs(input: {
       ${input.clientName.trim()},
       ${nullableStr(input.clientCity)},
       ${nullableStr(input.clientAddress)},
+      ${nullableStr(input.clientUf)?.toUpperCase().slice(0, 2) ?? null},
+      ${nullableStr(input.clientCep)?.replace(/\D/g, "").slice(0, 8) ?? null},
       ${input.servico?.trim() ?? ""},
       ${input.quoteId ?? null},
       ${nullableStr(input.quoteNumero)},
@@ -620,6 +636,11 @@ export async function createOs(input: {
   `) as Array<{ id: number }>;
   if (!row) throw new Error("Falha ao criar OS.");
   const osId = num(row.id);
+  try {
+    await syncOsClientLocation(osId, { fromOmie: Boolean(input.clientCode) });
+  } catch {
+    // geocode best-effort
+  }
   const items = input.items ?? [];
   for (let i = 0; i < items.length; i++) {
     const it = items[i]!;
@@ -684,6 +705,152 @@ export async function createOs(input: {
     }
   }
 
+  return getOsById(osId);
+}
+
+const COMPANY_LOCATION_KEY = "assist.company_location";
+
+export async function getCompanyLocation() {
+  const { parseCompanyLocation } = await import("@/lib/geo");
+  return parseCompanyLocation(await getSetting(COMPANY_LOCATION_KEY));
+}
+
+export async function saveCompanyLocation(input: {
+  label?: string;
+  address?: string;
+  city?: string;
+  uf?: string;
+  cep?: string;
+  lat?: number | null;
+  lng?: number | null;
+  geocode?: boolean;
+}) {
+  const { parseCompanyLocation } = await import("@/lib/geo");
+  const current = parseCompanyLocation(await getSetting(COMPANY_LOCATION_KEY));
+  let next = {
+    ...current,
+    label: input.label?.trim() || current.label,
+    address: input.address != null ? input.address.trim() : current.address,
+    city: input.city != null ? input.city.trim() : current.city,
+    uf: input.uf != null ? input.uf.trim().toUpperCase().slice(0, 2) : current.uf,
+    cep:
+      input.cep != null
+        ? input.cep.replace(/\D/g, "").slice(0, 8)
+        : current.cep,
+    lat: input.lat !== undefined ? input.lat : current.lat,
+    lng: input.lng !== undefined ? input.lng : current.lng,
+  };
+
+  if (input.geocode !== false && (next.cep || next.address || next.city)) {
+    if (next.lat == null || next.lng == null || input.geocode === true) {
+      const { geocodeBrazilAddress } = await import("@/server/geo");
+      const geo = await geocodeBrazilAddress({
+        address: next.address,
+        city: next.city,
+        uf: next.uf,
+        cep: next.cep,
+      });
+      if (geo) {
+        next = { ...next, lat: geo.lat, lng: geo.lng };
+      }
+    }
+  }
+
+  await setSetting(COMPANY_LOCATION_KEY, JSON.stringify(next));
+  await recomputeOsDistancesFromCompany();
+  return next;
+}
+
+export async function recomputeOsDistancesFromCompany() {
+  const { companyHasCoords, haversineKm } = await import("@/lib/geo");
+  const company = await getCompanyLocation();
+  if (!companyHasCoords(company)) return 0;
+  const db = await getDb();
+  const rows = (await db`
+    select id, client_lat, client_lng
+    from assist_os
+    where client_lat is not null and client_lng is not null
+  `) as Array<{ id: number; client_lat: number; client_lng: number }>;
+  let updated = 0;
+  for (const row of rows) {
+    const km = haversineKm(
+      { lat: company.lat, lng: company.lng },
+      { lat: Number(row.client_lat), lng: Number(row.client_lng) },
+    );
+    await db`
+      update assist_os
+      set distance_km = ${Math.round(km * 100) / 100}, updated_at = now()
+      where id = ${row.id}
+    `;
+    updated += 1;
+  }
+  return updated;
+}
+
+/** Atualiza endereço/coords/distância da OS (Omie opcional + geocode). */
+export async function syncOsClientLocation(
+  osId: number,
+  opts?: { fromOmie?: boolean },
+) {
+  const { buildRegionLabel, companyHasCoords, haversineKm } = await import("@/lib/geo");
+  const { geocodeBrazilAddress } = await import("@/server/geo");
+  const db = await getDb();
+  const os = await getOsById(osId);
+  if (!os) throw new Error("OS não encontrada.");
+
+  let address = os.clientAddress;
+  let city = os.clientCity;
+  let uf = os.clientUf;
+  let cep = os.clientCep;
+
+  if (opts?.fromOmie && os.clientCode && os.omieAppId) {
+    try {
+      const { listOmieApps } = await import("@/server/omie/client");
+      const { getCliente } = await import("@/server/omie/clients");
+      const app = listOmieApps().find((a) => a.id === os.omieAppId);
+      if (app) {
+        const client = await getCliente(app, os.clientCode);
+        if (client) {
+          address = client.endereco ?? address;
+          city = client.cidade ?? city;
+          uf = client.estado ?? uf;
+          cep = client.cep ?? cep;
+        }
+      }
+    } catch {
+      // keep existing
+    }
+  }
+
+  const region = buildRegionLabel({ city, uf });
+  let lat = os.clientLat;
+  let lng = os.clientLng;
+  const geo = await geocodeBrazilAddress({ address, city, uf, cep });
+  if (geo) {
+    lat = geo.lat;
+    lng = geo.lng;
+  }
+
+  let distanceKm: number | null = null;
+  const company = await getCompanyLocation();
+  if (companyHasCoords(company) && lat != null && lng != null) {
+    distanceKm = Math.round(haversineKm(company, { lat, lng }) * 100) / 100;
+  }
+
+  await db`
+    update assist_os
+    set
+      client_address = ${nullableStr(address)},
+      client_city = ${nullableStr(city)},
+      client_uf = ${nullableStr(uf)?.toUpperCase().slice(0, 2) ?? null},
+      client_cep = ${nullableStr(cep)?.replace(/\D/g, "").slice(0, 8) ?? null},
+      client_region = ${nullableStr(region === "Sem região" ? null : region)},
+      client_lat = ${lat},
+      client_lng = ${lng},
+      distance_km = ${distanceKm},
+      updated_at = now()
+    where id = ${osId}
+  `;
   return getOsById(osId);
 }
 
