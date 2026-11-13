@@ -248,7 +248,7 @@ function AssistenciaPage() {
   const { view: viewFromUrl } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { query } = useShellSearch();
-  const { confirm: askConfirm, ConfirmHost } = useAppConfirm();
+  const { confirm: askConfirm, ConfirmHost, open: confirmOpen } = useAppConfirm();
   const [tab, setTab] = useState<TabId>(viewFromUrl);
   const [agendaView, setAgendaView] = useState<AgendaView>("lista");
 
@@ -3565,7 +3565,11 @@ function AssistenciaPage() {
         ) : null}
       </div>
 
-      <Dialog open={histOpen && Boolean(selected)} onOpenChange={setHistOpen}>
+      <Dialog
+        modal={!confirmOpen}
+        open={histOpen && Boolean(selected)}
+        onOpenChange={setHistOpen}
+      >
         <SoftDialogContent size="lg">
           <SoftDialogHeader
             eyebrow={selected ? `OS ${selected.num}` : "OS"}
@@ -3723,9 +3727,11 @@ function AssistenciaPage() {
       </Dialog>
 
       <Dialog
+        modal={!confirmOpen}
         open={Boolean(selected) && !histOpen && !(tab === "agenda" && agendaView === "calendario" && calSheetOpen)}
         onOpenChange={(open) => {
           if (!open) {
+            if (confirmOpen) return;
             setSelectedId(null);
             setCalSheetOpen(false);
           }

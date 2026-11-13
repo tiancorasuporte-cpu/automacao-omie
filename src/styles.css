@@ -263,21 +263,23 @@
 .ancora-confirm-overlay {
   position: fixed;
   inset: 0;
-  z-index: 200;
+  z-index: 400;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1rem;
   background: rgb(0 0 0 / 0.6);
+  pointer-events: auto;
 }
 
 .ancora-confirm-panel {
   box-sizing: border-box;
   position: relative;
-  z-index: 201;
+  z-index: 401;
   width: min(28rem, calc(100vw - 2rem));
   max-width: min(28rem, calc(100vw - 2rem));
   min-width: min(16rem, calc(100vw - 2rem));
+  pointer-events: auto;
 }
 
 /* Dialog: centrado por flex — evita left/translate + w-[min()] quebrado no Tailwind deste projeto. */

@@ -40,6 +40,9 @@ export type Quote = {
   cotacaoEnviados: number;
   /** Itens já cotados e comprados. */
   cotacaoComprados: number;
+  /** OS de pedido na Assistência (quando já enviado ao Kanban). */
+  assistOsId: number | null;
+  assistOsNum: string | null;
 };
 
 export type QuoteItem = {
@@ -104,6 +107,8 @@ function mapQuote(r: Record<string, unknown>): Quote {
       r["servico_mensal_valor"] == null ? null : toNumber(r["servico_mensal_valor"]),
     cotacaoEnviados: toNumber(r["cotacao_enviados"] ?? 0),
     cotacaoComprados: toNumber(r["cotacao_comprados"] ?? 0),
+    assistOsId: r["assist_os_id"] == null ? null : toNumber(r["assist_os_id"]),
+    assistOsNum: r["assist_os_num"] == null ? null : String(r["assist_os_num"]),
   };
 }
 
@@ -160,6 +165,48 @@ async function attachCotacaoCounts(quotes: Quote[]) {
   } catch {
     // tabela de compras pode ainda não existir em ambientes antigos
   }
+  return quotes;
+}
+
+async function attachAssistPedido(quotes: Quote[]) {
+  for (const quote of quotes) {
+    if (quote.assistOsId == null) quote.assistOsId = null;
+    if (quote.assistOsNum == null) quote.assistOsNum = null;
+  }
+  if (!quotes.length) return quotes;
+  try {
+    const db = await getDb();
+    const ids = quotes.map((q) => q.id);
+    const rows = (await db`
+      select distinct on (quote_id)
+        quote_id,
+        id as assist_os_id,
+        num as assist_os_num
+      from assist_os
+      where quote_id in ${db(ids)}
+        and tipo = 'pedido'
+      order by quote_id, id desc
+    `) as Array<{
+      quote_id: number;
+      assist_os_id: number;
+      assist_os_num: string;
+    }>;
+    const byId = new Map(quotes.map((q) => [q.id, q]));
+    for (const row of rows) {
+      const quote = byId.get(Number(row.quote_id));
+      if (!quote) continue;
+      quote.assistOsId = Number(row.assist_os_id) || null;
+      quote.assistOsNum = String(row.assist_os_num ?? "") || null;
+    }
+  } catch {
+    // assist_os pode não existir em ambientes antigos
+  }
+  return quotes;
+}
+
+async function enrichQuotes(quotes: Quote[]) {
+  await attachCotacaoCounts(quotes);
+  await attachAssistPedido(quotes);
   return quotes;
 }
 
@@ -458,7 +505,7 @@ export async function listQuotes(input: {
     offset ${safeOffset}
   `) as Array<Record<string, unknown>>;
 
-  const quotes = await attachCotacaoCounts(rows.map(mapQuote));
+  const quotes = await enrichQuotes(rows.map(mapQuote));
   return {
     quotes,
     total: Number(countRows[0]?.total ?? 0),
@@ -482,7 +529,9 @@ export async function getQuoteById(quoteId: number): Promise<Quote | null> {
     limit 1
   `) as Array<Record<string, unknown>>;
   const r = rows[0];
-  return r ? mapQuote(r) : null;
+  if (!r) return null;
+  const [quote] = await enrichQuotes([mapQuote(r)]);
+  return quote ?? null;
 }
 
 export async function getQuoteItems(quoteId: number): Promise<QuoteItem[]> {

@@ -101,15 +101,28 @@ function cotacaoStatusClass(status: string) {
   return "bg-amber-100 text-amber-950";
 }
 
+function quotePedidoBadge(quote: { assistOsNum?: string | null }) {
+  const num = quote.assistOsNum?.trim();
+  if (!num) return null;
+  return (
+    <span className="inline-flex rounded-full bg-indigo-100 px-sm py-2xs text-[0.65rem] font-semibold text-indigo-950">
+      Enviado ao pedido · OS {num}
+    </span>
+  );
+}
+
 function quoteCotacaoBadges(quote: {
   cotacaoEnviados?: number | null;
   cotacaoComprados?: number | null;
+  assistOsNum?: string | null;
 }) {
   const enviados = Number(quote.cotacaoEnviados ?? 0);
   const comprados = Number(quote.cotacaoComprados ?? 0);
-  if (enviados <= 0 && comprados <= 0) return null;
+  const pedido = quotePedidoBadge(quote);
+  if (enviados <= 0 && comprados <= 0 && !pedido) return null;
   return (
     <span className="mt-2xs flex flex-wrap gap-2xs">
+      {pedido}
       {enviados > 0 ? (
         <span className="inline-flex rounded-full bg-amber-100 px-sm py-2xs text-[0.65rem] font-semibold text-amber-950">
           {enviados === 1
@@ -279,6 +292,7 @@ function OrcamentosPage() {
   const [quoteStatus, setQuoteStatus] = useState<string | null>(null);
   const [omiePedidoCode, setOmiePedidoCode] = useState<number | null>(null);
   const [numeroPedidoOmie, setNumeroPedidoOmie] = useState<string | null>(null);
+  const [assistOsNum, setAssistOsNum] = useState<string | null>(null);
   const [copiedOmieCode, setCopiedOmieCode] = useState(false);
   const [clientQuery, setClientQuery] = useState("");
   const [clientResults, setClientResults] = useState<
@@ -606,6 +620,7 @@ function OrcamentosPage() {
     setQuoteStatus(null);
     setOmiePedidoCode(null);
     setNumeroPedidoOmie(null);
+    setAssistOsNum(null);
     setCopiedOmieCode(false);
     setCotacaoByCodigo({});
     setSelectedClient(null);
@@ -1172,12 +1187,14 @@ function OrcamentosPage() {
       setPedidoAprovQuoteId(null);
       setPedidoAprovadoPor("");
       setPedidoAprovAnexo(null);
+      setAssistOsNum(result.osNum);
       setFeedback({
         type: "ok",
         text: result.alreadyExists
           ? `Orçamento ${result.numeroInterno} já tem OS ${result.osNum} na Assistência.`
           : `Pedido enviado: OS ${result.osNum} criada no Kanban da Assistência.`,
       });
+      await refreshQuotes();
       await router.invalidate();
       await router.navigate({ to: "/assistencia" });
     } catch (error) {
@@ -1275,6 +1292,7 @@ function OrcamentosPage() {
       setQuoteStatus(quote.status);
       setOmiePedidoCode(quote.omiePedidoCode);
       setNumeroPedidoOmie(quote.numeroPedido);
+      setAssistOsNum(quote.assistOsNum ?? null);
       setCopiedOmieCode(false);
       setSelectedClient({
         codigo: quote.clientCode,
@@ -1697,6 +1715,7 @@ function OrcamentosPage() {
               {omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode })
                 ? ` · Omie ${omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode })}`
                 : ""}
+              {assistOsNum ? ` · Pedido OS ${assistOsNum}` : ""}
             </div>
             {omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode }) ? (
               <button
@@ -2529,21 +2548,31 @@ function OrcamentosPage() {
                 <Icon name={sending ? "hourglass_empty" : "send"} className="text-[16px]" />
                 {sending ? "Enviando..." : "Omie · F8"}
               </button>
-              <button
-                type="button"
-                disabled={
-                  sendingPedido || locked || !selectedClient || cart.length === 0
-                }
-                onClick={() => openPedidoAprovacao()}
-                className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
-                title="Cria OS de pedido aprovado no Kanban da Assistência"
-              >
-                <Icon
-                  name={sendingPedido ? "hourglass_empty" : "handyman"}
-                  className="text-[16px]"
-                />
-                {sendingPedido ? "Enviando..." : "Enviar pedido"}
-              </button>
+              {assistOsNum ? (
+                <span
+                  className="inline-flex items-center gap-xs rounded-lg border border-indigo-200 bg-indigo-50 px-sm py-xs text-label-md font-semibold text-indigo-950"
+                  title="Já enviado ao Kanban da Assistência"
+                >
+                  <Icon name="handyman" className="text-[16px]" />
+                  Pedido OS {assistOsNum}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={
+                    sendingPedido || locked || !selectedClient || cart.length === 0
+                  }
+                  onClick={() => openPedidoAprovacao()}
+                  className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+                  title="Cria OS de pedido aprovado no Kanban da Assistência"
+                >
+                  <Icon
+                    name={sendingPedido ? "hourglass_empty" : "handyman"}
+                    className="text-[16px]"
+                  />
+                  {sendingPedido ? "Enviando..." : "Enviar pedido"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setShortcutsHelpOpen(true)}
@@ -2691,19 +2720,29 @@ function OrcamentosPage() {
                           Omie {omieCodigoLabel(quote)}
                         </button>
                       ) : null}
-                      <button
-                        type="button"
-                        disabled={sendingPedido}
-                        onClick={() => openPedidoAprovacao(quote.id)}
-                        className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
-                        title="Enviar pedido ao Kanban da Assistência"
-                      >
-                        <Icon
-                          name={sendingPedido ? "hourglass_empty" : "handyman"}
-                          className="text-[16px]"
-                        />
-                        Enviar pedido
-                      </button>
+                      {quote.assistOsNum ? (
+                        <span
+                          className="inline-flex items-center gap-xs rounded-lg border border-indigo-200 bg-indigo-50 px-sm py-xs text-label-md font-semibold text-indigo-950"
+                          title="Já enviado ao Kanban da Assistência"
+                        >
+                          <Icon name="handyman" className="text-[16px]" />
+                          Pedido OS {quote.assistOsNum}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={sendingPedido}
+                          onClick={() => openPedidoAprovacao(quote.id)}
+                          className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+                          title="Enviar pedido ao Kanban da Assistência"
+                        >
+                          <Icon
+                            name={sendingPedido ? "hourglass_empty" : "handyman"}
+                            className="text-[16px]"
+                          />
+                          Enviar pedido
+                        </button>
+                      )}
                       {canDeleteQuotes ? (
                         <button
                           type="button"
@@ -2802,19 +2841,29 @@ function OrcamentosPage() {
                               Omie {omieCodigoLabel(quote)}
                             </button>
                           ) : null}
-                          <button
-                            type="button"
-                            disabled={sendingPedido}
-                            onClick={() => openPedidoAprovacao(quote.id)}
-                            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
-                            title="Enviar pedido ao Kanban da Assistência"
-                          >
-                            <Icon
-                              name={sendingPedido ? "hourglass_empty" : "handyman"}
-                              className="text-[16px]"
-                            />
-                            Enviar pedido
-                          </button>
+                          {quote.assistOsNum ? (
+                            <span
+                              className="inline-flex items-center gap-xs rounded-lg border border-indigo-200 bg-indigo-50 px-sm py-xs text-label-md font-semibold text-indigo-950"
+                              title="Já enviado ao Kanban da Assistência"
+                            >
+                              <Icon name="handyman" className="text-[16px]" />
+                              Pedido OS {quote.assistOsNum}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={sendingPedido}
+                              onClick={() => openPedidoAprovacao(quote.id)}
+                              className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+                              title="Enviar pedido ao Kanban da Assistência"
+                            >
+                              <Icon
+                                name={sendingPedido ? "hourglass_empty" : "handyman"}
+                                className="text-[16px]"
+                              />
+                              Enviar pedido
+                            </button>
+                          )}
                           {canDeleteQuotes ? (
                             <button
                               type="button"

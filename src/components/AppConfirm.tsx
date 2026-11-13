@@ -111,5 +111,5 @@ export function useAppConfirm() {
         )
       : null;
 
-  return { confirm, ConfirmHost };
+  return { confirm, ConfirmHost, open: Boolean(pending) };
 }
