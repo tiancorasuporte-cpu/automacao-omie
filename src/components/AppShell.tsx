@@ -129,7 +129,7 @@ const NAV: NavEntry[] = [
     children: [
       {
         to: "/assistencia",
-        label: "Quadro de OS",
+        label: "Quadro de O.S",
         icon: "view_kanban",
         module: "assistencia",
         search: "view=kanban",
@@ -175,17 +175,10 @@ const NAV: NavEntry[] = [
     children: [
       {
         to: "/compras",
-        label: "Kanban OS",
+        label: "Quadro",
         icon: "view_kanban",
         module: "compras",
         search: "tab=kanban",
-      },
-      {
-        to: "/compras",
-        label: "Cotações",
-        icon: "request_quote",
-        module: "compras",
-        search: "tab=cotacoes",
       },
       {
         to: "/compras",
@@ -272,14 +265,8 @@ function applyComprasUnreadBadges(
       ...entry,
       badge: unread.total > 99 ? "99+" : unread.total,
       children: entry.children.map((child) => {
-        if (child.search === "tab=kanban" && unread.kanban > 0) {
-          return { ...child, badge: unread.kanban > 99 ? "99+" : unread.kanban };
-        }
-        if (child.search === "tab=cotacoes" && unread.cotacoes > 0) {
-          return {
-            ...child,
-            badge: unread.cotacoes > 99 ? "99+" : unread.cotacoes,
-          };
+        if (child.search === "tab=kanban" && unread.total > 0) {
+          return { ...child, badge: unread.total > 99 ? "99+" : unread.total };
         }
         return child;
       }),

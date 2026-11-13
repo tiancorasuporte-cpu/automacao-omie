@@ -1,10 +1,19 @@
-import { createFileRoute } from "@tanstack/react-router";
+﻿import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { z } from "zod";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
 import { PageSection, PageTitle } from "@/components/PageChrome";
+import {
+  SoftDialogBody,
+  SoftDialogContent,
+  SoftDialogFooter,
+  SoftDialogHeader,
+  softCancelBtnClass,
+  softInputClass,
+  softPrimaryBtnClass,
+} from "@/components/SoftOsDialog";
 import {
   Dialog,
   DialogContent,
@@ -13,16 +22,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { osKanbanColumnStyle } from "@/lib/assistencia-domain";
 import { APP_NAME } from "@/lib/brand";
 import {
   concluirCompraFn,
   createCompraSolicitacaoFn,
+  deleteCotacaoPropostaFn,
   getComprasBootstrapFn,
   markComprasSeenFn,
-  markOsItemCompradoFn,
   notifyComprasUnreadChanged,
   refreshComprasFn,
+  saveCotacaoPropostaFn,
   searchComprasProductsFn,
+  searchComprasSuppliersFn,
   setCompraStatusFn,
 } from "@/lib/compras";
 import { downloadComprasHistoricoExcel } from "@/lib/compras-relatorio-excel";
@@ -36,8 +48,13 @@ import {
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 
-const TAB_IDS = ["kanban", "cotacoes", "solicitar", "historico"] as const;
-const searchSchema = z.object({ tab: z.enum(TAB_IDS).catch("kanban") });
+const TAB_IDS = ["kanban", "solicitar", "historico"] as const;
+const searchSchema = z.object({
+  tab: z
+    .union([z.enum(TAB_IDS), z.literal("cotacoes")])
+    .catch("kanban")
+    .transform((t): (typeof TAB_IDS)[number] => (t === "cotacoes" ? "kanban" : t)),
+});
 
 export const Route = createFileRoute("/compras")({
   validateSearch: searchSchema,
@@ -50,15 +67,41 @@ export const Route = createFileRoute("/compras")({
 type TabId = (typeof TAB_IDS)[number];
 type Boot = Awaited<ReturnType<typeof getComprasBootstrapFn>>;
 type Solicitacao = Boot["abertas"][number];
-type OsItem = Boot["osQueue"][number];
-type KanbanBoard = "comprar" | "comprados";
+type CotacaoProposta = Boot["propostas"][number];
+type CotacaoColId = "aberta" | "em_cotacao" | "comprada" | "finalizado";
+
+const COTACAO_COLS: Array<{ id: CotacaoColId; label: string }> = [
+  { id: "aberta", label: "A cotar" },
+  { id: "em_cotacao", label: "Em cotação" },
+  { id: "comprada", label: "Aguardando entrega" },
+  { id: "finalizado", label: "Finalizado" },
+];
+
+const COMPRA_DRAG_MIME = "application/x-compra-id";
+
+type CotacaoColFilter = { name: string; dateFrom: string; dateTo: string };
+
+function emptyCotacaoColFilters(): Record<CotacaoColId, CotacaoColFilter> {
+  return {
+    aberta: { name: "", dateFrom: "", dateTo: "" },
+    em_cotacao: { name: "", dateFrom: "", dateTo: "" },
+    comprada: { name: "", dateFrom: "", dateTo: "" },
+    finalizado: { name: "", dateFrom: "", dateTo: "" },
+  };
+}
 
 const TABS: Array<{ id: TabId; label: string; icon: string }> = [
-  { id: "kanban", label: "Kanban OS", icon: "view_kanban" },
-  { id: "cotacoes", label: "Cotações", icon: "request_quote" },
+  { id: "kanban", label: "Quadro", icon: "view_kanban" },
   { id: "solicitar", label: "Solicitar", icon: "add_shopping_cart" },
   { id: "historico", label: "Histórico", icon: "history" },
 ];
+
+function origemLabel(origem: string) {
+  if (origem === "os") return "O.S";
+  if (origem === "orcamento") return "Orçamento";
+  if (origem === "manual") return "Solicitação";
+  return origem;
+}
 
 const fieldClass =
   "rounded-lg border border-outline-variant bg-white px-md py-sm text-body-md font-normal normal-case tracking-normal text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50";
@@ -71,9 +114,10 @@ function formatMoney(value: number | null | undefined) {
 }
 
 function statusLabel(status: string) {
-  if (status === "aberta") return "Aberta";
+  if (status === "aberta") return "A cotar";
   if (status === "em_cotacao") return "Em cotação";
-  if (status === "comprada") return "Comprada";
+  if (status === "comprada") return "Aguardando entrega";
+  if (status === "finalizado") return "Finalizado";
   if (status === "cancelada") return "Cancelada";
   if (status === "comprar") return "A comprar";
   if (status === "comprado") return "Comprado";
@@ -174,7 +218,7 @@ function ComprasPage() {
 
   const [abertas, setAbertas] = useState(boot.abertas);
   const [historico, setHistorico] = useState(boot.historico);
-  const [osQueue, setOsQueue] = useState(boot.osQueue);
+  const [propostas, setPropostas] = useState<CotacaoProposta[]>(boot.propostas ?? []);
   const [unread, setUnread] = useState(
     boot.unread ?? { cotacoes: 0, kanban: 0, total: 0 },
   );
@@ -182,24 +226,31 @@ function ComprasPage() {
   const [exportBusy, setExportBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
-  const [kanbanBoard, setKanbanBoard] = useState<KanbanBoard>("comprar");
-  const [kanbanQuery, setKanbanQuery] = useState("");
-  const [kanbanDatePreset, setKanbanDatePreset] = useState<DatePreset>("todos");
-  const [kanbanDateFrom, setKanbanDateFrom] = useState("");
-  const [kanbanDateTo, setKanbanDateTo] = useState("");
-  const [kanbanClient, setKanbanClient] = useState("");
+  useEffect(() => {
+    setAbertas(boot.abertas);
+    setHistorico(boot.historico);
+    setPropostas(boot.propostas ?? []);
+    setUnread(boot.unread ?? { cotacoes: 0, kanban: 0, total: 0 });
+  }, [boot]);
 
   const [cotQuery, setCotQuery] = useState("");
   const [cotDatePreset, setCotDatePreset] = useState<DatePreset>("todos");
   const [cotDateFrom, setCotDateFrom] = useState("");
   const [cotDateTo, setCotDateTo] = useState("");
   const [cotOrigem, setCotOrigem] = useState("");
+  const [cotFiltersOpen, setCotFiltersOpen] = useState(false);
+  const [colFilters, setColFilters] = useState(emptyCotacaoColFilters);
+  const [openColFilter, setOpenColFilter] = useState<CotacaoColId | null>(null);
+  const [dragSolicitacaoId, setDragSolicitacaoId] = useState<number | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<CotacaoColId | null>(null);
 
   const [histQuery, setHistQuery] = useState("");
   const [histDatePreset, setHistDatePreset] = useState<DatePreset>("mes");
   const [histDateFrom, setHistDateFrom] = useState("");
   const [histDateTo, setHistDateTo] = useState("");
-  const [histStatus, setHistStatus] = useState<"todos" | "comprada" | "cancelada">("todos");
+  const [histStatus, setHistStatus] = useState<"todos" | "finalizado" | "cancelada">(
+    "todos",
+  );
 
   const [manualDesc, setManualDesc] = useState("");
   const [manualQtd, setManualQtd] = useState("1");
@@ -254,6 +305,7 @@ function ComprasPage() {
 
   const [concluirOpen, setConcluirOpen] = useState(false);
   const [selected, setSelected] = useState<Solicitacao | null>(null);
+  const [propostaId, setPropostaId] = useState<number | "">("");
   const [fornecedorId, setFornecedorId] = useState<number | "">("");
   const [fornecedorNome, setFornecedorNome] = useState("");
   const [valorCompra, setValorCompra] = useState("");
@@ -262,12 +314,22 @@ function ComprasPage() {
   const [notas, setNotas] = useState("");
   const [updateCmc, setUpdateCmc] = useState(true);
 
+  const [boardOpen, setBoardOpen] = useState(false);
+  const [boardRow, setBoardRow] = useState<Solicitacao | null>(null);
+  const [propSupplierId, setPropSupplierId] = useState<number | "">("");
+  const [propSupplierName, setPropSupplierName] = useState("");
+  const [propSupplierQuery, setPropSupplierQuery] = useState("");
+  const [propSupplierHits, setPropSupplierHits] = useState<
+    Array<{ id: number; name: string; cnpjCpf: string | null; codigoOmie: number }>
+  >([]);
+  const [searchingSuppliers, setSearchingSuppliers] = useState(false);
+  const [propValor, setPropValor] = useState("");
+  const [propPrevisao, setPropPrevisao] = useState("");
+  const [propObs, setPropObs] = useState("");
+  const [editingPropId, setEditingPropId] = useState<number | null>(null);
+
   const canComprar = boot.user.canComprar;
 
-  const kanbanRange = useMemo(
-    () => resolveDatePreset(kanbanDatePreset, kanbanDateFrom, kanbanDateTo),
-    [kanbanDatePreset, kanbanDateFrom, kanbanDateTo],
-  );
   const cotRange = useMemo(
     () => resolveDatePreset(cotDatePreset, cotDateFrom, cotDateTo),
     [cotDatePreset, cotDateFrom, cotDateTo],
@@ -277,72 +339,63 @@ function ComprasPage() {
     [histDatePreset, histDateFrom, histDateTo],
   );
 
-  const filteredOs = useMemo(() => {
-    const q = (kanbanQuery || shellQuery).trim().toLowerCase();
-    const clientQ = kanbanClient.trim().toLowerCase();
-    const wanted = kanbanBoard === "comprar" ? "comprar" : "comprado";
-    return osQueue.filter((item) => {
-      if (item.status !== wanted) return false;
-      if (q) {
-        const hay = `${item.nome} ${item.osNum} ${item.clientName} ${item.quoteNumero ?? ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      if (clientQ && !item.clientName.toLowerCase().includes(clientQ)) return false;
-      const dateValue = ymdFromIso(item.previsao) || ymdFromIso(item.updatedAt);
-      if (!inDateRange(dateValue, kanbanRange.from, kanbanRange.to)) return false;
-      return true;
-    });
-  }, [osQueue, kanbanBoard, kanbanQuery, shellQuery, kanbanClient, kanbanRange]);
+  const cotacoesBoardRows = useMemo(() => {
+    const finalizados = historico.filter((r) => r.status === "finalizado");
+    return [...abertas, ...finalizados];
+  }, [abertas, historico]);
 
-  const osByProduct = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        key: string;
-        nome: string;
-        productId: number | null;
-        totalQtd: number;
-        cmcEfetivo: number | null;
-        fornecedores: OsItem["fornecedores"];
-        items: OsItem[];
-      }
-    >();
-    for (const item of filteredOs) {
-      const key = item.productId != null ? `p:${item.productId}` : `n:${item.nome.trim().toLowerCase()}`;
-      const cur = map.get(key);
-      if (!cur) {
-        map.set(key, {
-          key,
-          nome: item.nome,
-          productId: item.productId,
-          totalQtd: item.qtd,
-          cmcEfetivo: item.cmcEfetivo,
-          fornecedores: item.fornecedores,
-          items: [item],
-        });
-      } else {
-        cur.totalQtd += item.qtd;
-        cur.items.push(item);
-        if (cur.cmcEfetivo == null && item.cmcEfetivo != null) cur.cmcEfetivo = item.cmcEfetivo;
-        if (!cur.fornecedores.length && item.fornecedores.length) cur.fornecedores = item.fornecedores;
-      }
-    }
-    return [...map.values()].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
-  }, [filteredOs]);
+  const cotFiltersActive = Boolean(
+    cotQuery.trim() ||
+      cotOrigem ||
+      cotDatePreset !== "todos" ||
+      cotDateFrom ||
+      cotDateTo,
+  );
 
   const filteredCotacoes = useMemo(() => {
     const q = (cotQuery || shellQuery).trim().toLowerCase();
-    return abertas.filter((row) => {
+    return cotacoesBoardRows.filter((row) => {
       if (cotOrigem && row.origem !== cotOrigem) return false;
       if (q) {
         const hay =
-          `${row.descricao} ${row.solicitadoPorNome} ${row.quoteNumero ?? ""} ${row.motivo ?? ""}`.toLowerCase();
+          `${row.descricao} ${row.solicitadoPorNome} ${row.quoteNumero ?? ""} ${row.motivo ?? ""} ${origemLabel(row.origem)}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (!inDateRange(ymdFromIso(row.createdAt), cotRange.from, cotRange.to)) return false;
       return true;
     });
-  }, [abertas, cotQuery, shellQuery, cotOrigem, cotRange]);
+  }, [cotacoesBoardRows, cotQuery, shellQuery, cotOrigem, cotRange]);
+
+  const minhasSolicitacoes = useMemo(() => {
+    const rows = [...abertas, ...historico].filter(
+      (r) => r.solicitadoPor === boot.user.id,
+    );
+    return rows.sort((a, b) => {
+      const ta = Date.parse(a.updatedAt || a.createdAt) || 0;
+      const tb = Date.parse(b.updatedAt || b.createdAt) || 0;
+      return tb - ta;
+    });
+  }, [abertas, historico, boot.user.id]);
+
+  const propostasBySolicitacao = useMemo(() => {
+    const map = new Map<number, CotacaoProposta[]>();
+    for (const p of propostas) {
+      const list = map.get(p.solicitacaoId) ?? [];
+      list.push(p);
+      map.set(p.solicitacaoId, list);
+    }
+    return map;
+  }, [propostas]);
+
+  const selectedPropostas = useMemo(() => {
+    if (!selected) return [] as CotacaoProposta[];
+    return propostasBySolicitacao.get(selected.id) ?? [];
+  }, [selected, propostasBySolicitacao]);
+
+  const boardPropostas = useMemo(() => {
+    if (!boardRow) return [] as CotacaoProposta[];
+    return propostasBySolicitacao.get(boardRow.id) ?? [];
+  }, [boardRow, propostasBySolicitacao]);
 
   const filteredHistorico = useMemo(() => {
     const q = (histQuery || shellQuery).trim().toLowerCase();
@@ -359,17 +412,20 @@ function ComprasPage() {
     });
   }, [historico, histQuery, shellQuery, histStatus, histRange]);
 
-  const stats = useMemo(
-    () => ({
-      osPendentes: osQueue.filter((i) => i.status === "comprar").length,
-      osComprados: osQueue.filter((i) => i.status === "comprado").length,
-      cotacoes: abertas.length,
+  const stats = useMemo(() => {
+    const aCotar = abertas.filter((r) => r.status === "aberta").length;
+    const emCotacao = abertas.filter((r) => r.status === "em_cotacao").length;
+    const aguardando = abertas.filter((r) => r.status === "comprada").length;
+    const finalizados = historico.filter((r) => r.status === "finalizado").length;
+    return {
+      aCotar,
+      emCotacao,
+      aguardando,
+      finalizados,
       historico: filteredHistorico.length,
-      novosKanban: osQueue.filter((i) => i.naoVisto).length,
-      novosCotacoes: abertas.filter((i) => i.naoVisto).length,
-    }),
-    [osQueue, abertas, filteredHistorico],
-  );
+      novosQuadro: abertas.filter((i) => i.naoVisto).length,
+    };
+  }, [abertas, historico, filteredHistorico]);
 
   function goTab(next: TabId) {
     void navigate({
@@ -380,39 +436,21 @@ function ComprasPage() {
   }
 
   async function markTabSeen(nextTab: TabId) {
-    if (nextTab !== "kanban" && nextTab !== "cotacoes") return;
-    const hasUnread =
-      nextTab === "kanban" ? unread.kanban > 0 || stats.novosKanban > 0 : unread.cotacoes > 0 || stats.novosCotacoes > 0;
+    if (nextTab !== "kanban") return;
+    const hasUnread = unread.total > 0 || stats.novosQuadro > 0;
     if (!hasUnread) return;
     try {
       const next = await markComprasSeenFn({
-        data: {
-          kanban: nextTab === "kanban",
-          cotacoes: nextTab === "cotacoes",
-        },
+        data: { kanban: true, cotacoes: true },
       });
       setUnread(next);
-      if (nextTab === "kanban") {
-        setOsQueue((prev) =>
-          prev.map((item) =>
-            item.naoVisto
-              ? {
-                  ...item,
-                  naoVisto: false,
-                  compraVistoEm: new Date().toISOString(),
-                }
-              : item,
-          ),
-        );
-      } else {
-        setAbertas((prev) =>
-          prev.map((item) =>
-            item.naoVisto
-              ? { ...item, naoVisto: false, vistoEm: new Date().toISOString() }
-              : item,
-          ),
-        );
-      }
+      setAbertas((prev) =>
+        prev.map((item) =>
+          item.naoVisto
+            ? { ...item, naoVisto: false, vistoEm: new Date().toISOString() }
+            : item,
+        ),
+      );
       notifyComprasUnreadChanged();
     } catch {
       /* ignore */
@@ -427,14 +465,33 @@ function ComprasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  async function reload() {
+  async function reload(opts?: { notify?: boolean }) {
     const next = await refreshComprasFn();
     setAbertas(next.abertas);
     setHistorico(next.historico);
-    setOsQueue(next.osQueue);
+    setPropostas(next.propostas ?? []);
     if (next.unread) setUnread(next.unread);
-    notifyComprasUnreadChanged();
+    if (opts?.notify !== false) notifyComprasUnreadChanged();
   }
+
+  useEffect(() => {
+    const softReload = () => {
+      if (document.visibilityState !== "visible") return;
+      void reload({ notify: false }).catch(() => undefined);
+    };
+    softReload();
+    document.addEventListener("visibilitychange", softReload);
+    window.addEventListener("focus", softReload);
+    window.addEventListener("compras-unread-changed", softReload);
+    const timer = window.setInterval(softReload, 30_000);
+    return () => {
+      document.removeEventListener("visibilitychange", softReload);
+      window.removeEventListener("focus", softReload);
+      window.removeEventListener("compras-unread-changed", softReload);
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -448,17 +505,212 @@ function ComprasPage() {
     }
   }
 
+  function applyPropostaToForm(p: CotacaoProposta | null) {
+    if (!p) {
+      setPropostaId("");
+      return;
+    }
+    setPropostaId(p.id);
+    setFornecedorId(p.supplierId ?? "");
+    setFornecedorNome(p.supplierName);
+    setValorCompra(String(p.valorUnitario));
+    setCmcNovo(String(p.valorUnitario));
+    setPrevisao(p.previsao ?? "");
+    setNotas(p.observacao ?? "");
+  }
+
   function openConcluir(row: Solicitacao) {
     setSelected(row);
-    const first = row.fornecedores[0];
-    setFornecedorId(first?.supplierId ?? "");
-    setFornecedorNome(first?.supplierName ?? "");
-    setValorCompra(row.cmcEfetivo != null ? String(row.cmcEfetivo) : "");
-    setCmcNovo(row.cmcEfetivo != null ? String(row.cmcEfetivo) : "");
-    setPrevisao("");
-    setNotas("");
+    const props = propostasBySolicitacao.get(row.id) ?? [];
+    if (props.length) {
+      applyPropostaToForm(props[0]!);
+    } else {
+      setPropostaId("");
+      const first = row.fornecedores[0];
+      setFornecedorId(first?.supplierId ?? "");
+      setFornecedorNome(first?.supplierName ?? "");
+      setValorCompra(row.cmcEfetivo != null ? String(row.cmcEfetivo) : "");
+      setCmcNovo(row.cmcEfetivo != null ? String(row.cmcEfetivo) : "");
+      setPrevisao("");
+      setNotas("");
+    }
     setUpdateCmc(Boolean(row.productId));
     setConcluirOpen(true);
+  }
+
+  function resetPropostaForm() {
+    setEditingPropId(null);
+    setPropSupplierId("");
+    setPropSupplierName("");
+    setPropSupplierQuery("");
+    setPropSupplierHits([]);
+    setPropValor("");
+    setPropPrevisao("");
+    setPropObs("");
+  }
+
+  function pickPropSupplier(s: { id: number; name: string }) {
+    setPropSupplierId(s.id);
+    setPropSupplierName(s.name);
+    setPropSupplierQuery(s.name);
+    setPropSupplierHits([]);
+  }
+
+  function openCotacaoBoard(row: Solicitacao) {
+    setBoardRow(row);
+    resetPropostaForm();
+    setBoardOpen(true);
+    if (row.status === "aberta" && canComprar) {
+      void run(async () => {
+        const result = await setCompraStatusFn({
+          data: { id: row.id, status: "em_cotacao" },
+        });
+        if (!result.ok) {
+          setFeedback(result.error);
+          return;
+        }
+        setAbertas((prev) =>
+          prev.map((r) => (r.id === row.id ? { ...r, status: "em_cotacao" as const } : r)),
+        );
+        setBoardRow((prev) =>
+          prev && prev.id === row.id ? { ...prev, status: "em_cotacao" } : prev,
+        );
+      });
+    }
+  }
+
+  async function moveSolicitacaoToCol(row: Solicitacao, target: CotacaoColId) {
+    if (row.status === target) return;
+    if (!canComprar) {
+      setFeedback("Somente compradores podem mover cards no quadro.");
+      return;
+    }
+    if (
+      target === "comprada" &&
+      row.status !== "comprada" &&
+      row.status !== "finalizado"
+    ) {
+      openConcluir(row);
+      return;
+    }
+    await run(async () => {
+      const result = await setCompraStatusFn({
+        data: { id: row.id, status: target },
+      });
+      if (!result.ok) {
+        setFeedback(result.error);
+        return;
+      }
+      await reload();
+    });
+  }
+
+  function onKanbanDrop(target: CotacaoColId, rawId: number | null) {
+    setDragOverCol(null);
+    const id = rawId ?? dragSolicitacaoId;
+    if (id == null) return;
+    const row = cotacoesBoardRows.find((r) => r.id === id);
+    if (!row) return;
+    void moveSolicitacaoToCol(row, target);
+  }
+
+  function loadPropostaIntoForm(p: CotacaoProposta) {
+    setEditingPropId(p.id);
+    setPropSupplierId(p.supplierId ?? "");
+    setPropSupplierName(p.supplierName);
+    setPropSupplierQuery(p.supplierName);
+    setPropSupplierHits([]);
+    setPropValor(String(p.valorUnitario));
+    setPropPrevisao(p.previsao ?? "");
+    setPropObs(p.observacao ?? "");
+  }
+
+  useEffect(() => {
+    if (!boardOpen) return;
+    const q = propSupplierQuery.trim();
+    if (q.length < 2 || (propSupplierId !== "" && q === propSupplierName.trim())) {
+      setPropSupplierHits([]);
+      setSearchingSuppliers(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setSearchingSuppliers(true);
+      try {
+        const rows = await searchComprasSuppliersFn({
+          data: { query: q, limit: 40 },
+        });
+        setPropSupplierHits(rows);
+      } catch {
+        setPropSupplierHits([]);
+      } finally {
+        setSearchingSuppliers(false);
+      }
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [boardOpen, propSupplierQuery, propSupplierId, propSupplierName]);
+
+  async function handleSaveProposta() {
+    if (!boardRow) return;
+    const valor = Number(propValor.replace(",", "."));
+    if (!propSupplierName.trim()) {
+      setFeedback("Informe o fornecedor da cotação.");
+      return;
+    }
+    if (!Number.isFinite(valor) || valor < 0) {
+      setFeedback("Informe um valor unitário válido.");
+      return;
+    }
+    await run(async () => {
+      const result = await saveCotacaoPropostaFn({
+        data: {
+          id: editingPropId,
+          solicitacaoId: boardRow.id,
+          supplierId: propSupplierId === "" ? null : propSupplierId,
+          supplierName: propSupplierName.trim(),
+          valorUnitario: valor,
+          previsao: propPrevisao || null,
+          observacao: propObs.trim() || null,
+        },
+      });
+      if (!result.ok) {
+        setFeedback(result.error);
+        return;
+      }
+      setPropostas((prev) => {
+        const others = prev.filter((p) => p.solicitacaoId !== boardRow.id);
+        return [...others, ...result.propostas];
+      });
+      if (result.solicitacao) {
+        setAbertas((prev) => {
+          const without = prev.filter((r) => r.id !== result.solicitacao!.id);
+          if (result.solicitacao!.status === "aberta" || result.solicitacao!.status === "em_cotacao") {
+            return [result.solicitacao!, ...without];
+          }
+          return without;
+        });
+        setBoardRow(result.solicitacao);
+      }
+      resetPropostaForm();
+      setFeedback("Cotação salva.");
+    });
+  }
+
+  async function handleDeleteProposta(id: number) {
+    if (!boardRow) return;
+    await run(async () => {
+      const result = await deleteCotacaoPropostaFn({
+        data: { id, solicitacaoId: boardRow.id },
+      });
+      if (!result.ok) {
+        setFeedback(result.error);
+        return;
+      }
+      setPropostas((prev) => {
+        const others = prev.filter((p) => p.solicitacaoId !== boardRow.id);
+        return [...others, ...result.propostas];
+      });
+      if (editingPropId === id) resetPropostaForm();
+    });
   }
 
   function parseLinksInput(raw: string) {
@@ -502,35 +754,24 @@ function ComprasPage() {
       setManualProductCode(null);
       setManualUnidade(null);
       setProductHits([]);
-      setFeedback("Solicitação enviada ao comprador.");
+      setFeedback("Solicitação enviada. Acompanhe em Minhas solicitações.");
       await reload();
-      goTab("cotacoes");
-    });
-  }
-
-  async function handleMarkOsComprado(item: OsItem) {
-    await run(async () => {
-      const result = await markOsItemCompradoFn({
-        data: { itemId: item.itemId, previsao: new Date().toISOString().slice(0, 10) },
-      });
-      if (!result.ok) {
-        setFeedback(result.error);
-        return;
-      }
-      setOsQueue(result.osQueue);
-      setKanbanBoard("comprados");
-      setFeedback(`${item.nome} marcado como comprado e movido para Comprados.`);
     });
   }
 
   async function handleConcluir() {
     if (!selected) return;
+    if (selectedPropostas.length && propostaId === "") {
+      setFeedback("Selecione qual cotação foi escolhida para registrar a compra.");
+      return;
+    }
     const valor = valorCompra.trim() ? Number(valorCompra.replace(",", ".")) : null;
     const cmc = cmcNovo.trim() ? Number(cmcNovo.replace(",", ".")) : valor;
     await run(async () => {
       const result = await concluirCompraFn({
         data: {
           id: selected.id,
+          propostaId: propostaId === "" ? null : propostaId,
           fornecedorId: fornecedorId === "" ? null : fornecedorId,
           fornecedorNome: fornecedorNome.trim() || null,
           valorCompra: valor != null && Number.isFinite(valor) ? valor : null,
@@ -545,7 +786,9 @@ function ComprasPage() {
         return;
       }
       setConcluirOpen(false);
+      setBoardOpen(false);
       setSelected(null);
+      setBoardRow(null);
       setFeedback(
         updateCmc && selected.productId
           ? "Compra concluída e CMC interno atualizado."
@@ -610,12 +853,26 @@ function ComprasPage() {
   }
 
   return (
-    <AppShell mobileTitle="Compras" searchPlaceholder="Buscar produto, OS, solicitante…">
-      <main className="flex-1 px-margin-mobile py-md md:px-margin-desktop md:py-lg">
-        <div className="@container mx-auto max-w-6xl space-y-md">
+    <AppShell
+      mobileTitle="Compras"
+      searchPlaceholder="Buscar produto, OS, solicitante…"
+      fullHeight={tab === "kanban"}
+    >
+      <main
+        className={cn(
+          "flex min-h-0 flex-1 flex-col px-margin-mobile py-md md:px-margin-desktop md:py-lg",
+          tab === "kanban" && "overflow-hidden",
+        )}
+      >
+        <div
+          className={cn(
+            "@container flex min-h-0 flex-1 flex-col gap-md",
+            tab === "kanban" && "overflow-hidden",
+          )}
+        >
           <PageTitle
             title="Compras"
-            subtitle="Kanban por produto, cotações, solicitações e histórico com relatório."
+            subtitle="Quadro geral de cotações (O.S, solicitação e orçamento), solicitações e histórico."
           >
             <button
               type="button"
@@ -641,53 +898,45 @@ function ComprasPage() {
             </p>
           ) : null}
 
-          {unread.total > 0 || stats.novosKanban > 0 || stats.novosCotacoes > 0 ? (
+          {unread.total > 0 || stats.novosQuadro > 0 ? (
             <div className="rounded-xl border border-amber-300 bg-amber-50 px-md py-sm text-label-md text-amber-950">
-              <p className="font-semibold">Há novidades para comprar/cotar</p>
+              <p className="font-semibold">Há novidades no Quadro</p>
               <p className="mt-2xs">
-                {[
-                  stats.novosKanban > 0 || unread.kanban > 0
-                    ? `${Math.max(stats.novosKanban, unread.kanban)} item(ns) novo(s) no Kanban OS`
-                    : null,
-                  stats.novosCotacoes > 0 || unread.cotacoes > 0
-                    ? `${Math.max(stats.novosCotacoes, unread.cotacoes)} cotação(ões) nova(s)`
-                    : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-                . Abra a aba correspondente para marcar como visto.
+                {Math.max(stats.novosQuadro, unread.total)} item(ns) novo(s) para cotar/comprar.
+                Abra o Quadro para marcar como visto.
               </p>
             </div>
           ) : null}
 
-          <div className="grid gap-sm sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-sm sm:grid-cols-2 lg:grid-cols-5">
             <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-md py-sm">
               <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
-                A comprar
+                A cotar
               </div>
-              <div className="text-title-lg font-bold text-on-surface">{stats.osPendentes}</div>
-              {stats.novosKanban > 0 ? (
+              <div className="text-title-lg font-bold text-on-surface">{stats.aCotar}</div>
+              {stats.novosQuadro > 0 ? (
                 <div className="mt-2xs text-label-sm font-semibold text-amber-800">
-                  {stats.novosKanban} novo(s)
+                  {stats.novosQuadro} novo(s)
                 </div>
               ) : null}
             </div>
             <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-md py-sm">
               <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
-                Comprados
+                Em cotação
               </div>
-              <div className="text-title-lg font-bold text-on-surface">{stats.osComprados}</div>
+              <div className="text-title-lg font-bold text-on-surface">{stats.emCotacao}</div>
             </div>
             <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-md py-sm">
               <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
-                Cotações
+                Aguardando
               </div>
-              <div className="text-title-lg font-bold text-on-surface">{stats.cotacoes}</div>
-              {stats.novosCotacoes > 0 ? (
-                <div className="mt-2xs text-label-sm font-semibold text-amber-800">
-                  {stats.novosCotacoes} nova(s)
-                </div>
-              ) : null}
+              <div className="text-title-lg font-bold text-on-surface">{stats.aguardando}</div>
+            </div>
+            <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-md py-sm">
+              <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
+                Finalizado
+              </div>
+              <div className="text-title-lg font-bold text-on-surface">{stats.finalizados}</div>
             </div>
             <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-md py-sm">
               <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
@@ -699,12 +948,7 @@ function ComprasPage() {
 
           <div className="flex flex-wrap gap-xs border-b border-outline-variant pb-sm">
             {TABS.map((t) => {
-              const badge =
-                t.id === "kanban"
-                  ? stats.novosKanban
-                  : t.id === "cotacoes"
-                    ? stats.novosCotacoes
-                    : 0;
+              const badge = t.id === "kanban" ? stats.novosQuadro : 0;
               return (
                 <button
                   key={t.id}
@@ -737,319 +981,401 @@ function ComprasPage() {
           </div>
 
           {tab === "kanban" ? (
-            <PageSection className="space-y-md">
+            <div className="flex min-h-0 flex-1 flex-col gap-md">
               <div className="flex flex-wrap items-start justify-between gap-md">
                 <div>
-                  <h2 className="text-title-md font-semibold text-on-surface">Kanban por produto</h2>
+                  <h2 className="text-title-md font-semibold text-on-surface">
+                    Quadro de compras
+                  </h2>
                   <p className="text-label-md text-on-surface-variant">
-                    Itens da Assistência agrupados por produto. Ao comprar, vão para Comprados.
+                    Arraste os cards entre as fases. Comprado fica em Aguardando entrega até
+                    chegar.
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-xs">
-                  {(
-                    [
-                      { id: "comprar" as const, label: `A comprar (${stats.osPendentes})` },
-                      { id: "comprados" as const, label: `Comprados (${stats.osComprados})` },
-                    ] as const
-                  ).map((b) => (
-                    <button
-                      key={b.id}
-                      type="button"
-                      onClick={() => setKanbanBoard(b.id)}
+                <button
+                  type="button"
+                  onClick={() => setCotFiltersOpen((v) => !v)}
+                  className={cn(
+                    "inline-flex items-center gap-xs rounded-lg border px-sm py-xs text-label-md font-semibold",
+                    cotFiltersOpen || cotFiltersActive
+                      ? "border-neutral-900 bg-neutral-900 text-white"
+                      : "border-outline-variant bg-white text-on-surface",
+                  )}
+                >
+                  <Icon name="filter_list" className="text-[16px]" />
+                  Filtros
+                  {cotFiltersActive ? (
+                    <span
                       className={cn(
-                        "rounded-lg px-sm py-xs text-label-md font-semibold",
-                        kanbanBoard === b.id
-                          ? "bg-secondary-container text-on-secondary-container"
-                          : "border border-outline-variant text-on-surface-variant",
+                        "rounded-full px-xs py-2xs text-[10px] font-bold uppercase",
+                        cotFiltersOpen || cotFiltersActive
+                          ? "bg-white/20 text-white"
+                          : "bg-amber-100 text-amber-950",
                       )}
                     >
-                      {b.label}
-                    </button>
-                  ))}
-                </div>
+                      on
+                    </span>
+                  ) : null}
+                </button>
               </div>
-
-              <DateFilterBar
-                preset={kanbanDatePreset}
-                from={kanbanDateFrom}
-                to={kanbanDateTo}
-                onPreset={setKanbanDatePreset}
-                onFrom={setKanbanDateFrom}
-                onTo={setKanbanDateTo}
-                query={kanbanQuery}
-                onQuery={setKanbanQuery}
-                extra={
-                  <label className={labelClass}>
-                    Cliente
-                    <input
-                      value={kanbanClient}
-                      onChange={(e) => setKanbanClient(e.target.value)}
-                      placeholder="Filtrar cliente"
-                      className={fieldClass}
-                    />
-                  </label>
-                }
-              />
-
-              <div className="grid gap-md">
-                {osByProduct.map((group) => {
-                  const novosNoGrupo = group.items.filter((i) => i.naoVisto).length;
+              {cotFiltersOpen ? (
+                <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+                  <DateFilterBar
+                    preset={cotDatePreset}
+                    from={cotDateFrom}
+                    to={cotDateTo}
+                    onPreset={setCotDatePreset}
+                    onFrom={setCotDateFrom}
+                    onTo={setCotDateTo}
+                    query={cotQuery}
+                    onQuery={setCotQuery}
+                    extra={
+                      <label className={labelClass}>
+                        Origem
+                        <select
+                          value={cotOrigem}
+                          onChange={(e) => setCotOrigem(e.target.value)}
+                          className={fieldClass}
+                        >
+                          <option value="">Todas</option>
+                          <option value="os">O.S</option>
+                          <option value="manual">Solicitação</option>
+                          <option value="orcamento">Orçamento</option>
+                        </select>
+                      </label>
+                    }
+                  />
+                </div>
+              ) : null}
+              <div className="flex min-h-0 flex-1 gap-md overflow-x-auto pb-sm">
+                {COTACAO_COLS.map((col) => {
+                  const style = osKanbanColumnStyle(
+                    col.id !== "comprada" && col.id !== "finalizado",
+                  );
+                  const colFilter = colFilters[col.id];
+                  const nameQ = colFilter.name.trim().toLowerCase();
+                  const dateFrom = colFilter.dateFrom.trim();
+                  const dateTo = colFilter.dateTo.trim();
+                  const stageRows = filteredCotacoes.filter((r) => r.status === col.id);
+                  const rows = stageRows.filter((row) => {
+                    if (nameQ) {
+                      const hay =
+                        `${row.descricao} ${row.solicitadoPorNome} ${row.quoteNumero ?? ""} ${row.motivo ?? ""} ${origemLabel(row.origem)} ${row.fornecedorNome ?? ""}`.toLowerCase();
+                      if (!hay.includes(nameQ)) return false;
+                    }
+                    const dateValue =
+                      col.id === "comprada" || col.id === "finalizado"
+                        ? ymdFromIso(row.compradoEm) ||
+                          ymdFromIso(row.previsao) ||
+                          ymdFromIso(row.updatedAt)
+                        : ymdFromIso(row.createdAt);
+                    if (!inDateRange(dateValue, dateFrom, dateTo)) return false;
+                    return true;
+                  });
+                  const filteredCol = Boolean(nameQ || dateFrom || dateTo);
                   return (
-                  <article
-                    key={group.key}
-                    className={cn(
-                      "rounded-xl border bg-surface-container-lowest p-md",
-                      novosNoGrupo > 0
-                        ? "border-amber-300 ring-1 ring-amber-200"
-                        : "border-outline-variant",
-                    )}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-sm">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-xs">
-                          <h3 className="text-title-md font-semibold text-on-surface">{group.nome}</h3>
-                          {novosNoGrupo > 0 ? (
-                            <span className="rounded-full bg-amber-400 px-xs py-2xs text-[10px] font-bold uppercase tracking-wide text-amber-950">
-                              Novo
+                    <section
+                      key={col.id}
+                      className={cn(
+                        "flex h-full min-h-0 min-w-[16rem] flex-1 flex-col overflow-hidden rounded-xl border transition",
+                        style.column,
+                        dragOverCol === col.id && "ring-2 ring-amber-400",
+                      )}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        setDragOverCol(col.id);
+                      }}
+                      onDragLeave={() => {
+                        setDragOverCol((cur) => (cur === col.id ? null : cur));
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const raw = Number(
+                          e.dataTransfer.getData(COMPRA_DRAG_MIME) ||
+                            e.dataTransfer.getData("text/plain"),
+                        );
+                        onKanbanDrop(col.id, Number.isFinite(raw) && raw > 0 ? raw : null);
+                      }}
+                    >
+                      <header className={cn("px-sm py-sm", style.header)}>
+                        <div className="flex items-center justify-between gap-sm">
+                          <h3 className={cn("text-label-md font-bold uppercase", style.header)}>
+                            {col.label}
+                          </h3>
+                          <div className="flex shrink-0 items-center gap-2xs">
+                            <button
+                              type="button"
+                              className={cn(
+                                "rounded-lg p-2xs hover:bg-black/5",
+                                (openColFilter === col.id || filteredCol) && "bg-black/10",
+                              )}
+                              title="Filtros da coluna"
+                              onClick={() =>
+                                setOpenColFilter((cur) => (cur === col.id ? null : col.id))
+                              }
+                            >
+                              <Icon name="filter_list" className="text-[16px]" />
+                            </button>
+                            <span
+                              className={cn(
+                                "rounded-full px-xs py-2xs text-label-sm font-semibold",
+                                style.count,
+                              )}
+                            >
+                              {filteredCol ? rows.length : stageRows.length}
                             </span>
-                          ) : null}
+                          </div>
                         </div>
-                        <p className="text-label-md text-on-surface-variant">
-                          Total {group.totalQtd} · {group.items.length} OS
-                          {group.cmcEfetivo != null ? ` · CMC ${formatMoney(group.cmcEfetivo)}` : ""}
-                        </p>
-                        {group.fornecedores.length ? (
-                          <p className="mt-2xs text-label-sm text-on-surface-variant">
-                            {group.fornecedores
-                              .map(
-                                (f) =>
-                                  `${f.supplierName}${f.codigoFornecedor ? ` (${f.codigoFornecedor})` : ""}`,
-                              )
-                              .join(" · ")}
+                        {openColFilter === col.id ? (
+                          <div className="mt-sm flex flex-col gap-xs">
+                            <input
+                              type="search"
+                              value={colFilter.name}
+                              onChange={(e) =>
+                                setColFilters((prev) => ({
+                                  ...prev,
+                                  [col.id]: { ...prev[col.id], name: e.target.value },
+                                }))
+                              }
+                              placeholder="Produto, solicitante…"
+                              className="w-full rounded-lg border border-black/10 bg-white px-sm py-xs text-label-md text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50"
+                            />
+                            <div className="grid grid-cols-2 gap-xs">
+                              <label className="flex min-w-0 flex-col gap-2xs">
+                                <span className="text-[10px] font-semibold uppercase tracking-wide opacity-80">
+                                  De
+                                </span>
+                                <input
+                                  type="date"
+                                  value={colFilter.dateFrom}
+                                  onChange={(e) =>
+                                    setColFilters((prev) => ({
+                                      ...prev,
+                                      [col.id]: {
+                                        ...prev[col.id],
+                                        dateFrom: e.target.value,
+                                      },
+                                    }))
+                                  }
+                                  className="w-full rounded-lg border border-black/10 bg-white px-xs py-xs text-label-md text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50"
+                                  title="Data inicial"
+                                />
+                              </label>
+                              <label className="flex min-w-0 flex-col gap-2xs">
+                                <span className="text-[10px] font-semibold uppercase tracking-wide opacity-80">
+                                  Até
+                                </span>
+                                <input
+                                  type="date"
+                                  value={colFilter.dateTo}
+                                  onChange={(e) =>
+                                    setColFilters((prev) => ({
+                                      ...prev,
+                                      [col.id]: {
+                                        ...prev[col.id],
+                                        dateTo: e.target.value,
+                                      },
+                                    }))
+                                  }
+                                  className="w-full rounded-lg border border-black/10 bg-white px-xs py-xs text-label-md text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50"
+                                  title="Data final"
+                                />
+                              </label>
+                            </div>
+                            {filteredCol ? (
+                              <button
+                                type="button"
+                                className="w-full rounded-lg bg-black/5 px-sm py-xs text-label-sm font-semibold hover:bg-black/10"
+                                onClick={() =>
+                                  setColFilters((prev) => ({
+                                    ...prev,
+                                    [col.id]: { name: "", dateFrom: "", dateTo: "" },
+                                  }))
+                                }
+                                title="Limpar filtros"
+                              >
+                                Limpar
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </header>
+                      <div className="flex min-h-0 flex-1 flex-col gap-sm overflow-y-auto p-sm">
+                        {rows.map((row) => {
+                          const props = propostasBySolicitacao.get(row.id) ?? [];
+                          const best = props.length
+                            ? Math.min(...props.map((p) => p.valorUnitario))
+                            : null;
+                          return (
+                            <article
+                              key={row.id}
+                              draggable={canComprar}
+                              onDragStart={(e) => {
+                                if (
+                                  (e.target as HTMLElement | null)?.closest?.("[data-no-drag]")
+                                ) {
+                                  e.preventDefault();
+                                  return;
+                                }
+                                setDragSolicitacaoId(row.id);
+                                e.dataTransfer.setData(COMPRA_DRAG_MIME, String(row.id));
+                                e.dataTransfer.setData("text/plain", String(row.id));
+                                e.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragEnd={() => {
+                                setDragSolicitacaoId(null);
+                                setDragOverCol(null);
+                              }}
+                              className={cn(
+                                "rounded-lg border p-sm",
+                                style.card,
+                                canComprar && "cursor-grab active:cursor-grabbing",
+                                dragSolicitacaoId === row.id && "opacity-60",
+                                row.naoVisto && "ring-1 ring-amber-300",
+                              )}
+                            >
+                              <div className="flex flex-wrap items-center gap-xs">
+                                {row.naoVisto ? (
+                                  <span className="rounded-full bg-amber-400 px-xs py-2xs text-[10px] font-bold uppercase text-amber-950">
+                                    Novo
+                                  </span>
+                                ) : null}
+                                <span
+                                  className={cn(
+                                    "rounded-full px-xs py-2xs text-[10px] font-bold uppercase tracking-wide",
+                                    style.pill,
+                                  )}
+                                >
+                                  {origemLabel(row.origem)}
+                                </span>
+                              </div>
+                              <p className="mt-xs line-clamp-2 text-body-md font-semibold text-on-surface">
+                                {row.descricao}
+                              </p>
+                              <p className="text-label-sm text-on-surface-variant">
+                                {row.qtd}
+                                {row.unidade ? ` ${row.unidade}` : " un"} ·{" "}
+                                {row.solicitadoPorNome}
+                                {row.quoteNumero ? ` · ${row.quoteNumero}` : ""}
+                              </p>
+                              {row.motivo ? (
+                                <p className="mt-xs line-clamp-2 text-label-sm text-on-surface-variant">
+                                  {row.motivo}
+                                </p>
+                              ) : null}
+                              {row.status === "aberta" || row.status === "em_cotacao" ? (
+                                <p className="mt-xs text-label-sm text-on-surface-variant">
+                                  {props.length
+                                    ? `${props.length} cotação(ões)${best != null ? ` · menor ${formatMoney(best)}` : ""}`
+                                    : "Sem cotações ainda"}
+                                </p>
+                              ) : null}
+                              {row.status === "comprada" ? (
+                                <div className="mt-sm space-y-2xs">
+                                  <p className="text-label-sm font-semibold text-on-surface">
+                                    {row.fornecedorNome || "—"} · {formatMoney(row.valorCompra)}
+                                  </p>
+                                  <p className="text-label-sm text-amber-900">
+                                    Previsto chegar:{" "}
+                                    <span className="font-semibold">
+                                      {formatDateBr(row.previsao)}
+                                    </span>
+                                  </p>
+                                </div>
+                              ) : null}
+                              {row.status === "finalizado" ? (
+                                <p className="mt-sm text-label-sm font-semibold text-on-surface">
+                                  {row.fornecedorNome || "—"} · {formatMoney(row.valorCompra)}
+                                  {row.previsao ? ` · chegou ${formatDateBr(row.previsao)}` : ""}
+                                </p>
+                              ) : null}
+                              {row.status !== "comprada" &&
+                              row.status !== "finalizado" &&
+                              canComprar ? (
+                                <div className="mt-sm flex flex-wrap gap-xs" data-no-drag>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    className="rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold disabled:opacity-50"
+                                    onClick={() => openCotacaoBoard(row)}
+                                  >
+                                    Cotar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    className="rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+                                    onClick={() => openConcluir(row)}
+                                  >
+                                    Registrar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    className="rounded-lg px-sm py-xs text-label-md text-red-700 disabled:opacity-50"
+                                    onClick={() =>
+                                      void run(async () => {
+                                        const result = await setCompraStatusFn({
+                                          data: { id: row.id, status: "cancelada" },
+                                        });
+                                        if (!result.ok) setFeedback(result.error);
+                                        else await reload();
+                                      })
+                                    }
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              ) : row.status === "comprada" && canComprar ? (
+                                <div className="mt-sm flex flex-wrap gap-xs" data-no-drag>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    className="rounded-lg bg-neutral-900 px-sm py-xs text-label-md font-semibold text-white disabled:opacity-50"
+                                    onClick={() =>
+                                      void moveSolicitacaoToCol(row, "finalizado")
+                                    }
+                                  >
+                                    Marcar chegou
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold"
+                                    onClick={() => openCotacaoBoard(row)}
+                                  >
+                                    Ver
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  data-no-drag
+                                  className="mt-sm rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold"
+                                  onClick={() => openCotacaoBoard(row)}
+                                >
+                                  Ver cotações
+                                </button>
+                              )}
+                            </article>
+                          );
+                        })}
+                        {!rows.length ? (
+                          <p
+                            className={cn(
+                              "rounded-lg border border-dashed p-md text-center text-label-md",
+                              style.empty,
+                            )}
+                          >
+                            Vazio
                           </p>
                         ) : null}
                       </div>
-                    </div>
-                    <ul className="mt-sm space-y-sm border-t border-outline-variant pt-sm">
-                      {group.items.map((item) => (
-                        <li
-                          key={item.itemId}
-                          className={cn(
-                            "flex flex-wrap items-center justify-between gap-sm rounded-lg px-sm py-xs",
-                            item.naoVisto
-                              ? "bg-amber-50 ring-1 ring-amber-200"
-                              : "bg-surface",
-                          )}
-                        >
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-xs font-medium text-on-surface">
-                              <span>
-                                {item.qtd}× · {item.osNum} · {item.clientName}
-                              </span>
-                              {item.naoVisto ? (
-                                <span className="rounded-full bg-amber-400 px-xs py-2xs text-[10px] font-bold uppercase tracking-wide text-amber-950">
-                                  Novo
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="text-label-sm text-on-surface-variant">
-                              {item.quoteNumero ? `${item.quoteNumero} · ` : ""}
-                              {item.previsao
-                                ? `Previsão ${formatDateBr(item.previsao)}`
-                                : statusLabel(item.status)}
-                            </div>
-                          </div>
-                          {canComprar && item.status === "comprar" ? (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              className="rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
-                              onClick={() => void handleMarkOsComprado(item)}
-                            >
-                              Comprado
-                            </button>
-                          ) : (
-                            <span className="rounded-full bg-emerald-100 px-xs py-2xs text-[10px] font-bold uppercase tracking-wide text-emerald-900">
-                              {statusLabel(item.status)}
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </article>
+                    </section>
                   );
                 })}
               </div>
-              {!osByProduct.length ? (
-                <p className="text-body-md text-on-surface-variant">
-                  Nenhum produto nesta aba com os filtros atuais.
-                </p>
-              ) : null}
-            </PageSection>
-          ) : null}
-
-          {tab === "cotacoes" ? (
-            <PageSection className="space-y-md">
-              <div>
-                <h2 className="text-title-md font-semibold text-on-surface">Cotações abertas</h2>
-                <p className="text-label-md text-on-surface-variant">
-                  Solicitações de colaboradores e produtos enviados dos orçamentos.
-                </p>
-              </div>
-              <DateFilterBar
-                preset={cotDatePreset}
-                from={cotDateFrom}
-                to={cotDateTo}
-                onPreset={setCotDatePreset}
-                onFrom={setCotDateFrom}
-                onTo={setCotDateTo}
-                query={cotQuery}
-                onQuery={setCotQuery}
-                extra={
-                  <label className={labelClass}>
-                    Origem
-                    <select
-                      value={cotOrigem}
-                      onChange={(e) => setCotOrigem(e.target.value)}
-                      className={fieldClass}
-                    >
-                      <option value="">Todas</option>
-                      <option value="manual">Manual</option>
-                      <option value="orcamento">Orçamento</option>
-                      <option value="os">OS</option>
-                    </select>
-                  </label>
-                }
-              />
-              <div className="grid gap-md lg:grid-cols-2">
-                {filteredCotacoes.map((row) => (
-                  <article
-                    key={row.id}
-                    className={cn(
-                      "rounded-xl border bg-surface-container-lowest p-md",
-                      row.naoVisto
-                        ? "border-amber-300 ring-1 ring-amber-200"
-                        : "border-outline-variant",
-                    )}
-                  >
-                    <div className="flex flex-wrap items-center gap-xs">
-                      {row.naoVisto ? (
-                        <span className="rounded-full bg-amber-400 px-xs py-2xs text-[10px] font-bold uppercase tracking-wide text-amber-950">
-                          Novo
-                        </span>
-                      ) : null}
-                      <span className="rounded-full bg-amber-100 px-xs py-2xs text-[10px] font-bold uppercase tracking-wide text-amber-900">
-                        {row.origem}
-                      </span>
-                      <span className="rounded-full bg-neutral-900 px-xs py-2xs text-[10px] font-bold uppercase tracking-wide text-white">
-                        {statusLabel(row.status)}
-                      </span>
-                    </div>
-                    <h3 className="mt-xs text-title-md font-semibold text-on-surface">
-                      {row.descricao}
-                    </h3>
-                    <p className="text-label-md text-on-surface-variant">
-                      {row.qtd}
-                      {row.unidade ? ` ${row.unidade}` : " un"} · solicitado por{" "}
-                      <span className="font-semibold text-on-surface">{row.solicitadoPorNome}</span>
-                      {row.quoteNumero ? ` · ${row.quoteNumero}` : ""}
-                    </p>
-                    {row.motivo ? (
-                      <p className="mt-sm rounded-lg bg-surface px-sm py-xs text-body-md text-on-surface">
-                        <span className="text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
-                          Motivo ·{" "}
-                        </span>
-                        {row.motivo}
-                      </p>
-                    ) : null}
-                    <dl className="mt-sm grid gap-xs text-label-md sm:grid-cols-2">
-                      <div>
-                        <dt className="text-on-surface-variant">CMC atual</dt>
-                        <dd className="font-medium">{formatMoney(row.cmcEfetivo)}</dd>
-                      </div>
-                      <div>
-                        <dt className="text-on-surface-variant">Fornecedores</dt>
-                        <dd>
-                          {row.fornecedores.length
-                            ? row.fornecedores.map((f) => f.supplierName).join(" · ")
-                            : "—"}
-                        </dd>
-                      </div>
-                    </dl>
-                    {row.links.length ? (
-                      <ul className="mt-sm space-y-2xs text-label-md">
-                        {row.links.map((link) => (
-                          <li key={link}>
-                            <a
-                              href={link}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="break-all font-medium text-primary underline"
-                            >
-                              {link}
-                            </a>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                    {row.observacao ? (
-                      <p className="mt-sm text-label-md text-on-surface-variant">{row.observacao}</p>
-                    ) : null}
-                    {canComprar ? (
-                      <div className="mt-sm flex flex-wrap gap-xs">
-                        {row.status === "aberta" ? (
-                          <button
-                            type="button"
-                            disabled={busy}
-                            className="rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold disabled:opacity-50"
-                            onClick={() =>
-                              void run(async () => {
-                                const result = await setCompraStatusFn({
-                                  data: { id: row.id, status: "em_cotacao" },
-                                });
-                                if (!result.ok) setFeedback(result.error);
-                                else await reload();
-                              })
-                            }
-                          >
-                            Em cotação
-                          </button>
-                        ) : null}
-                        <button
-                          type="button"
-                          disabled={busy}
-                          className="rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
-                          onClick={() => openConcluir(row)}
-                        >
-                          Registrar compra
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          className="rounded-lg px-sm py-xs text-label-md text-red-700 disabled:opacity-50"
-                          onClick={() =>
-                            void run(async () => {
-                              const result = await setCompraStatusFn({
-                                data: { id: row.id, status: "cancelada" },
-                              });
-                              if (!result.ok) setFeedback(result.error);
-                              else await reload();
-                            })
-                          }
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    ) : null}
-                  </article>
-                ))}
-              </div>
-              {!filteredCotacoes.length ? (
-                <p className="text-body-md text-on-surface-variant">
-                  Nenhuma cotação com esses filtros.
-                </p>
-              ) : null}
-            </PageSection>
+            </div>
           ) : null}
 
           {tab === "solicitar" ? (
@@ -1062,7 +1388,7 @@ function ComprasPage() {
                   <p className="text-label-md text-on-surface-variant">
                     Solicitante:{" "}
                     <span className="font-semibold text-on-surface">{boot.user.name}</span>
-                    . O comprador vê em Cotações.
+                    . Acompanhe a fase em Minhas solicitações.
                   </p>
                 </div>
               </div>
@@ -1200,9 +1526,69 @@ function ComprasPage() {
                     <li>Busque o produto no catálogo Omie ou digite o nome.</li>
                     <li>Informe o motivo para o comprador priorizar.</li>
                     <li>Links de referência (loja, foto, PDF) são opcionais.</li>
-                    <li>A solicitação aparece em Cotações para quem é comprador.</li>
+                    <li>A solicitação entra no Quadro e aparece abaixo com a fase atual.</li>
                   </ul>
                 </aside>
+              </div>
+
+              <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+                <div className="mb-md flex flex-wrap items-end justify-between gap-sm">
+                  <div>
+                    <h3 className="text-title-sm font-semibold text-on-surface">
+                      Minhas solicitações
+                    </h3>
+                    <p className="text-label-md text-on-surface-variant">
+                      Fase atual de cada item que você pediu.
+                    </p>
+                  </div>
+                  <span className="text-label-sm font-semibold text-on-surface-variant">
+                    {minhasSolicitacoes.length} item(ns)
+                  </span>
+                </div>
+                {minhasSolicitacoes.length ? (
+                  <ul className="divide-y divide-outline-variant">
+                    {minhasSolicitacoes.map((row) => (
+                      <li
+                        key={row.id}
+                        className="flex flex-wrap items-start justify-between gap-sm py-sm first:pt-0 last:pb-0"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-body-md font-semibold text-on-surface">
+                            {row.descricao}
+                          </p>
+                          <p className="text-label-sm text-on-surface-variant">
+                            {row.qtd}
+                            {row.unidade ? ` ${row.unidade}` : " un"}
+                            {row.motivo ? ` · ${row.motivo}` : ""}
+                            {" · "}
+                            {formatDateBr(ymdFromIso(row.createdAt))}
+                          </p>
+                          {row.status === "comprada" && row.previsao ? (
+                            <p className="mt-2xs text-label-sm text-amber-900">
+                              Previsto chegar: {formatDateBr(row.previsao)}
+                            </p>
+                          ) : null}
+                        </div>
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-full px-sm py-2xs text-label-sm font-semibold",
+                            row.status === "aberta" && "bg-amber-100 text-amber-950",
+                            row.status === "em_cotacao" && "bg-sky-100 text-sky-950",
+                            row.status === "comprada" && "bg-orange-100 text-orange-950",
+                            row.status === "finalizado" && "bg-emerald-100 text-emerald-950",
+                            row.status === "cancelada" && "bg-red-100 text-red-900",
+                          )}
+                        >
+                          {statusLabel(row.status)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-body-md text-on-surface-variant">
+                    Você ainda não tem solicitações nesta conta.
+                  </p>
+                )}
               </div>
             </PageSection>
           ) : null}
@@ -1253,12 +1639,14 @@ function ComprasPage() {
                     <select
                       value={histStatus}
                       onChange={(e) =>
-                        setHistStatus(e.target.value as "todos" | "comprada" | "cancelada")
+                        setHistStatus(
+                          e.target.value as "todos" | "finalizado" | "cancelada",
+                        )
                       }
                       className={fieldClass}
                     >
                       <option value="todos">Todos</option>
-                      <option value="comprada">Comprada</option>
+                      <option value="finalizado">Finalizado</option>
                       <option value="cancelada">Cancelada</option>
                     </select>
                   </label>
@@ -1346,7 +1734,7 @@ function ComprasPage() {
             <DialogTitle>Registrar compra</DialogTitle>
             <DialogDescription>
               {selected
-                ? `${selected.descricao} · informe fornecedor, valor e CMC para atualizar o cadastro.`
+                ? `${selected.descricao} · escolha a cotação e confirme fornecedor/valor.`
                 : "Concluir cotação"}
             </DialogDescription>
           </DialogHeader>
@@ -1358,6 +1746,32 @@ function ComprasPage() {
                 </span>
                 {selected.motivo}
               </p>
+            ) : null}
+            {selectedPropostas.length ? (
+              <label className={labelClass}>
+                Qual cotação foi escolhida?
+                <select
+                  value={propostaId}
+                  onChange={(e) => {
+                    const id = e.target.value ? Number(e.target.value) : "";
+                    if (id === "") {
+                      setPropostaId("");
+                      return;
+                    }
+                    const found = selectedPropostas.find((p) => p.id === id) ?? null;
+                    applyPropostaToForm(found);
+                  }}
+                  className={fieldClass}
+                >
+                  <option value="">Selecione…</option>
+                  {selectedPropostas.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.supplierName} · {formatMoney(p.valorUnitario)}
+                      {p.previsao ? ` · prev. ${formatDateBr(p.previsao)}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
             ) : null}
             <label className={labelClass}>
               Fornecedor cadastrado
@@ -1453,7 +1867,7 @@ function ComprasPage() {
             </button>
             <button
               type="button"
-              disabled={busy}
+              disabled={busy || (selectedPropostas.length > 0 && propostaId === "")}
               className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
               onClick={() => void handleConcluir()}
             >
@@ -1461,6 +1875,244 @@ function ComprasPage() {
             </button>
           </DialogFooter>
         </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={boardOpen}
+        onOpenChange={(open) => {
+          setBoardOpen(open);
+          if (!open) {
+            setBoardRow(null);
+            resetPropostaForm();
+          }
+        }}
+      >
+        <SoftDialogContent size="lg">
+          <SoftDialogHeader
+            eyebrow="COMPRAS"
+            title={boardRow ? `COTAÇÕES · ${boardRow.descricao}` : "QUADRO DE COTAÇÕES"}
+          />
+          <SoftDialogBody>
+            {boardRow ? (
+              <div className="space-y-md">
+                <p className="text-label-md text-on-surface-variant">
+                  {boardRow.qtd}
+                  {boardRow.unidade ? ` ${boardRow.unidade}` : " un"} · origem {boardRow.origem}
+                  {boardRow.quoteNumero ? ` · ${boardRow.quoteNumero}` : ""}
+                  {boardRow.motivo ? ` · ${boardRow.motivo}` : ""}
+                </p>
+
+                <div className="space-y-xs">
+                  <p className="text-label-md font-semibold text-on-surface">Propostas</p>
+                  {boardPropostas.length ? (
+                    <ul className="divide-y divide-outline-variant rounded-lg border border-outline-variant">
+                      {boardPropostas.map((p) => (
+                        <li
+                          key={p.id}
+                          className="flex flex-wrap items-start justify-between gap-sm px-sm py-sm"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-body-md font-semibold text-on-surface">
+                              {p.supplierName}
+                            </p>
+                            <p className="text-label-sm text-on-surface-variant">
+                              {formatMoney(p.valorUnitario)}
+                              {p.previsao ? ` · prev. ${formatDateBr(p.previsao)}` : ""}
+                              {p.observacao ? ` · ${p.observacao}` : ""}
+                            </p>
+                          </div>
+                          {canComprar &&
+                          boardRow.status !== "comprada" &&
+                          boardRow.status !== "finalizado" ? (
+                            <div className="flex shrink-0 gap-xs">
+                              <button
+                                type="button"
+                                className="rounded-lg border border-outline-variant px-sm py-xs text-label-md"
+                                onClick={() => loadPropostaIntoForm(p)}
+                              >
+                                Editar
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded-lg px-sm py-xs text-label-md text-red-700"
+                                disabled={busy}
+                                onClick={() => void handleDeleteProposta(p.id)}
+                              >
+                                Excluir
+                              </button>
+                            </div>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-body-md text-on-surface-variant">
+                      Nenhuma cotação ainda. Adicione a primeira abaixo.
+                    </p>
+                  )}
+                </div>
+
+                {canComprar &&
+                boardRow.status !== "comprada" &&
+                boardRow.status !== "finalizado" ? (
+                  <div className="space-y-sm rounded-xl border border-outline-variant bg-surface-container-low p-md">
+                    <p className="text-label-md font-semibold text-on-surface">
+                      {editingPropId ? "Editar cotação" : "Nova cotação"}
+                    </p>
+                    {boardRow.fornecedores.length ? (
+                      <div className="space-y-xs">
+                        <p className="text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                          Fornecedores do produto
+                        </p>
+                        <div className="flex flex-wrap gap-xs">
+                          {boardRow.fornecedores.map((f) => (
+                            <button
+                              key={f.supplierId}
+                              type="button"
+                              onClick={() =>
+                                pickPropSupplier({ id: f.supplierId, name: f.supplierName })
+                              }
+                              className={cn(
+                                "rounded-full px-sm py-1 text-label-md font-semibold",
+                                propSupplierId === f.supplierId
+                                  ? "bg-secondary-container text-on-secondary-container"
+                                  : "border border-outline-variant bg-surface text-on-surface",
+                              )}
+                            >
+                              {f.supplierName}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="relative space-y-xs">
+                      <label className="flex flex-col gap-xs text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                        Buscar fornecedor Omie
+                        <span className="flex items-center gap-sm rounded-md border border-neutral-300 bg-white px-md py-sm">
+                          <Icon
+                            name="search"
+                            className="shrink-0 text-[20px] text-on-surface-variant"
+                          />
+                          <input
+                            value={propSupplierQuery}
+                            onChange={(e) => {
+                              setPropSupplierQuery(e.target.value);
+                              setPropSupplierId("");
+                              setPropSupplierName(e.target.value);
+                            }}
+                            placeholder="Nome, fantasia ou CNPJ…"
+                            className="min-w-0 flex-1 bg-transparent text-body-md font-normal normal-case tracking-normal text-on-surface outline-none"
+                            autoComplete="off"
+                          />
+                        </span>
+                      </label>
+                      {searchingSuppliers ? (
+                        <p className="text-label-sm text-on-surface-variant">Buscando…</p>
+                      ) : null}
+                      {propSupplierHits.length ? (
+                        <ul className="absolute z-20 max-h-48 w-full overflow-auto rounded-lg border border-outline-variant bg-surface shadow-lg">
+                          {propSupplierHits.map((s) => (
+                            <li key={s.id}>
+                              <button
+                                type="button"
+                                className="block w-full px-md py-sm text-left text-body-md hover:bg-surface-container-high"
+                                onClick={() => pickPropSupplier(s)}
+                              >
+                                <span className="font-semibold text-on-surface">{s.name}</span>
+                                <span className="mt-2xs block text-label-sm text-on-surface-variant">
+                                  #{s.codigoOmie}
+                                  {s.cnpjCpf ? ` · ${s.cnpjCpf}` : ""}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {propSupplierId !== "" ? (
+                        <p className="text-label-sm text-on-surface-variant">
+                          Selecionado:{" "}
+                          <span className="font-semibold text-on-surface">{propSupplierName}</span>
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="grid gap-sm sm:grid-cols-2">
+                      <label className="flex flex-col gap-xs text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                        Valor unitário
+                        <input
+                          value={propValor}
+                          onChange={(e) => setPropValor(e.target.value)}
+                          className={softInputClass}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-xs text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                        Previsão
+                        <input
+                          type="date"
+                          value={propPrevisao}
+                          onChange={(e) => setPropPrevisao(e.target.value)}
+                          className={softInputClass}
+                        />
+                      </label>
+                    </div>
+                    <label className="flex flex-col gap-xs text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                      Observações
+                      <textarea
+                        value={propObs}
+                        onChange={(e) => setPropObs(e.target.value)}
+                        rows={2}
+                        className={softInputClass}
+                      />
+                    </label>
+                    <div className="flex flex-wrap gap-sm">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className={softPrimaryBtnClass}
+                        onClick={() => void handleSaveProposta()}
+                      >
+                        {editingPropId ? "Atualizar cotação" : "Adicionar cotação"}
+                      </button>
+                      {editingPropId ? (
+                        <button
+                          type="button"
+                          className={softCancelBtnClass}
+                          onClick={resetPropostaForm}
+                        >
+                          Nova
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </SoftDialogBody>
+          <SoftDialogFooter>
+            <button
+              type="button"
+              className={softCancelBtnClass}
+              onClick={() => setBoardOpen(false)}
+            >
+              Fechar
+            </button>
+            {boardRow &&
+            canComprar &&
+            boardRow.status !== "comprada" &&
+            boardRow.status !== "finalizado" ? (
+              <button
+                type="button"
+                className={softPrimaryBtnClass}
+                disabled={busy}
+                onClick={() => {
+                  setBoardOpen(false);
+                  openConcluir(boardRow);
+                }}
+              >
+                Registrar compra
+              </button>
+            ) : null}
+          </SoftDialogFooter>
+        </SoftDialogContent>
       </Dialog>
     </AppShell>
   );

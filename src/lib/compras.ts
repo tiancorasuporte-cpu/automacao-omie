@@ -4,7 +4,13 @@ import { z } from "zod";
 import { hasPermission } from "@/lib/modules";
 
 const origemSchema = z.enum(["manual", "orcamento", "os"]);
-const statusSchema = z.enum(["aberta", "em_cotacao", "comprada", "cancelada"]);
+const statusSchema = z.enum([
+  "aberta",
+  "em_cotacao",
+  "comprada",
+  "finalizado",
+  "cancelada",
+]);
 
 function canActAsComprador(user: {
   role: string;
@@ -23,17 +29,29 @@ export const getComprasBootstrapFn = createServerFn({ method: "GET" }).handler(a
   await ensureSchema();
   const {
     listCompraSolicitacoes,
-    listOsCompraQueue,
     getComprasUnreadSummary,
+    backfillOsCompraSolicitacoes,
+    listCotacaoPropostasForSolicitacoes,
   } = await import("@/db/compras");
   const { listOmieSuppliers } = await import("@/db/suppliers");
 
-  const [abertas, historico, osQueue, suppliers, unread] = await Promise.all([
-    listCompraSolicitacoes({ status: ["aberta", "em_cotacao"], limit: 300 }),
-    listCompraSolicitacoes({ status: ["comprada", "cancelada"], limit: 500 }),
-    listOsCompraQueue(),
+  await backfillOsCompraSolicitacoes({
+    solicitadoPor: user.id,
+    solicitadoPorNome: user.name,
+  });
+
+  const [abertas, historico, suppliers, unread] = await Promise.all([
+    listCompraSolicitacoes({
+      status: ["aberta", "em_cotacao", "comprada"],
+      limit: 400,
+    }),
+    listCompraSolicitacoes({ status: ["finalizado", "cancelada"], limit: 500 }),
     listOmieSuppliers({ activeOnly: true, limit: 400 }),
     getComprasUnreadSummary(),
+  ]);
+  const propostas = await listCotacaoPropostasForSolicitacoes([
+    ...abertas.map((r) => r.id),
+    ...historico.filter((r) => r.status === "finalizado").slice(0, 80).map((r) => r.id),
   ]);
 
   return {
@@ -45,7 +63,8 @@ export const getComprasBootstrapFn = createServerFn({ method: "GET" }).handler(a
     },
     abertas,
     historico,
-    osQueue,
+    osQueue: [],
+    propostas,
     unread,
     suppliers: suppliers.map((s) => ({
       id: s.id,
@@ -149,6 +168,35 @@ export const searchComprasProductsFn = createServerFn({ method: "GET" })
     });
   });
 
+export const searchComprasSuppliersFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        query: z.string().trim().min(2),
+        limit: z.coerce.number().int().min(1).max(80).optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("compras");
+    const { ensureSchema } = await import("@/db/schema");
+    await ensureSchema();
+    const { listOmieSuppliers } = await import("@/db/suppliers");
+    const rows = await listOmieSuppliers({
+      query: data.query,
+      activeOnly: true,
+      limit: data.limit ?? 40,
+    });
+    return rows.map((s) => ({
+      id: s.id,
+      name: s.nomeFantasia || s.razaoSocial || `Fornecedor ${s.codigoOmie}`,
+      razaoSocial: s.razaoSocial,
+      cnpjCpf: s.cnpjCpf,
+      codigoOmie: s.codigoOmie,
+    }));
+  });
+
 export const createCompraSolicitacaoFn = createServerFn({ method: "POST" })
   .validator((input) =>
     z
@@ -229,11 +277,107 @@ export const setCompraStatusFn = createServerFn({ method: "POST" })
     return { ok: true as const, solicitacao: row };
   });
 
+export const listCotacaoPropostasFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z.object({ solicitacaoId: z.coerce.number().int().positive() }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("compras");
+    const { ensureSchema } = await import("@/db/schema");
+    await ensureSchema();
+    const { listCotacaoPropostas } = await import("@/db/compras");
+    return listCotacaoPropostas(data.solicitacaoId);
+  });
+
+export const saveCotacaoPropostaFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive().optional().nullable(),
+        solicitacaoId: z.number().int().positive(),
+        supplierId: z.number().int().positive().optional().nullable(),
+        supplierName: z.string().trim().min(1).max(200),
+        valorUnitario: z.number().nonnegative(),
+        previsao: z.string().trim().max(10).optional().nullable(),
+        observacao: z.string().trim().max(2000).optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    const { user } = await requireModule("compras");
+    if (!canActAsComprador(user)) {
+      return { ok: false as const, error: "Somente compradores podem registrar cotações." };
+    }
+    const { ensureSchema } = await import("@/db/schema");
+    await ensureSchema();
+    const { saveCotacaoProposta, listCotacaoPropostas, getCompraSolicitacao } = await import(
+      "@/db/compras"
+    );
+    try {
+      await saveCotacaoProposta({
+        id: data.id,
+        solicitacaoId: data.solicitacaoId,
+        supplierId: data.supplierId ?? null,
+        supplierName: data.supplierName,
+        valorUnitario: data.valorUnitario,
+        previsao: data.previsao ?? null,
+        observacao: data.observacao ?? null,
+        createdBy: user.id,
+        createdByName: user.name,
+      });
+      const [propostas, solicitacao] = await Promise.all([
+        listCotacaoPropostas(data.solicitacaoId),
+        getCompraSolicitacao(data.solicitacaoId),
+      ]);
+      return { ok: true as const, propostas, solicitacao };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao salvar cotação.",
+      };
+    }
+  });
+
+export const deleteCotacaoPropostaFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive(),
+        solicitacaoId: z.number().int().positive().optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    const { user } = await requireModule("compras");
+    if (!canActAsComprador(user)) {
+      return { ok: false as const, error: "Somente compradores podem excluir cotações." };
+    }
+    const { ensureSchema } = await import("@/db/schema");
+    await ensureSchema();
+    const { deleteCotacaoProposta, listCotacaoPropostas } = await import("@/db/compras");
+    try {
+      await deleteCotacaoProposta({ id: data.id, solicitacaoId: data.solicitacaoId });
+      const propostas = data.solicitacaoId
+        ? await listCotacaoPropostas(data.solicitacaoId)
+        : [];
+      return { ok: true as const, propostas };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao excluir cotação.",
+      };
+    }
+  });
+
 export const concluirCompraFn = createServerFn({ method: "POST" })
   .validator((input) =>
     z
       .object({
         id: z.number().int().positive(),
+        propostaId: z.number().int().positive().optional().nullable(),
         fornecedorNome: z.string().trim().max(200).optional().nullable(),
         fornecedorId: z.number().int().positive().optional().nullable(),
         valorCompra: z.number().nonnegative().optional().nullable(),
@@ -256,6 +400,7 @@ export const concluirCompraFn = createServerFn({ method: "POST" })
     try {
       const row = await concluirCompraSolicitacao({
         id: data.id,
+        propostaId: data.propostaId ?? null,
         fornecedorNome: data.fornecedorNome ?? null,
         fornecedorId: data.fornecedorId ?? null,
         valorCompra: data.valorCompra ?? null,
@@ -313,21 +458,32 @@ export const markOsItemCompradoFn = createServerFn({ method: "POST" })
 
 export const refreshComprasFn = createServerFn({ method: "GET" }).handler(async () => {
   const { requireModule } = await import("@/lib/require-auth");
-  await requireModule("compras");
+  const { user } = await requireModule("compras");
   const { ensureSchema } = await import("@/db/schema");
   await ensureSchema();
   const {
     listCompraSolicitacoes,
-    listOsCompraQueue,
     getComprasUnreadSummary,
+    listCotacaoPropostasForSolicitacoes,
+    backfillOsCompraSolicitacoes,
   } = await import("@/db/compras");
-  const [abertas, historico, osQueue, unread] = await Promise.all([
-    listCompraSolicitacoes({ status: ["aberta", "em_cotacao"], limit: 300 }),
-    listCompraSolicitacoes({ status: ["comprada", "cancelada"], limit: 500 }),
-    listOsCompraQueue(),
+  await backfillOsCompraSolicitacoes({
+    solicitadoPor: user.id,
+    solicitadoPorNome: user.name,
+  });
+  const [abertas, historico, unread] = await Promise.all([
+    listCompraSolicitacoes({
+      status: ["aberta", "em_cotacao", "comprada"],
+      limit: 400,
+    }),
+    listCompraSolicitacoes({ status: ["finalizado", "cancelada"], limit: 500 }),
     getComprasUnreadSummary(),
   ]);
-  return { abertas, historico, osQueue, unread };
+  const propostas = await listCotacaoPropostasForSolicitacoes([
+    ...abertas.map((r) => r.id),
+    ...historico.filter((r) => r.status === "finalizado").slice(0, 80).map((r) => r.id),
+  ]);
+  return { abertas, historico, osQueue: [], propostas, unread };
 });
 
 export function notifyComprasUnreadChanged() {

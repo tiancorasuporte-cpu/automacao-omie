@@ -7,7 +7,12 @@ import { listProductSupplierCodes } from "@/db/suppliers";
 import { updateOsItemStatus } from "@/db/assistencia";
 
 export type CompraOrigem = "manual" | "orcamento" | "os";
-export type CompraStatus = "aberta" | "em_cotacao" | "comprada" | "cancelada";
+export type CompraStatus =
+  | "aberta"
+  | "em_cotacao"
+  | "comprada"
+  | "finalizado"
+  | "cancelada";
 
 export type CompraFornecedorSnap = {
   supplierId: number;
@@ -168,7 +173,9 @@ function mapSolicitacao(row: Record<string, unknown>): CompraSolicitacao {
     compradoPorNome: nullableStr(row["comprado_por_nome"]),
     compradoEm: iso(row["comprado_em"]),
     vistoEm: iso(row["visto_em"]),
-    naoVisto: !row["visto_em"] && ["aberta", "em_cotacao"].includes(str(row["status"])),
+    naoVisto:
+      !row["visto_em"] &&
+      ["aberta", "em_cotacao", "comprada"].includes(str(row["status"])),
     createdAt: iso(row["created_at"]) ?? "",
     updatedAt: iso(row["updated_at"]) ?? "",
   };
@@ -281,6 +288,97 @@ export async function createCompraSolicitacao(input: {
   return mapSolicitacao(row);
 }
 
+/** Cria (ou reutiliza) solicitação de compra para item OS marcado como comprar. */
+export async function ensureOsCompraSolicitacao(input: {
+  osItemId: number;
+  solicitadoPor?: number | null;
+  solicitadoPorNome?: string;
+}) {
+  const db = await getDb();
+  const existing = (await db`
+    select *
+    from compras_solicitacoes
+    where os_item_id = ${input.osItemId}
+      and status in ('aberta', 'em_cotacao')
+    order by id desc
+    limit 1
+  `) as Record<string, unknown>[];
+  if (existing[0]) return mapSolicitacao(existing[0]);
+
+  const rows = (await db`
+    select
+      i.id as item_id,
+      i.os_id,
+      i.qtd,
+      i.nome,
+      i.product_id,
+      o.num as os_num,
+      o.quote_id,
+      o.quote_numero,
+      o.client_name
+    from assist_os_items i
+    join assist_os o on o.id = i.os_id
+    where i.id = ${input.osItemId}
+    limit 1
+  `) as Record<string, unknown>[];
+  const row = rows[0];
+  if (!row) throw new Error("Item da OS não encontrado.");
+
+  const osNum = str(row["os_num"]);
+  const clientName = nullableStr(row["client_name"]);
+  return createCompraSolicitacao({
+    origem: "os",
+    descricao: str(row["nome"]),
+    qtd: num(row["qtd"]) || 1,
+    productId: row["product_id"] == null ? null : num(row["product_id"]),
+    quoteId: row["quote_id"] == null ? null : num(row["quote_id"]),
+    quoteNumero: nullableStr(row["quote_numero"]),
+    osId: num(row["os_id"]),
+    osItemId: num(row["item_id"]),
+    motivo: `Compra da OS ${osNum}${clientName ? ` · ${clientName}` : ""}`,
+    solicitadoPor: input.solicitadoPor ?? null,
+    solicitadoPorNome: input.solicitadoPorNome?.trim() || "Assistência",
+  });
+}
+
+/** Garante solicitação para todo item OS ainda em 'comprar' sem pedido aberto. */
+export async function backfillOsCompraSolicitacoes(input?: {
+  solicitadoPor?: number | null;
+  solicitadoPorNome?: string;
+}) {
+  const db = await getDb();
+  const missing = (await db`
+    select i.id
+    from assist_os_items i
+    join assist_os o on o.id = i.os_id
+    where i.status = 'comprar'
+      and o.stage in (1, 2)
+      and not exists (
+        select 1
+        from compras_solicitacoes s
+        where s.os_item_id = i.id
+          and s.status in ('aberta', 'em_cotacao')
+      )
+    order by i.id asc
+    limit 200
+  `) as Array<{ id: number }>;
+  const created: CompraSolicitacao[] = [];
+  for (const row of missing) {
+    try {
+      created.push(
+        await ensureOsCompraSolicitacao({
+          osItemId: num(row.id),
+          solicitadoPor: input?.solicitadoPor ?? null,
+          solicitadoPorNome: input?.solicitadoPorNome,
+        }),
+      );
+    } catch {
+      // best-effort
+    }
+  }
+  return created;
+}
+
 export async function listCompraSolicitacoesForQuote(input: {
   quoteId?: number | null;
   quoteNumero?: string | null;
@@ -327,7 +425,8 @@ export async function listCompraSolicitacoes(input?: {
               when 'aberta' then 0
               when 'em_cotacao' then 1
               when 'comprada' then 2
-              else 3
+              when 'finalizado' then 3
+              else 4
             end,
             created_at desc
           limit ${limit}
@@ -367,8 +466,155 @@ export async function setCompraSolicitacaoStatus(input: {
   return row ? mapSolicitacao(row) : null;
 }
 
+export type CotacaoProposta = {
+  id: number;
+  solicitacaoId: number;
+  supplierId: number | null;
+  supplierName: string;
+  valorUnitario: number;
+  previsao: string | null;
+  observacao: string | null;
+  createdBy: number | null;
+  createdByName: string;
+  createdAt: string;
+};
+
+function mapProposta(row: Record<string, unknown>): CotacaoProposta {
+  return {
+    id: num(row["id"]),
+    solicitacaoId: num(row["solicitacao_id"]),
+    supplierId: row["supplier_id"] == null ? null : num(row["supplier_id"]),
+    supplierName: str(row["supplier_name"]),
+    valorUnitario: num(row["valor_unitario"]),
+    previsao: dateOnly(row["previsao"]),
+    observacao: nullableStr(row["observacao"]),
+    createdBy: row["created_by"] == null ? null : num(row["created_by"]),
+    createdByName: str(row["created_by_name"]),
+    createdAt: iso(row["created_at"]) ?? "",
+  };
+}
+
+export async function listCotacaoPropostas(solicitacaoId: number) {
+  const db = await getDb();
+  const rows = (await db`
+    select *
+    from compras_cotacao_propostas
+    where solicitacao_id = ${solicitacaoId}
+    order by created_at asc, id asc
+  `) as Record<string, unknown>[];
+  return rows.map(mapProposta);
+}
+
+export async function listCotacaoPropostasForSolicitacoes(solicitacaoIds: number[]) {
+  const ids = [...new Set(solicitacaoIds.filter((id) => Number.isFinite(id) && id > 0))];
+  if (!ids.length) return [] as CotacaoProposta[];
+  const db = await getDb();
+  const rows = (await db`
+    select *
+    from compras_cotacao_propostas
+    where solicitacao_id in ${db(ids)}
+    order by created_at asc, id asc
+  `) as Record<string, unknown>[];
+  return rows.map(mapProposta);
+}
+
+export async function getCotacaoProposta(id: number) {
+  const db = await getDb();
+  const [row] = (await db`
+    select * from compras_cotacao_propostas where id = ${id} limit 1
+  `) as Record<string, unknown>[];
+  return row ? mapProposta(row) : null;
+}
+
+export async function saveCotacaoProposta(input: {
+  id?: number | null;
+  solicitacaoId: number;
+  supplierId?: number | null;
+  supplierName: string;
+  valorUnitario: number;
+  previsao?: string | null;
+  observacao?: string | null;
+  createdBy: number | null;
+  createdByName: string;
+}) {
+  const solicitacao = await getCompraSolicitacao(input.solicitacaoId);
+  if (!solicitacao) throw new Error("Solicitação não encontrada.");
+  if (solicitacao.status === "comprada" || solicitacao.status === "finalizado") {
+    throw new Error("Solicitação já concluída.");
+  }
+  if (solicitacao.status === "cancelada") {
+    throw new Error("Solicitação cancelada.");
+  }
+  const supplierName = input.supplierName.trim().slice(0, 200);
+  if (!supplierName) throw new Error("Informe o fornecedor.");
+  if (!(input.valorUnitario >= 0) || !Number.isFinite(input.valorUnitario)) {
+    throw new Error("Valor unitário inválido.");
+  }
+  const previsao = nullableStr(input.previsao)?.slice(0, 10) ?? null;
+  const observacao = nullableStr(input.observacao);
+  const supplierId =
+    input.supplierId != null && Number.isFinite(input.supplierId) && input.supplierId > 0
+      ? Number(input.supplierId)
+      : null;
+  const db = await getDb();
+
+  if (input.id != null && input.id > 0) {
+    const [row] = (await db`
+      update compras_cotacao_propostas
+      set supplier_id = ${supplierId},
+          supplier_name = ${supplierName},
+          valor_unitario = ${input.valorUnitario},
+          previsao = ${previsao},
+          observacao = ${observacao}
+      where id = ${input.id} and solicitacao_id = ${input.solicitacaoId}
+      returning *
+    `) as Record<string, unknown>[];
+    if (!row) throw new Error("Proposta não encontrada.");
+    return mapProposta(row);
+  }
+
+  const [row] = (await db`
+    insert into compras_cotacao_propostas (
+      solicitacao_id, supplier_id, supplier_name, valor_unitario, previsao, observacao,
+      created_by, created_by_name
+    ) values (
+      ${input.solicitacaoId},
+      ${supplierId},
+      ${supplierName},
+      ${input.valorUnitario},
+      ${previsao},
+      ${observacao},
+      ${input.createdBy},
+      ${input.createdByName.trim() || "Comprador"}
+    )
+    returning *
+  `) as Record<string, unknown>[];
+  if (!row) throw new Error("Falha ao salvar proposta.");
+
+  if (solicitacao.status === "aberta") {
+    await setCompraSolicitacaoStatus({ id: input.solicitacaoId, status: "em_cotacao" });
+  }
+  return mapProposta(row);
+}
+
+export async function deleteCotacaoProposta(input: { id: number; solicitacaoId?: number }) {
+  const db = await getDb();
+  const existing = await getCotacaoProposta(input.id);
+  if (!existing) throw new Error("Proposta não encontrada.");
+  if (input.solicitacaoId != null && existing.solicitacaoId !== input.solicitacaoId) {
+    throw new Error("Proposta não pertence a esta solicitação.");
+  }
+  const solicitacao = await getCompraSolicitacao(existing.solicitacaoId);
+  if (solicitacao?.status === "comprada" || solicitacao?.status === "finalizado") {
+    throw new Error("Não é possível excluir proposta de compra já concluída.");
+  }
+  await db`delete from compras_cotacao_propostas where id = ${input.id}`;
+  return true;
+}
+
 export async function concluirCompraSolicitacao(input: {
   id: number;
+  propostaId?: number | null;
   fornecedorNome?: string | null;
   fornecedorId?: number | null;
   valorCompra?: number | null;
@@ -381,11 +627,35 @@ export async function concluirCompraSolicitacao(input: {
 }) {
   const current = await getCompraSolicitacao(input.id);
   if (!current) throw new Error("Solicitação não encontrada.");
-  if (current.status === "comprada") throw new Error("Solicitação já concluída.");
+  if (current.status === "comprada" || current.status === "finalizado") {
+    throw new Error("Solicitação já concluída.");
+  }
   if (current.status === "cancelada") throw new Error("Solicitação cancelada.");
 
+  let fornecedorNome = input.fornecedorNome ?? null;
+  let fornecedorId = input.fornecedorId ?? null;
+  let valorCompra = input.valorCompra ?? null;
+  let previsao = input.previsao ?? null;
+  let notasCompra = input.notasCompra ?? null;
+
+  if (input.propostaId != null && input.propostaId > 0) {
+    const proposta = await getCotacaoProposta(input.propostaId);
+    if (!proposta || proposta.solicitacaoId !== current.id) {
+      throw new Error("Cotação selecionada inválida.");
+    }
+    fornecedorNome = proposta.supplierName;
+    fornecedorId = proposta.supplierId;
+    valorCompra = proposta.valorUnitario;
+    if (proposta.previsao) previsao = proposta.previsao;
+    if (proposta.observacao) {
+      notasCompra = notasCompra
+        ? `${notasCompra}\n${proposta.observacao}`
+        : proposta.observacao;
+    }
+  }
+
   const cmcNovo =
-    input.cmcNovo != null && Number.isFinite(input.cmcNovo) ? input.cmcNovo : input.valorCompra ?? null;
+    input.cmcNovo != null && Number.isFinite(input.cmcNovo) ? input.cmcNovo : valorCompra ?? null;
 
   if (input.updateCmcInterno !== false && current.productId != null && cmcNovo != null) {
     const product = await getOmieProductById(current.productId);
@@ -403,12 +673,12 @@ export async function concluirCompraSolicitacao(input: {
   const [row] = (await db`
     update compras_solicitacoes
     set status = 'comprada',
-        fornecedor_nome = ${nullableStr(input.fornecedorNome)},
-        fornecedor_id = ${input.fornecedorId ?? null},
-        valor_compra = ${input.valorCompra ?? null},
+        fornecedor_nome = ${nullableStr(fornecedorNome)},
+        fornecedor_id = ${fornecedorId},
+        valor_compra = ${valorCompra},
         cmc_novo = ${cmcNovo},
-        previsao = ${input.previsao ?? null},
-        notas_compra = ${nullableStr(input.notasCompra)},
+        previsao = ${previsao},
+        notas_compra = ${nullableStr(notasCompra)},
         comprado_por = ${input.compradoPor},
         comprado_por_nome = ${input.compradoPorNome.trim() || "Comprador"},
         comprado_em = now(),
@@ -416,7 +686,20 @@ export async function concluirCompraSolicitacao(input: {
     where id = ${input.id}
     returning *
   `) as Record<string, unknown>[];
-  return row ? mapSolicitacao(row) : null;
+  const result = row ? mapSolicitacao(row) : null;
+  if (result?.osItemId) {
+    try {
+      await markOsItemComprado({
+        itemId: result.osItemId,
+        previsao: result.previsao,
+        quem: input.compradoPorNome,
+        userId: input.compradoPor,
+      });
+    } catch {
+      // Compra já gravada; sync do Quadro de O.S é best-effort.
+    }
+  }
+  return result;
 }
 
 export async function listOsCompraQueue() {
@@ -496,25 +779,15 @@ export type ComprasUnreadSummary = {
 
 export async function getComprasUnreadSummary(): Promise<ComprasUnreadSummary> {
   const db = await getDb();
-  const [cotRows, kanbanRows] = await Promise.all([
-    db`
-      select count(*)::int as total
-      from compras_solicitacoes
-      where status in ('aberta', 'em_cotacao')
-        and visto_em is null
-    ` as Promise<Array<{ total: number }>>,
-    db`
-      select count(*)::int as total
-      from assist_os_items i
-      join assist_os o on o.id = i.os_id
-      where i.status = 'comprar'
-        and i.compra_visto_em is null
-        and o.stage in (1, 2)
-    ` as Promise<Array<{ total: number }>>,
-  ]);
-  const cotacoes = Number(cotRows[0]?.total ?? 0);
-  const kanban = Number(kanbanRows[0]?.total ?? 0);
-  return { cotacoes, kanban, total: cotacoes + kanban };
+  const cotRows = (await db`
+    select count(*)::int as total
+    from compras_solicitacoes
+    where status in ('aberta', 'em_cotacao')
+      and visto_em is null
+  `) as Array<{ total: number }>;
+  const open = Number(cotRows[0]?.total ?? 0);
+  // Quadro unificado: badge do Quadro usa `kanban`; `cotacoes` permanece por compat.
+  return { cotacoes: open, kanban: open, total: open };
 }
 
 export async function markComprasAsSeen(input?: {
@@ -522,18 +795,17 @@ export async function markComprasAsSeen(input?: {
   kanban?: boolean;
 }): Promise<ComprasUnreadSummary> {
   const hasExplicit = input?.cotacoes != null || input?.kanban != null;
-  const markCotacoes = hasExplicit ? Boolean(input?.cotacoes) : true;
-  const markKanban = hasExplicit ? Boolean(input?.kanban) : true;
+  const markQuadro = hasExplicit
+    ? Boolean(input?.cotacoes) || Boolean(input?.kanban)
+    : true;
   const db = await getDb();
-  if (markCotacoes) {
+  if (markQuadro) {
     await db`
       update compras_solicitacoes
       set visto_em = now(), updated_at = now()
       where status in ('aberta', 'em_cotacao')
         and visto_em is null
     `;
-  }
-  if (markKanban) {
     await db`
       update assist_os_items i
       set compra_visto_em = now(), updated_at = now()

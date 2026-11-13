@@ -67,6 +67,7 @@ import {
   submitConferenceFn,
   updateOsItemFn,
 } from "@/lib/assistencia";
+import { notifyComprasUnreadChanged } from "@/lib/compras";
 import {
   OS_ITEM_STATUS_CLASS,
   OS_ITEM_STATUS_LABEL,
@@ -1197,11 +1198,12 @@ function AssistenciaPage() {
                                   type="button"
                                   disabled={busy || it.status === "comprar"}
                                   onClick={() =>
-                                    run(() =>
-                                      updateOsItemFn({
+                                    void run(async () => {
+                                      await updateOsItemFn({
                                         data: { itemId: it.id, status: "comprar" },
-                                      }),
-                                    )
+                                      });
+                                      notifyComprasUnreadChanged();
+                                    })
                                   }
                                   className={cn(
                                     "rounded-full px-sm py-2xs text-label-sm font-semibold disabled:opacity-60",
@@ -2469,11 +2471,20 @@ function AssistenciaPage() {
   }
 
   return (
-    <AppShell mobileTitle="Assistência" searchPlaceholder="Buscar OS, cliente, orçamento...">
-      <div className="flex flex-col gap-md px-margin-mobile py-md md:px-margin-desktop md:py-lg">
+    <AppShell
+      mobileTitle="Assistência"
+      searchPlaceholder="Buscar OS, cliente, orçamento..."
+      fullHeight={tab === "kanban"}
+    >
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col gap-md px-margin-mobile py-md md:px-margin-desktop md:py-lg",
+          tab === "kanban" && "overflow-hidden",
+        )}
+      >
         <PageTitle
           title="Assistência"
-          subtitle="Kanban de OS, agenda, conferência e relatório."
+          subtitle="Quadro de O.S, agenda, conferência e relatório."
         >
           {boot.user.canAssistencia || boot.user.isAdmin ? (
             <button type="button" onClick={openNewOs} className={btnPrimary}>
@@ -2483,42 +2494,101 @@ function AssistenciaPage() {
           ) : null}
         </PageTitle>
 
-        <div className="flex flex-wrap items-center gap-xs">
+        <div className="grid gap-sm sm:grid-cols-2 lg:grid-cols-5">
+          <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-md py-sm">
+            <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
+              No quadro
+            </div>
+            <div className="text-title-lg font-bold text-on-surface">
+              {filtered.filter((o) => o.stage < 7).length}
+            </div>
+          </div>
+          <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-md py-sm">
+            <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
+              Suas pendências
+            </div>
+            <div className="text-title-lg font-bold text-on-surface">{myPendingOs.length}</div>
+          </div>
+          <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-md py-sm">
+            <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
+              Compras
+            </div>
+            <div className="text-title-lg font-bold text-on-surface">
+              {(byStage.get(2) ?? []).length}
+            </div>
+          </div>
+          <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-md py-sm">
+            <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
+              Em execução
+            </div>
+            <div className="text-title-lg font-bold text-on-surface">
+              {(byStage.get(5) ?? []).length}
+            </div>
+          </div>
+          <div className="rounded-xl border border-outline-variant bg-surface-container-lowest px-md py-sm">
+            <div className="text-label-sm uppercase tracking-wide text-on-surface-variant">
+              Finalizado
+            </div>
+            <div className="text-title-lg font-bold text-on-surface">
+              {(byStage.get(7) ?? []).length}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-xs border-b border-outline-variant pb-sm">
           {(
             [
-              ["kanban", "Kanban"],
-              ["agenda", "Agenda"],
-              ["conf", "Conferência"],
-              ["rel", "Relatório"],
-              ["config", "Config"],
+              ["kanban", "Quadro de O.S", "view_kanban"],
+              ["agenda", "Agenda", "calendar_month"],
+              ["conf", "Conferência", "fact_check"],
+              ["rel", "Relatório", "assessment"],
+              ["config", "Config", "settings"],
             ] as const
-          ).map(([id, label]) => (
+          ).map(([id, label, icon]) => (
             <button
               key={id}
               type="button"
               onClick={() => goTab(id)}
               className={cn(
-                tab === id ? btnPrimary : btnOutline,
+                "inline-flex items-center gap-xs rounded-lg px-sm py-xs text-label-md font-semibold",
+                tab === id
+                  ? "bg-neutral-900 text-white"
+                  : "bg-surface text-on-surface-variant hover:bg-surface-container",
               )}
             >
+              <Icon name={icon} className="text-[16px]" />
               {label}
             </button>
           ))}
           <button
             type="button"
             onClick={() => setFiltersOpen((v) => !v)}
-            className={cn(filtersOpen || globalFiltersActive ? btnPrimary : btnOutline)}
+            className={cn(
+              "ml-auto inline-flex items-center gap-xs rounded-lg border px-sm py-xs text-label-md font-semibold",
+              filtersOpen || globalFiltersActive
+                ? "border-neutral-900 bg-neutral-900 text-white"
+                : "border-outline-variant bg-white text-on-surface",
+            )}
           >
             <Icon name="filter_list" className="text-[16px]" />
             Filtros
             {globalFiltersActive ? (
-              <span className="rounded-full bg-white/25 px-xs text-label-sm">ativos</span>
+              <span
+                className={cn(
+                  "rounded-full px-xs py-2xs text-[10px] font-bold uppercase",
+                  filtersOpen || globalFiltersActive
+                    ? "bg-white/20 text-white"
+                    : "bg-amber-100 text-amber-950",
+                )}
+              >
+                on
+              </span>
             ) : null}
           </button>
         </div>
 
         {filtersOpen ? (
-          <PageSection className="border-outline-variant/80 bg-surface-container-low">
+          <PageSection className="border-outline-variant/80 bg-surface-container-lowest">
             <div className="flex flex-wrap items-end gap-md">
               <label className="flex min-w-[10rem] flex-1 flex-col gap-2xs text-label-md text-on-surface-variant">
                 Nome / OS
@@ -2718,7 +2788,7 @@ function AssistenciaPage() {
                 className={btnOutline}
                 onClick={() => goTab("kanban")}
               >
-                Ver no Kanban
+                Ver no quadro de O.S
               </button>
             </div>
             <div className="mt-sm flex flex-wrap gap-xs">
@@ -2748,7 +2818,7 @@ function AssistenciaPage() {
         ) : null}
 
         {tab === "kanban" ? (
-          <div className="flex gap-md overflow-x-auto pb-md">
+          <div className="flex min-h-0 flex-1 gap-md overflow-x-auto pb-md">
             {OS_STAGES.map((stage) => {
               const mine = isMySectorStage(stage.idx);
               const style = osKanbanColumnStyle(mine);
@@ -2777,7 +2847,7 @@ function AssistenciaPage() {
                 <div
                   key={stage.idx}
                   className={cn(
-                    "flex w-[17.5rem] shrink-0 flex-col overflow-hidden rounded-2xl border shadow-sm transition",
+                    "flex h-full min-h-0 min-w-[15.5rem] flex-1 flex-col overflow-hidden rounded-2xl border shadow-sm transition",
                     style.column,
                     dropActive && "ring-2 ring-amber-500 ring-offset-2",
                   )}
@@ -2906,7 +2976,7 @@ function AssistenciaPage() {
                       </div>
                     ) : null}
                   </div>
-                  <div className="flex max-h-[65vh] flex-col gap-sm overflow-auto p-sm">
+                  <div className="flex min-h-0 flex-1 flex-col gap-sm overflow-auto p-sm">
                     {visibleRows.map((os) => {
                       const mineCard = isMySectorStage(os.stage);
                       const cta = osCardPrimaryCta(os);

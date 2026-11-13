@@ -759,6 +759,18 @@ export async function updateOsItemStatus(input: {
     acao: `Item "${str(item["nome"])}" → ${input.status}`,
   });
   await db`update assist_os set updated_at = now() where id = ${num(item["os_id"])}`;
+  if (goingToComprar) {
+    try {
+      const { ensureOsCompraSolicitacao } = await import("@/db/compras");
+      await ensureOsCompraSolicitacao({
+        osItemId: input.itemId,
+        solicitadoPor: input.userId ?? null,
+        solicitadoPorNome: input.quem,
+      });
+    } catch {
+      // Compra board sync is best-effort; item already marked comprar.
+    }
+  }
   return getOsById(num(item["os_id"]));
 }
 

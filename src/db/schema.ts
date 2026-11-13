@@ -1884,6 +1884,28 @@ export async function ensureSchema() {
     `);
   }
 
+  if (!(await tableExists("compras_cotacao_propostas"))) {
+    await sql`
+      create table compras_cotacao_propostas (
+        id serial primary key,
+        solicitacao_id integer not null references compras_solicitacoes(id) on delete cascade,
+        supplier_id integer,
+        supplier_name varchar(200) not null,
+        valor_unitario numeric(15, 4) not null,
+        previsao date,
+        observacao text,
+        created_by integer references users(id) on delete set null,
+        created_by_name varchar(120) not null default '',
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("compras_cotacao_propostas_sol_idx"))) {
+    await sql.unsafe(
+      "create index compras_cotacao_propostas_sol_idx on compras_cotacao_propostas (solicitacao_id, created_at desc)",
+    );
+  }
+
   // FK tardia: tickets existe depois de assist_os.ticket_id
   try {
     await sql.unsafe(`
