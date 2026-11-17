@@ -154,6 +154,11 @@ export async function ensureSchema() {
       "alter table users add column last_location_at timestamptz",
     );
   }
+  if (!(await columnExists("users", "last_accuracy_m"))) {
+    await sql.unsafe(
+      "alter table users add column last_accuracy_m numeric(10, 2)",
+    );
+  }
 
   if (!(await tableExists("due_items"))) {
     await sql`
@@ -1651,6 +1656,16 @@ export async function ensureSchema() {
   }
   if ((await tableExists("assist_os_items")) && !(await columnExists("assist_os_items", "baixa_qtd"))) {
     await sql.unsafe("alter table assist_os_items add column baixa_qtd numeric(15, 4)");
+  }
+  if ((await tableExists("assist_os_items")) && !(await columnExists("assist_os_items", "confirmado_em"))) {
+    await sql.unsafe(
+      "alter table assist_os_items add column confirmado_em timestamptz",
+    );
+  }
+  if ((await tableExists("assist_os_items")) && !(await columnExists("assist_os_items", "confirmado_por"))) {
+    await sql.unsafe(
+      "alter table assist_os_items add column confirmado_por varchar(160)",
+    );
   }
   if (!(await indexExists("assist_os_items_os_idx"))) {
     await sql.unsafe("create index assist_os_items_os_idx on assist_os_items (os_id)");

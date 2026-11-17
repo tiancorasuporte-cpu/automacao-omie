@@ -8,6 +8,7 @@ import {
   backfillOsClientLocations,
   checkInOs,
   checkOutOs,
+  confirmOsMaterialItem,
   createOs,
   deleteOs,
   finishVisita,
@@ -494,6 +495,29 @@ export const startExecOsFn = createServerFn({ method: "POST" })
     return startExecOs({
       osId: data.osId,
       materialOk: data.materialOk ?? true,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const confirmOsMaterialItemFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        itemId: z.number().int().positive(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return confirmOsMaterialItem({
+      osId: data.osId,
+      itemId: data.itemId,
       quem: user.name,
       userId: user.id,
       isAdmin: roles.isAdmin,

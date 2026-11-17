@@ -203,7 +203,12 @@ export async function setUserPasswordByAdmin(id: number, password: string) {
 
 export async function updateTecnicoLocation(
   userId: number,
-  input: { lat: number; lng: number; at?: Date | string | null },
+  input: {
+    lat: number;
+    lng: number;
+    at?: Date | string | null;
+    accuracy?: number | null;
+  },
 ) {
   const lat = Number(input.lat);
   const lng = Number(input.lng);
@@ -220,14 +225,57 @@ export async function updateTecnicoLocation(
   if (Number.isNaN(at.getTime())) {
     throw new Error("Timestamp de localização inválido.");
   }
+  const accuracyRaw =
+    input.accuracy == null || input.accuracy === ("" as unknown)
+      ? null
+      : Number(input.accuracy);
+  const accuracy =
+    accuracyRaw != null && Number.isFinite(accuracyRaw) && accuracyRaw >= 0
+      ? Math.round(accuracyRaw * 100) / 100
+      : null;
+
   const db = await getDb();
+  // Se já temos um ponto fresco e bem preciso, ignora leitura bem pior.
+  if (accuracy != null && accuracy > 80) {
+    const [prev] = (await db`
+      select last_lat, last_lng, last_location_at, last_accuracy_m
+      from users where id = ${userId} limit 1
+    `) as Array<{
+      last_lat: number | string | null;
+      last_lng: number | string | null;
+      last_location_at: Date | string | null;
+      last_accuracy_m: number | string | null;
+    }>;
+    if (prev?.last_lat != null && prev.last_lng != null && prev.last_location_at) {
+      const ageMs = Date.now() - new Date(prev.last_location_at).getTime();
+      const prevAcc =
+        prev.last_accuracy_m == null ? null : Number(prev.last_accuracy_m);
+      if (
+        ageMs < 15 * 60 * 1000 &&
+        prevAcc != null &&
+        Number.isFinite(prevAcc) &&
+        prevAcc <= 50 &&
+        accuracy > prevAcc * 2
+      ) {
+        return {
+          lat: Number(prev.last_lat),
+          lng: Number(prev.last_lng),
+          at: new Date(prev.last_location_at).toISOString(),
+          accuracy: prevAcc,
+          keptPrevious: true as const,
+        };
+      }
+    }
+  }
+
   await db`
     update users
     set last_lat = ${lat},
         last_lng = ${lng},
         last_location_at = ${at},
+        last_accuracy_m = ${accuracy},
         updated_at = now()
     where id = ${userId}
   `;
-  return { lat, lng, at: at.toISOString() };
+  return { lat, lng, at: at.toISOString(), accuracy, keptPrevious: false as const };
 }

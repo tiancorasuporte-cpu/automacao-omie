@@ -52,6 +52,7 @@ import { Route as ApiMobileOsIdIndexRouteImport } from './routes/api/mobile/os/$
 import { Route as ApiMobileOsIdCheckInRouteImport } from './routes/api/mobile/os/$id/check-in'
 import { Route as ApiMobileOsIdCheckOutRouteImport } from './routes/api/mobile/os/$id/check-out'
 import { Route as ApiMobileOsIdChecklistRouteImport } from './routes/api/mobile/os/$id/checklist'
+import { Route as ApiMobileOsIdConfirmarItemRouteImport } from './routes/api/mobile/os/$id/confirmar-item'
 import { Route as ApiMobileOsIdPauseRouteImport } from './routes/api/mobile/os/$id/pause'
 import { Route as ApiMobileOsIdResumeRouteImport } from './routes/api/mobile/os/$id/resume'
 import { Route as ApiMobileOsIdStartRouteImport } from './routes/api/mobile/os/$id/start'
@@ -274,6 +275,12 @@ const ApiMobileOsIdChecklistRoute = ApiMobileOsIdChecklistRouteImport.update({
   path: '/api/mobile/os/$id/checklist',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMobileOsIdConfirmarItemRoute =
+  ApiMobileOsIdConfirmarItemRouteImport.update({
+    id: '/api/mobile/os/$id/confirmar-item',
+    path: '/api/mobile/os/$id/confirmar-item',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiMobileOsIdPauseRoute = ApiMobileOsIdPauseRouteImport.update({
   id: '/api/mobile/os/$id/pause',
   path: '/api/mobile/os/$id/pause',
@@ -339,6 +346,7 @@ export interface FileRoutesByFullPath {
   '/api/mobile/os/$id/check-in': typeof ApiMobileOsIdCheckInRoute
   '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
   '/api/mobile/os/$id/checklist': typeof ApiMobileOsIdChecklistRoute
+  '/api/mobile/os/$id/confirmar-item': typeof ApiMobileOsIdConfirmarItemRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
@@ -388,6 +396,7 @@ export interface FileRoutesByTo {
   '/api/mobile/os/$id/check-in': typeof ApiMobileOsIdCheckInRoute
   '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
   '/api/mobile/os/$id/checklist': typeof ApiMobileOsIdChecklistRoute
+  '/api/mobile/os/$id/confirmar-item': typeof ApiMobileOsIdConfirmarItemRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
@@ -438,6 +447,7 @@ export interface FileRoutesById {
   '/api/mobile/os/$id/check-in': typeof ApiMobileOsIdCheckInRoute
   '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
   '/api/mobile/os/$id/checklist': typeof ApiMobileOsIdChecklistRoute
+  '/api/mobile/os/$id/confirmar-item': typeof ApiMobileOsIdConfirmarItemRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
@@ -489,6 +499,7 @@ export interface FileRouteTypes {
     | '/api/mobile/os/$id/check-in'
     | '/api/mobile/os/$id/check-out'
     | '/api/mobile/os/$id/checklist'
+    | '/api/mobile/os/$id/confirmar-item'
     | '/api/mobile/os/$id/pause'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
@@ -538,6 +549,7 @@ export interface FileRouteTypes {
     | '/api/mobile/os/$id/check-in'
     | '/api/mobile/os/$id/check-out'
     | '/api/mobile/os/$id/checklist'
+    | '/api/mobile/os/$id/confirmar-item'
     | '/api/mobile/os/$id/pause'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
@@ -587,6 +599,7 @@ export interface FileRouteTypes {
     | '/api/mobile/os/$id/check-in'
     | '/api/mobile/os/$id/check-out'
     | '/api/mobile/os/$id/checklist'
+    | '/api/mobile/os/$id/confirmar-item'
     | '/api/mobile/os/$id/pause'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
@@ -637,6 +650,7 @@ export interface RootRouteChildren {
   ApiMobileOsIdCheckInRoute: typeof ApiMobileOsIdCheckInRoute
   ApiMobileOsIdCheckOutRoute: typeof ApiMobileOsIdCheckOutRoute
   ApiMobileOsIdChecklistRoute: typeof ApiMobileOsIdChecklistRoute
+  ApiMobileOsIdConfirmarItemRoute: typeof ApiMobileOsIdConfirmarItemRoute
   ApiMobileOsIdPauseRoute: typeof ApiMobileOsIdPauseRoute
   ApiMobileOsIdResumeRoute: typeof ApiMobileOsIdResumeRoute
   ApiMobileOsIdStartRoute: typeof ApiMobileOsIdStartRoute
@@ -947,6 +961,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMobileOsIdChecklistRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mobile/os/$id/confirmar-item': {
+      id: '/api/mobile/os/$id/confirmar-item'
+      path: '/api/mobile/os/$id/confirmar-item'
+      fullPath: '/api/mobile/os/$id/confirmar-item'
+      preLoaderRoute: typeof ApiMobileOsIdConfirmarItemRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/mobile/os/$id/pause': {
       id: '/api/mobile/os/$id/pause'
       path: '/api/mobile/os/$id/pause'
@@ -1021,6 +1042,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMobileOsIdCheckInRoute: ApiMobileOsIdCheckInRoute,
   ApiMobileOsIdCheckOutRoute: ApiMobileOsIdCheckOutRoute,
   ApiMobileOsIdChecklistRoute: ApiMobileOsIdChecklistRoute,
+  ApiMobileOsIdConfirmarItemRoute: ApiMobileOsIdConfirmarItemRoute,
   ApiMobileOsIdPauseRoute: ApiMobileOsIdPauseRoute,
   ApiMobileOsIdResumeRoute: ApiMobileOsIdResumeRoute,
   ApiMobileOsIdStartRoute: ApiMobileOsIdStartRoute,

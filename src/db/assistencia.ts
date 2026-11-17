@@ -58,8 +58,26 @@ export type AssistOsItem = {
   sobraDestino: "devolver" | "equipe" | null;
   baixaStatus: "pendente" | "feita" | "ignorada" | null;
   baixaQtd: number | null;
+  /** Quando o técnico confirmou o recebimento deste item. */
+  confirmadoEm: string | null;
+  confirmadoPor: string | null;
   sortOrder: number;
 };
+
+/** Statuses que ainda precisam do OK do técnico no recebimento. */
+export const MATERIAL_CONFIRM_STATUSES = [
+  "pendente",
+  "separado",
+  "recebido",
+  "chegou",
+  "aplicado",
+  "comprado",
+  "comprar",
+] as const;
+
+export function itemNeedsMaterialConfirm(item: Pick<AssistOsItem, "status">) {
+  return (MATERIAL_CONFIRM_STATUSES as readonly string[]).includes(item.status);
+}
 
 export type AssistOsEvent = {
   id: number;
@@ -191,6 +209,8 @@ function mapItem(row: Record<string, unknown>): AssistOsItem {
     baixaStatus:
       baixa === "pendente" || baixa === "feita" || baixa === "ignorada" ? baixa : null,
     baixaQtd: row["baixa_qtd"] == null ? null : num(row["baixa_qtd"]),
+    confirmadoEm: iso(row["confirmado_em"]),
+    confirmadoPor: nullableStr(row["confirmado_por"]),
     sortOrder: num(row["sort_order"]),
   };
 }
@@ -1080,7 +1100,11 @@ const TECNICO_GPS_FRESH_MS = 45 * 60 * 1000;
 export type TecnicoProximo = {
   userId: number | null;
   name: string;
+  /** Distância técnico → cliente da OS. */
   distanceKm: number | null;
+  /** Distância técnico → base da empresa. */
+  distanceToBaseKm: number | null;
+  accuracyM: number | null;
   locationAt: string | null;
   stale: boolean;
   hasGps: boolean;
@@ -1090,9 +1114,10 @@ export async function listTecnicosProximos(input: {
   osId: number;
   teamId?: number | null;
 }) {
-  const { haversineKm } = await import("@/lib/geo");
+  const { companyHasCoords, haversineKm } = await import("@/lib/geo");
   const os = await getOsById(input.osId);
   if (!os) throw new Error("OS não encontrada.");
+  const company = await getCompanyLocation();
 
   const clientLat = os.clientLat;
   const clientLng = os.clientLng;
@@ -1111,6 +1136,7 @@ export async function listTecnicosProximos(input: {
     last_lat: number | string | null;
     last_lng: number | string | null;
     last_location_at: Date | string | null;
+    last_accuracy_m: number | string | null;
   };
 
   let rows: LocRow[];
@@ -1121,7 +1147,8 @@ export async function listTecnicosProximos(input: {
         m.name as name,
         u.last_lat,
         u.last_lng,
-        u.last_location_at
+        u.last_location_at,
+        u.last_accuracy_m
       from assist_team_members m
       left join users u
         on (
@@ -1139,7 +1166,8 @@ export async function listTecnicosProximos(input: {
         name,
         last_lat,
         last_lng,
-        last_location_at
+        last_location_at,
+        last_accuracy_m
       from users
       where coalesce(is_tecnico, false) = true
         and active = true
@@ -1170,6 +1198,10 @@ export async function listTecnicosProximos(input: {
       row.last_location_at == null
         ? null
         : new Date(row.last_location_at).toISOString();
+    const accuracyM =
+      row.last_accuracy_m == null || row.last_accuracy_m === ""
+        ? null
+        : Number(row.last_accuracy_m);
     const hasGps =
       lat != null &&
       lng != null &&
@@ -1178,22 +1210,36 @@ export async function listTecnicosProximos(input: {
       locationAt != null;
     const ageMs =
       locationAt != null ? now - new Date(locationAt).getTime() : Number.POSITIVE_INFINITY;
-    const stale = !hasGps || ageMs > TECNICO_GPS_FRESH_MS;
+    const inaccurate =
+      accuracyM != null && Number.isFinite(accuracyM) && accuracyM > 120;
+    const stale = !hasGps || ageMs > TECNICO_GPS_FRESH_MS || inaccurate;
     let distanceKm: number | null = null;
-    if (hasClient && hasGps && !stale) {
-      distanceKm =
-        Math.round(
-          haversineKm(
-            { lat: clientLat!, lng: clientLng! },
-            { lat: lat!, lng: lng! },
-          ) * 100,
-        ) / 100;
+    let distanceToBaseKm: number | null = null;
+    if (hasGps && !stale) {
+      if (hasClient) {
+        distanceKm =
+          Math.round(
+            haversineKm(
+              { lat: clientLat!, lng: clientLng! },
+              { lat: lat!, lng: lng! },
+            ) * 100,
+          ) / 100;
+      }
+      if (companyHasCoords(company)) {
+        distanceToBaseKm =
+          Math.round(
+            haversineKm(company, { lat: lat!, lng: lng! }) * 100,
+          ) / 100;
+      }
     }
 
     result.push({
       userId: row.id == null ? null : Number(row.id),
       name,
       distanceKm,
+      distanceToBaseKm,
+      accuracyM:
+        accuracyM != null && Number.isFinite(accuracyM) ? accuracyM : null,
       locationAt,
       stale: Boolean(stale),
       hasGps: Boolean(hasGps),
@@ -1292,7 +1338,7 @@ export async function startExecOs(input: {
   userId?: number | null;
   isAdmin: boolean;
   canRole: (role: OsWorkflowRole) => boolean;
-  /** Sem app: confirma OK do material direto. */
+  /** Sem app: confirma OK do material direto (item a item no histórico). */
   materialOk?: boolean;
 }) {
   const os = await getOsById(input.osId);
@@ -1318,23 +1364,39 @@ export async function startExecOs(input: {
       osId: os.id,
       quem: input.quem,
       userId: input.userId,
-      acao: "Material enviado (aguardando OK)",
+      acao: "Material enviado (aguardando OK por item)",
     });
     return getOsById(os.id);
   }
 
+  // Bypass escritório / sem material: confirma cada item pendente e registra no histórico.
   if (hasItems) {
-    await db`
-      update assist_os_items
-      set status = 'campo', updated_at = now()
-      where os_id = ${os.id}
-        and status in ('separado', 'recebido', 'chegou', 'pendente', 'aplicado')
-    `;
+    let last = os;
+    for (const item of os.items.filter(itemNeedsMaterialConfirm)) {
+      if (item.status === "comprar") continue;
+      last =
+        (await confirmOsMaterialItem({
+          osId: os.id,
+          itemId: item.id,
+          quem: input.quem,
+          userId: input.userId,
+          isAdmin: input.isAdmin,
+          canRole: input.canRole,
+          skipOwnershipStageCheck: true,
+        })) ?? last;
+    }
+    const still = last.items.some(
+      (i) => itemNeedsMaterialConfirm(i) && i.status !== "comprar",
+    );
+    if (still) {
+      return last;
+    }
+    if (last.stage === 5) return last;
   }
 
   const envio: AssistOsEnvio = {
     equipe: os.tecnicoNome || os.teamName || "Equipe",
-    quando: new Date().toISOString(),
+    quando: os.envio?.quando ?? new Date().toISOString(),
   };
   await db`
     update assist_os
@@ -1347,9 +1409,104 @@ export async function startExecOs(input: {
     osId: os.id,
     quem: input.quem,
     userId: input.userId,
-    acao: hasItems ? "OK material · Em execução" : "Em execução (sem material)",
+    acao: hasItems
+      ? "Todos os materiais confirmados · Em execução"
+      : "Em execução (sem material)",
   });
   return getOsById(os.id);
+}
+
+export async function confirmOsMaterialItem(input: {
+  osId: number;
+  itemId: number;
+  quem: string;
+  userId?: number | null;
+  isAdmin: boolean;
+  canRole: (role: OsWorkflowRole) => boolean;
+  /** Usado pelo bypass startExecOs (já validou stage/role). */
+  skipOwnershipStageCheck?: boolean;
+}) {
+  const os = await getOsById(input.osId);
+  if (!os) throw new Error("OS não encontrada.");
+  if (!input.skipOwnershipStageCheck) {
+    if (os.stage !== 4) throw new Error("OS precisa estar Agendada.");
+    assertCanMoveStage(4, input.canRole, input.isAdmin);
+  }
+  if (!os.envio && !input.skipOwnershipStageCheck) {
+    throw new Error("Material ainda não foi enviado para confirmação.");
+  }
+
+  const item = os.items.find((i) => i.id === input.itemId);
+  if (!item) throw new Error("Item não encontrado nesta OS.");
+  if (!itemNeedsMaterialConfirm(item)) {
+    return os;
+  }
+  if (item.status === "comprar") {
+    throw new Error("Item ainda em compra — não pode confirmar recebimento.");
+  }
+
+  const db = await getDb();
+  const quem = input.quem.trim() || "Técnico";
+  await db`
+    update assist_os_items
+    set status = 'campo',
+        confirmado_em = now(),
+        confirmado_por = ${quem},
+        updated_at = now()
+    where id = ${item.id}
+      and os_id = ${os.id}
+  `;
+  await addOsEvent({
+    osId: os.id,
+    quem,
+    userId: input.userId,
+    acao: `Confirmou material: ${item.qtd}× ${item.nome}`,
+  });
+
+  // Garante envio_json para o fluxo continuar consistente.
+  if (!os.envio) {
+    const envio: AssistOsEnvio = {
+      equipe: os.tecnicoNome || os.teamName || "Equipe",
+      quando: new Date().toISOString(),
+      div: null,
+    };
+    await db`
+      update assist_os
+      set envio_json = ${JSON.stringify(envio)},
+          updated_at = now()
+      where id = ${os.id}
+    `;
+  }
+
+  let next = await getOsById(os.id);
+  if (!next) throw new Error("OS não encontrada após confirmação.");
+
+  const pending = next.items.filter(
+    (i) => itemNeedsMaterialConfirm(i) && i.status !== "comprar",
+  );
+  if (pending.length === 0 && next.stage === 4) {
+    const envio: AssistOsEnvio = {
+      equipe: next.tecnicoNome || next.teamName || next.envio?.equipe || "Equipe",
+      quando: next.envio?.quando ?? new Date().toISOString(),
+      div: next.envio?.div ?? null,
+    };
+    await db`
+      update assist_os
+      set stage = 5,
+          envio_json = ${JSON.stringify(envio)},
+          updated_at = now()
+      where id = ${os.id}
+    `;
+    await addOsEvent({
+      osId: os.id,
+      quem,
+      userId: input.userId,
+      acao: "Todos os materiais confirmados · Em execução",
+    });
+    next = (await getOsById(os.id)) ?? next;
+  }
+
+  return next;
 }
 
 export async function markMaterialDivergence(input: {
@@ -2167,8 +2324,8 @@ export function osNeedsMaterialConfirm(os: AssistOs) {
   if (!os.items.length) return false;
   // Escritório já enviou para o técnico confirmar (envio_json preenchido).
   if (!os.envio) return false;
-  return os.items.some((i) =>
-    ["pendente", "separado", "recebido", "chegou", "comprado", "comprar"].includes(i.status),
+  return os.items.some(
+    (i) => itemNeedsMaterialConfirm(i) && i.status !== "comprar",
   );
 }
 
@@ -2235,7 +2392,13 @@ export async function saveOsMaterialDisposition(input: {
   const { creditTeamStock, debitTeamStock, teamStockTransaction } = await import(
     "@/db/team-stock"
   );
+  const { moveProductStock } = await import("@/db/stock");
   const db = await getDb();
+  const companyReturns: Array<{
+    productId: number;
+    quantidade: number;
+    motivo: string;
+  }> = [];
 
   await teamStockTransaction(db, async (tx) => {
     for (const row of input.rows) {
@@ -2310,7 +2473,7 @@ export async function saveOsMaterialDisposition(input: {
         }
       }
 
-      // Sobra para devolver: sai do estoque da equipe (se houver saldo).
+      // Sobra para devolver: sai da equipe e entra no estoque físico da empresa.
       if (sobraDestino === "devolver" && sobra > 0 && hasTeamStock) {
         const alreadyReturned =
           prevSobraDestino === "devolver" ? prevDevolvido : 0;
@@ -2334,6 +2497,11 @@ export async function saveOsMaterialDisposition(input: {
               motivo: `Sobra devolvida · OS ${os.num}`,
               userId: input.userId ?? null,
               userName: input.quem,
+            });
+            companyReturns.push({
+              productId: item.productId,
+              quantidade: debitQty,
+              motivo: `Sobra devolvida · OS ${os.num}`,
             });
           }
         }
@@ -2378,11 +2546,27 @@ export async function saveOsMaterialDisposition(input: {
     }
   });
 
+  // Entrada no estoque físico da empresa (fora da tx da equipe).
+  for (const ret of companyReturns) {
+    await moveProductStock({
+      productId: ret.productId,
+      tipo: "entrada",
+      quantidade: ret.quantidade,
+      motivo: ret.motivo,
+      observacao: `Retorno da equipe · OS ${os.num}`,
+      userId: input.userId ?? 0,
+    });
+  }
+
+  const returnedQty = companyReturns.reduce((s, r) => s + r.quantidade, 0);
   await addOsEvent({
     osId: os.id,
     quem: input.quem,
     userId: input.userId,
-    acao: "Informou uso e destino da sobra dos materiais",
+    acao:
+      returnedQty > 0
+        ? `Informou uso/sobra · ${returnedQty} un. devolvida(s) ao estoque`
+        : "Informou uso e destino da sobra dos materiais",
   });
   return getOsById(os.id);
 }

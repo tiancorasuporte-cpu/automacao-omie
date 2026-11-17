@@ -417,6 +417,8 @@ function AssistenciaPage() {
       userId: number | null;
       name: string;
       distanceKm: number | null;
+      distanceToBaseKm?: number | null;
+      accuracyM?: number | null;
       locationAt: string | null;
       stale: boolean;
       hasGps: boolean;
@@ -998,9 +1000,16 @@ function AssistenciaPage() {
     );
     if (!row) return name;
     if (row.distanceKm != null) {
-      return `${name} · ${formatDistanceKm(row.distanceKm)}`;
+      const acc =
+        row.accuracyM != null && row.accuracyM > 40
+          ? ` (±${Math.round(row.accuracyM)} m)`
+          : "";
+      return `${name} · ${formatDistanceKm(row.distanceKm)} do cliente${acc}`;
     }
-    if (row.hasGps && row.stale) return `${name} · GPS antigo`;
+    if (row.distanceToBaseKm != null) {
+      return `${name} · ${formatDistanceKm(row.distanceToBaseKm)} da base`;
+    }
+    if (row.hasGps && row.stale) return `${name} · GPS antigo/impreciso`;
     return `${name} · sem GPS`;
   }
 
@@ -1342,18 +1351,28 @@ function AssistenciaPage() {
                           key={it.id}
                           className="flex flex-wrap items-center justify-between gap-sm rounded-lg border border-outline-variant/50 px-md py-sm"
                         >
-                          <span className="flex min-w-0 flex-wrap items-center gap-sm">
-                            <span className="text-body-md text-on-surface">
-                              {it.qtd}× {it.nome}
+                          <span className="flex min-w-0 flex-col gap-2xs">
+                            <span className="flex min-w-0 flex-wrap items-center gap-sm">
+                              <span className="text-body-md text-on-surface">
+                                {it.qtd}× {it.nome}
+                              </span>
+                              <span
+                                className={cn(
+                                  "rounded-full px-sm py-2xs text-label-sm font-semibold",
+                                  statusClass,
+                                )}
+                              >
+                                {OS_ITEM_STATUS_LABEL[status] ?? it.status}
+                              </span>
                             </span>
-                            <span
-                              className={cn(
-                                "rounded-full px-sm py-2xs text-label-sm font-semibold",
-                                statusClass,
-                              )}
-                            >
-                              {OS_ITEM_STATUS_LABEL[status] ?? it.status}
-                            </span>
+                            {it.confirmadoPor ? (
+                              <span className="text-label-sm text-on-surface-variant">
+                                Aceito por {it.confirmadoPor}
+                                {it.confirmadoEm
+                                  ? ` · ${new Date(it.confirmadoEm).toLocaleString("pt-BR")}`
+                                  : ""}
+                              </span>
+                            ) : null}
                           </span>
                           <div className="flex flex-wrap gap-xs">
                             {selected.stage === 1 && (boot.user.canEstoque || boot.user.isAdmin) ? (
@@ -1654,7 +1673,7 @@ function AssistenciaPage() {
                               const ok = await askConfirm({
                                 title: "Iniciar sem app",
                                 description:
-                                  "Confirmar material agora e iniciar execução sem o app do técnico?",
+                                  "Confirmar cada material agora (fica no histórico) e iniciar execução sem o app do técnico?",
                                 confirmLabel: "Iniciar",
                               });
                               if (!ok) return;
@@ -1667,7 +1686,7 @@ function AssistenciaPage() {
                           }}
                           className="rounded-lg border border-outline-variant px-md py-sm text-label-md"
                         >
-                          OK material (iniciar sem app)
+                          OK material item a item (sem app)
                         </button>
                       ) : null}
                     </>
@@ -4775,10 +4794,10 @@ function AssistenciaPage() {
               {tecnicosProximosLoading
                 ? "Calculando proximidade dos técnicos…"
                 : selected?.clientLat == null
-                  ? "Sem coords do cliente ainda — proximidade indisponível."
+                  ? "Sem coords do cliente ainda — proximidade do cliente indisponível."
                   : tecnicosProximos.some((t) => t.distanceKm != null)
-                    ? "Ordenado pelo GPS do app (atualizado há menos de 45 min)."
-                    : "Nenhum técnico com GPS fresco no app SGO."}{" "}
+                    ? "Distância = GPS do técnico → cliente (GPS fresco há menos de 45 min, precisão)."
+                    : "Nenhum técnico com GPS fresco/preciso no app SGO."}{" "}
             </p>
           </SoftDialogBody>
 

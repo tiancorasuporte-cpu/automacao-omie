@@ -11,6 +11,7 @@ import {
 import {
   checkInOs,
   checkOutOs,
+  confirmOsMaterialItem,
   markMaterialDivergence,
   osNeedsMaterialConfirm,
   pauseOs,
@@ -109,6 +110,13 @@ function serializeOs(
       productId: i.productId,
       usado: i.usado,
       sobraDestino: i.sobraDestino,
+      confirmadoEm: i.confirmadoEm,
+      confirmadoPor: i.confirmadoPor,
+      needsConfirm: osNeedsMaterialConfirm(os)
+        ? ["pendente", "separado", "recebido", "chegou", "aplicado", "comprado"].includes(
+            i.status,
+          )
+        : false,
     })),
     events: (os.events ?? []).map((e) => ({
       id: e.id,
@@ -405,16 +413,14 @@ export async function handleMobileLocation(request: Request) {
       lat,
       lng,
       at: body?.at ?? null,
+      accuracy:
+        body?.accuracy != null && Number.isFinite(Number(body.accuracy))
+          ? Number(body.accuracy)
+          : null,
     });
     return jsonOk({
       ok: true,
-      location: {
-        ...loc,
-        accuracy:
-          body?.accuracy != null && Number.isFinite(Number(body.accuracy))
-            ? Number(body.accuracy)
-            : null,
-      },
+      location: loc,
     });
   } catch (error) {
     return jsonError(
@@ -521,7 +527,7 @@ export async function handleMobileStartOs(request: Request, osId: number) {
     const hasItems = ownedOs.items.length > 0;
     const confirmOk = body?.materialOk === true;
 
-    // Com material: técnico precisa confirmar equipamentos explicitamente.
+    // Com material: técnico precisa confirmar equipamentos explicitamente (por item).
     if (hasItems && !confirmOk) {
       let os = ownedOs;
       if (ownedOs.stage === 4) {
@@ -561,7 +567,44 @@ export async function handleMobileStartOs(request: Request, osId: number) {
     });
     return jsonOk({
       ok: true,
-      needsMaterialConfirm: false,
+      needsMaterialConfirm: osNeedsMaterialConfirm(os!),
+      os: serializeOs(os!),
+    });
+  });
+}
+
+export async function handleMobileConfirmOsItem(request: Request, osId: number) {
+  return withOwnedOs(request, osId, async (user) => {
+    const body = await readJsonBody<{ itemId?: number }>(request);
+    const itemId = Number(body?.itemId);
+    if (!Number.isFinite(itemId) || itemId <= 0) {
+      return jsonError("itemId obrigatório.");
+    }
+    const roles = mobileOsRoles(user);
+    // Garante que o envio está marcado (escritório/tecnico abriu a confirmação).
+    let current = await assertOsOwnedByTecnico(osId, user);
+    if (!current.ok) return jsonError(current.error, 404);
+    if (current.os.stage === 4 && !current.os.envio) {
+      await startExecOs({
+        osId,
+        materialOk: false,
+        quem: user.name,
+        userId: user.id,
+        isAdmin: roles.isAdmin,
+        canRole: roles.canRole,
+      });
+    }
+    const os = await confirmOsMaterialItem({
+      osId,
+      itemId,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+    return jsonOk({
+      ok: true,
+      needsMaterialConfirm: osNeedsMaterialConfirm(os!),
       os: serializeOs(os!),
     });
   });
@@ -883,6 +926,32 @@ async function applySyncAction(
         (await startExecOs({
           osId: action.osId,
           materialOk,
+          quem: user.name,
+          userId: user.id,
+          isAdmin: roles.isAdmin,
+          canRole: roles.canRole,
+        }))!,
+      );
+    }
+    if (action.type === "os_confirm_item") {
+      const itemId = Number(payload.itemId);
+      if (!Number.isFinite(itemId) || itemId <= 0) {
+        throw new Error("itemId obrigatório.");
+      }
+      if (owned.os.stage === 4 && !owned.os.envio) {
+        await startExecOs({
+          osId: action.osId,
+          materialOk: false,
+          quem: user.name,
+          userId: user.id,
+          isAdmin: roles.isAdmin,
+          canRole: roles.canRole,
+        });
+      }
+      return serializeOs(
+        (await confirmOsMaterialItem({
+          osId: action.osId,
+          itemId,
           quem: user.name,
           userId: user.id,
           isAdmin: roles.isAdmin,
