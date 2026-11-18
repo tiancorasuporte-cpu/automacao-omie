@@ -279,7 +279,7 @@ function FrotaPage() {
         />
         <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md sm:p-lg">
           <div className="flex flex-col gap-md sm:flex-row sm:items-end sm:justify-between">
-            <div className="grid flex-1 gap-xs sm:max-w-lg">
+            <div className="grid w-full min-w-0 flex-1 gap-xs sm:max-w-lg">
               <label className="text-label-sm font-medium text-on-surface-variant">Veículo</label>
               <SuggestInput
                 value={vehicleId != null ? String(vehicleId) : ""}
@@ -287,6 +287,7 @@ function FrotaPage() {
                 freeText={false}
                 placeholder={vehicles.length ? "Digite nome, marca ou placa…" : "Cadastre um veículo"}
                 emptyLabel="Nenhum veículo encontrado"
+                className="w-full"
                 leading={
                   selected?.brand ? <FleetBrandMark brand={selected.brand} size="sm" /> : (
                     <Icon name="directions_car" className="text-xl text-on-surface-variant" />

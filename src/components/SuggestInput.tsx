@@ -102,7 +102,7 @@ export function SuggestInput({
   }
 
   return (
-    <div ref={rootRef} className={cn("relative min-w-0 w-full", className)}>
+    <div ref={rootRef} className={cn("relative w-full min-w-[16rem]", className)}>
       <div
         className={cn(
           "flex w-full min-w-0 items-center gap-sm rounded-lg border border-outline-variant bg-surface px-md py-sm outline-none transition focus-within:border-primary",
@@ -121,7 +121,7 @@ export function SuggestInput({
           required={required && !value}
           placeholder={placeholder}
           value={inputValue}
-          className="min-w-0 flex-1 bg-transparent text-body-md text-on-surface outline-none placeholder:text-on-surface-variant"
+          className="min-w-[10rem] flex-1 bg-transparent text-body-md text-on-surface outline-none placeholder:text-on-surface-variant"
           onFocus={() => openList(true)}
           onClick={() => openList(true)}
           onChange={(e) => onTyped(e.target.value)}
@@ -164,7 +164,7 @@ export function SuggestInput({
         <ul
           id={listId}
           role="listbox"
-          className="absolute z-40 mt-xs max-h-60 w-full overflow-auto rounded-xl border border-outline-variant bg-surface-container-lowest py-xs shadow-lg"
+          className="absolute left-0 right-0 z-40 mt-xs max-h-60 min-w-full overflow-auto rounded-xl border border-outline-variant bg-surface-container-lowest py-xs shadow-lg"
         >
           {!filtered.length ? (
             <li className="px-md py-sm text-body-sm text-on-surface-variant">{emptyLabel}</li>
