@@ -5,9 +5,8 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Âncora Access design system.
- * Material-style token set, flat enterprise aesthetic:
- * black primary, amber secondary container, neutral greys.
+ * Soft10 · visual CRM Comercial (protótipo Guilherme).
+ * ink #141414 · brand #FFD200 · bg #f3f3f1 · line #e4e4e0 · mut #6b6b66
  */
 
 @theme inline {
@@ -97,8 +96,8 @@
   --container-6xl: 72rem;
   --container-7xl: 80rem;
 
-  --font-display: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-display: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
   --text-display-lg: 48px;
   --text-display-lg--line-height: 56px;
@@ -126,73 +125,81 @@
 }
 
 :root {
+  /* CRM: raios ~8px nos botões/inputs */
   --radius: 0.5rem;
 
-  --background: oklch(0.981 0.001 286);
-  --foreground: oklch(0.213 0.004 240);
-  --on-background: oklch(0.213 0.004 240);
+  /* CRM palette */
+  --ink: #141414;
+  --brand: #ffd200;
+  --bg: #f3f3f1;
+  --line: #e4e4e0;
+  --mut: #6b6b66;
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.213 0.004 240);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.213 0.004 240);
+  --background: #f3f3f1;
+  --foreground: #141414;
+  --on-background: #141414;
 
-  --primary: oklch(0 0 0);
-  --primary-foreground: oklch(1 0 0);
-  --on-primary: oklch(1 0 0);
-  --primary-container: oklch(0.243 0.003 60);
-  --on-primary-container: oklch(0.59 0.003 60);
-  --primary-fixed: oklch(0.911 0.004 60);
-  --primary-fixed-dim: oklch(0.815 0.005 60);
+  --card: #ffffff;
+  --card-foreground: #141414;
+  --popover: #ffffff;
+  --popover-foreground: #141414;
 
-  --secondary: oklch(0.517 0.126 89);
-  --secondary-foreground: oklch(1 0 0);
-  --on-secondary: oklch(1 0 0);
-  --secondary-container: oklch(0.869 0.171 93);
-  --on-secondary-container: oklch(0.42 0.1 89);
-  --secondary-fixed: oklch(0.91 0.13 95);
-  --secondary-fixed-dim: oklch(0.83 0.16 92);
+  --primary: #141414;
+  --primary-foreground: #ffffff;
+  --on-primary: #ffffff;
+  --primary-container: #2a2a2a;
+  --on-primary-container: #cccccc;
+  --primary-fixed: #e4e4e0;
+  --primary-fixed-dim: #cfcfc8;
 
-  --tertiary: oklch(0 0 0);
-  --tertiary-container: oklch(0.243 0.003 200);
-  --on-tertiary: oklch(1 0 0);
+  --secondary: #b7791f;
+  --secondary-foreground: #141414;
+  --on-secondary: #141414;
+  --secondary-container: #ffd200;
+  --on-secondary-container: #141414;
+  --secondary-fixed: #fff6d6;
+  --secondary-fixed-dim: #ffe566;
 
-  --muted: oklch(0.955 0.001 286);
-  --muted-foreground: oklch(0.45 0.008 60);
-  --accent: oklch(0.936 0.001 286);
-  --accent-foreground: oklch(0 0 0);
+  --tertiary: #141414;
+  --tertiary-container: #2a2a2a;
+  --on-tertiary: #ffffff;
 
-  --destructive: oklch(0.55 0.213 27.3);
-  --destructive-foreground: oklch(1 0 0);
-  --error: oklch(0.55 0.213 27.3);
-  --on-error: oklch(1 0 0);
-  --error-container: oklch(0.925 0.045 20);
-  --on-error-container: oklch(0.45 0.19 27);
+  --muted: #e9e9e5;
+  --muted-foreground: #6b6b66;
+  --accent: #e9e9e5;
+  --accent-foreground: #141414;
 
-  --success: oklch(0.53 0.11 150);
-  --on-success: oklch(1 0 0);
-  --success-container: oklch(0.955 0.03 150);
-  --on-success-container: oklch(0.38 0.1 150);
+  --destructive: #d64040;
+  --destructive-foreground: #ffffff;
+  --error: #d64040;
+  --on-error: #ffffff;
+  --error-container: #fdecec;
+  --on-error-container: #8a2424;
 
-  --border: oklch(0.879 0.008 60);
-  --input: oklch(0.879 0.008 60);
-  --ring: oklch(0.869 0.171 93);
-  --outline: oklch(0.556 0.012 60);
-  --outline-variant: oklch(0.83 0.013 55);
+  --success: #1f9d55;
+  --on-success: #ffffff;
+  --success-container: #e7f6ee;
+  --on-success-container: #145c34;
 
-  --surface: oklch(0.981 0.001 286);
-  --on-surface: oklch(0.213 0.004 240);
-  --on-surface-variant: oklch(0.393 0.014 55);
-  --surface-variant: oklch(0.909 0.002 286);
-  --surface-bright: oklch(0.981 0.001 286);
-  --surface-dim: oklch(0.879 0.001 286);
-  --surface-container-lowest: oklch(1 0 0);
-  --surface-container-low: oklch(0.965 0.001 286);
-  --surface-container: oklch(0.945 0.001 286);
-  --surface-container-high: oklch(0.928 0.001 286);
-  --surface-container-highest: oklch(0.909 0.002 286);
-  --inverse-surface: oklch(0.34 0.005 240);
-  --inverse-on-surface: oklch(0.951 0.001 286);
+  --border: #e4e4e0;
+  --input: #e4e4e0;
+  --ring: #ffd200;
+  --outline: #6b6b66;
+  --outline-variant: #e4e4e0;
+
+  --surface: #f3f3f1;
+  --on-surface: #141414;
+  --on-surface-variant: #6b6b66;
+  --surface-variant: #e9e9e5;
+  --surface-bright: #fafaf8;
+  --surface-dim: #e9e9e5;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #fafaf8;
+  --surface-container: #f3f3f1;
+  --surface-container-high: #e9e9e5;
+  --surface-container-highest: #e4e4e0;
+  --inverse-surface: #141414;
+  --inverse-on-surface: #f3f3f1;
 }
 
 @layer base {
@@ -204,7 +211,8 @@
     background-color: var(--color-background);
     color: var(--color-on-background);
     font-family: var(--font-sans);
-    font-feature-settings: "cv02", "cv03";
+    font-size: 14px;
+    line-height: 1.45;
   }
 
   button:not(:disabled),
@@ -255,7 +263,7 @@
 
 @utility input-glow {
   &:focus {
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--secondary-container) 35%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 35%, transparent);
   }
 }
 
@@ -311,12 +319,11 @@
   overflow-x: hidden;
   overflow-y: auto;
   border-radius: 0.75rem;
-  border: 1px solid color-mix(in oklch, var(--color-outline-variant) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
   background: var(--color-surface-container-lowest);
   padding: var(--spacing-xl);
   color: var(--color-on-surface);
-  box-shadow:
-    0 20px 40px -24px color-mix(in oklch, var(--primary) 35%, transparent);
+  box-shadow: 0 20px 40px -24px color-mix(in srgb, var(--ink) 35%, transparent);
 }
 
 /* Larguras opcionais via className no DialogContent */
@@ -331,6 +338,11 @@
 .ancora-dialog-panel.dialog-xl {
   width: min(56rem, calc(100vw - 2rem));
   max-width: min(56rem, calc(100vw - 2rem));
+}
+.ancora-dialog-panel.dialog-2xl {
+  width: min(72rem, calc(100vw - 1.5rem));
+  max-width: min(72rem, calc(100vw - 1.5rem));
+  max-height: min(94vh, 64rem);
 }
 
 @keyframes login-rise {

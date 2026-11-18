@@ -12,10 +12,17 @@ function clean(s: string | number) {
     .replace(/–/g, "-");
 }
 
-function formatDateBr(value: string) {
+function formatDateBr(value: string | null | undefined) {
+  if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleString("pt-BR");
+}
+
+function profileLabel(profile: string | null | undefined) {
+  if (profile === "monitoramento") return "Monitoramento";
+  if (profile === "assistencia") return "Assistência/RH";
+  return profile || "—";
 }
 
 async function loadLogoDataUrl() {
@@ -43,7 +50,7 @@ export async function downloadFrotaKmPdf(input: FrotaKmExcelInput) {
   const autoTable = autoTableMod.default;
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
   const W = 297;
-  const M = 12;
+  const M = 10;
   const logo = await loadLogoDataUrl();
   if (logo) {
     try {
@@ -79,35 +86,49 @@ export async function downloadFrotaKmPdf(input: FrotaKmExcelInput) {
     startY: 32,
     margin: { left: M, right: M },
     theme: "striped",
-    headStyles: { fillColor: NAVY, textColor: 255, fontSize: 7 },
-    styles: { fontSize: 7, cellPadding: 1.2, textColor: [20, 32, 44], overflow: "linebreak" },
+    headStyles: { fillColor: NAVY, textColor: 255, fontSize: 6.5 },
+    styles: { fontSize: 6.5, cellPadding: 1.1, textColor: [20, 32, 44], overflow: "linebreak" },
     head: [
       [
-        "Data/hora",
+        "Perfil",
+        "Abertura",
+        "Fechamento",
         "Veículo",
-        "KM ant.",
-        "KM atual",
+        "KM abert.",
+        "KM fech.",
         "KM dia",
-        "Motivo",
         "Motorista",
-        "Lançado por",
+        "Operadores / Motivo",
       ],
     ],
     body:
       input.rows.length > 0
-        ? input.rows.map((row) => [
-            formatDateBr(row.occurredAt),
-            clean(
-              row.vehiclePlate ? `${row.vehicleName} (${row.vehiclePlate})` : row.vehicleName,
-            ),
-            row.previousOdometer == null ? "—" : formatKm(row.previousOdometer),
-            formatKm(row.odometer),
-            row.kmDay == null ? "—" : formatKm(row.kmDay),
-            clean(row.reason || "—"),
-            clean(row.driverName || "—"),
-            clean(row.createdByName || "—"),
-          ])
-        : [["—", "Nenhum lançamento no filtro.", "", "", "", "", "", ""]],
+        ? input.rows.map((row) => {
+            const ops = [
+              row.monitorOperatorOpen ? `Abert.: ${row.monitorOperatorOpen}` : null,
+              row.monitorOperatorClose ? `Fech.: ${row.monitorOperatorClose}` : null,
+              row.usageReason ? `Uso: ${row.usageReason}` : null,
+              !row.monitorOperatorOpen && !row.usageReason && row.reason ? row.reason : null,
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            return [
+              profileLabel(row.profile),
+              formatDateBr(row.openedAt ?? row.occurredAt),
+              formatDateBr(row.closedAt),
+              clean(
+                row.vehiclePlate ? `${row.vehicleName} (${row.vehiclePlate})` : row.vehicleName,
+              ),
+              row.odometerOpen == null && row.previousOdometer == null
+                ? "—"
+                : formatKm(row.odometerOpen ?? row.previousOdometer),
+              row.odometerClose == null ? formatKm(row.odometer) : formatKm(row.odometerClose),
+              row.kmDay == null ? "—" : formatKm(row.kmDay),
+              clean(row.driverName || "—"),
+              clean(ops || "—"),
+            ];
+          })
+        : [["—", "Nenhum lançamento no filtro.", "", "", "", "", "", "", ""]],
   });
 
   const pageCount = doc.getNumberOfPages();

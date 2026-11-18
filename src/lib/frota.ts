@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { ensureSchema } from "@/db/schema";
 import {
+  closeReading,
   createChecklist,
   createExpense,
   createIncome,
@@ -20,6 +21,7 @@ import {
   listFleetDrivers,
   listFleetVehicles,
   listDailyKmReadings,
+  listOpenReadings,
   listReminders,
   listVehicleHistory,
   saveFleetDriver,
@@ -47,15 +49,18 @@ export const getFrotaBootstrapFn = createServerFn({ method: "GET" }).handler(asy
   const { user } = await auth();
   await boot();
   const currentDriver = await ensureFleetDriverForUser({ id: user.id, name: user.name });
-  const [vehicles, drivers, fuels, expenses, services, payments, reminders] = await Promise.all([
-    listFleetVehicles(false),
-    listFleetDrivers(false),
-    listFleetCatalog("fuel"),
-    listFleetCatalog("expense"),
-    listFleetCatalog("service"),
-    listFleetCatalog("payment"),
-    listReminders(null),
-  ]);
+  const [vehicles, drivers, fuels, expenses, services, payments, stations, suppliers, reminders] =
+    await Promise.all([
+      listFleetVehicles(false),
+      listFleetDrivers(false),
+      listFleetCatalog("fuel"),
+      listFleetCatalog("expense"),
+      listFleetCatalog("service"),
+      listFleetCatalog("payment"),
+      listFleetCatalog("station"),
+      listFleetCatalog("supplier"),
+      listReminders(null),
+    ]);
   const defaultVehicleId =
     user.defaultVehicleId && vehicles.some((v) => v.id === user.defaultVehicleId && v.active)
       ? user.defaultVehicleId
@@ -67,7 +72,7 @@ export const getFrotaBootstrapFn = createServerFn({ method: "GET" }).handler(asy
     defaultVehicleId,
     vehicles,
     drivers,
-    catalog: { fuels, expenses, services, payments },
+    catalog: { fuels, expenses, services, payments, stations, suppliers },
     reminders,
   };
 });
@@ -338,6 +343,7 @@ export const createExpenseFn = createServerFn({ method: "POST" })
         discount: z.number().optional(),
         installments: z.number().int().optional().nullable(),
         location: z.string().optional().nullable(),
+        supplier: z.string().optional().nullable(),
         reason: z.string().optional().nullable(),
         paymentMethod: z.string().optional().nullable(),
       })
@@ -357,6 +363,7 @@ export const createExpenseFn = createServerFn({ method: "POST" })
       discount: data.discount ?? 0,
       installments: data.installments ?? null,
       location: data.location ?? null,
+      supplier: data.supplier ?? null,
       reason: data.reason ?? null,
       paymentMethod: data.paymentMethod ?? null,
       notes: data.notes ?? null,
@@ -410,6 +417,7 @@ export const createServiceFn = createServerFn({ method: "POST" })
         discount: z.number().optional(),
         installments: z.number().int().optional().nullable(),
         location: z.string().optional().nullable(),
+        supplier: z.string().optional().nullable(),
         paymentMethod: z.string().optional().nullable(),
       })
       .parse(input ?? {}),
@@ -428,6 +436,7 @@ export const createServiceFn = createServerFn({ method: "POST" })
       discount: data.discount ?? 0,
       installments: data.installments ?? null,
       location: data.location ?? null,
+      supplier: data.supplier ?? null,
       paymentMethod: data.paymentMethod ?? null,
       notes: data.notes ?? null,
       createdBy: user.id,
@@ -477,7 +486,11 @@ export const createReadingFn = createServerFn({ method: "POST" })
         ...baseEntry,
         odometer: z.number(),
         kind: z.string().optional(),
-        reason: z.string().trim().min(1, "Informe o motivo da atualização."),
+        reason: z.string().optional().nullable(),
+        profile: z.enum(["monitoramento", "assistencia"]).optional().nullable(),
+        odometerOpen: z.number().optional().nullable(),
+        monitorOperatorOpen: z.string().optional().nullable(),
+        usageReason: z.string().optional().nullable(),
       })
       .parse(input ?? {}),
   )
@@ -490,11 +503,49 @@ export const createReadingFn = createServerFn({ method: "POST" })
       occurredAt: data.occurredAt,
       odometer: data.odometer,
       kind: data.kind ?? "daily_km",
-      reason: data.reason,
+      reason: data.reason ?? null,
       notes: data.notes ?? null,
       createdBy: user.id,
+      profile: data.profile ?? null,
+      odometerOpen: data.odometerOpen ?? data.odometer,
+      monitorOperatorOpen: data.monitorOperatorOpen ?? null,
+      usageReason: data.usageReason ?? null,
     });
     return { ok: true as const, id };
+  });
+
+export const closeReadingFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive(),
+        closedAt: z.string().min(8),
+        odometerClose: z.number(),
+        monitorOperatorClose: z.string().optional().nullable(),
+        notes: z.string().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    return closeReading({
+      id: data.id,
+      closedAt: data.closedAt,
+      odometerClose: data.odometerClose,
+      monitorOperatorClose: data.monitorOperatorClose ?? null,
+      notes: data.notes ?? null,
+    });
+  });
+
+export const listOpenReadingsFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z.object({ vehicleId: z.number().int().positive() }).parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    return listOpenReadings(data.vehicleId);
   });
 
 export const createChecklistFn = createServerFn({ method: "POST" })

@@ -20,6 +20,7 @@ import {
 } from "@/lib/groq-settings";
 import { getWahaSettingsFn, saveWahaSettingsFn, testWahaFn, registerWahaWebhookFn, restartWahaBotFn, stopWahaBotFn } from "@/lib/waha";
 import { getInteggriSettingsFn, saveInteggriSettingsFn, testInteggriFn } from "@/lib/integgri";
+import { getMoniSettingsFn, saveMoniSettingsFn, testMoniFn } from "@/lib/moni-settings";
 import {
   companyHasCoords,
   type CompanyLocation,
@@ -31,7 +32,7 @@ import { Route as RootRoute } from "@/routes/__root";
 export const Route = createFileRoute("/settings")({
   beforeLoad: requireAdmin,
   loader: async () => {
-    const [waha, integgri, notifications, apps, groq, companyLocation] =
+    const [waha, integgri, notifications, apps, groq, companyLocation, moni] =
       await Promise.all([
         getWahaSettingsFn(),
         getInteggriSettingsFn(),
@@ -39,8 +40,9 @@ export const Route = createFileRoute("/settings")({
         getOmieAppsFn(),
         getGroqSettingsFn().catch(() => null),
         getCompanyLocationFn(),
+        getMoniSettingsFn().catch(() => null),
       ]);
-    return { waha, integgri, notifications, apps, groq, companyLocation };
+    return { waha, integgri, notifications, apps, groq, companyLocation, moni };
   },
   head: () => ({
     meta: [{ title: `Configurações — ${APP_NAME}` }],
@@ -49,7 +51,7 @@ export const Route = createFileRoute("/settings")({
 });
 
 function SettingsPage() {
-  const { waha, integgri, notifications, apps, groq, companyLocation } =
+  const { waha, integgri, notifications, apps, groq, companyLocation, moni } =
     Route.useLoaderData();
   const { user } = RootRoute.useRouteContext();
   const router = useRouter();
@@ -60,7 +62,7 @@ function SettingsPage() {
         <div className="mx-auto max-w-3xl space-y-lg">
           <PageTitle
             title="Configurações"
-            subtitle="Base da empresa, WAHA, Integgri Chat, alertas, Groq e apps Omie."
+            subtitle="Base da empresa, Moni, WAHA, Integgri Chat, alertas, Groq e apps Omie."
           />
 
           <CompanyLocationSettings
@@ -97,6 +99,7 @@ function SettingsPage() {
           </section>
 
           <NotificationSettings initial={notifications} onSaved={() => router.invalidate()} />
+          {moni ? <MoniSettings initial={moni} /> : null}
           {integgri ? <InteggriSettings initial={integgri} /> : null}
           {waha ? <WahaSettings initial={waha} /> : null}
           {isSuperadmin(user) && groq ? <GroqSettings initial={groq} /> : null}
@@ -368,6 +371,167 @@ function NotificationSettings({
         >
           {pending ? "Salvando..." : "Salvar alertas"}
         </button>
+      </form>
+    </section>
+  );
+}
+
+function MoniSettings({
+  initial,
+}: {
+  initial: {
+    baseUrl: string;
+    username: string;
+    hasPassword: boolean;
+    defaultEmpresa: number;
+    configured: boolean;
+  };
+}) {
+  const router = useRouter();
+  const [baseUrl, setBaseUrl] = useState(initial.baseUrl);
+  const [username, setUsername] = useState(initial.username);
+  const [password, setPassword] = useState("");
+  const [defaultEmpresa, setDefaultEmpresa] = useState(String(initial.defaultEmpresa || 1));
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setBaseUrl(initial.baseUrl);
+    setUsername(initial.username);
+    setDefaultEmpresa(String(initial.defaultEmpresa || 1));
+  }, [initial.baseUrl, initial.username, initial.defaultEmpresa]);
+
+  return (
+    <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+      <h3 className="mb-sm flex items-center gap-xs text-title-lg text-primary">
+        <Icon name="sensors" className="text-secondary" />
+        Moni Integração
+      </h3>
+      <p className="mb-md text-body-md text-on-surface-variant">
+        Credenciais do Moni Integração (Basic Auth + <code>/LerDados</code>) para sincronizar e
+        vincular contas de monitoramento aos contratos. URL sem barra no final, ex.:{" "}
+        <code>http://192.168.0.100:8080</code>.
+      </p>
+      <form
+        className="space-y-md"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setPending(true);
+          setError(null);
+          setMessage(null);
+          try {
+            const emp = Number(defaultEmpresa);
+            if (!Number.isFinite(emp) || emp <= 0) {
+              throw new Error("Informe a empresa Moni padrão (código numérico, ex.: 3).");
+            }
+            await saveMoniSettingsFn({
+              data: { baseUrl, username, password, defaultEmpresa: Math.trunc(emp) },
+            });
+            setMessage("Dados do Moni salvos.");
+            setPassword("");
+            await router.invalidate();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Falha ao salvar Moni.");
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        <label className="block text-label-md text-on-surface-variant">
+          URL do servidor Moni
+          <input
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="http://IP:PORTA"
+            className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
+          />
+        </label>
+        <label className="block text-label-md text-on-surface-variant">
+          Usuário
+          <input
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username"
+            className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
+          />
+        </label>
+        <label className="block text-label-md text-on-surface-variant">
+          Senha {initial.hasPassword ? "(deixe vazio para manter)" : ""}
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={initial.hasPassword ? "••••••••" : "Senha do Moni Integração"}
+            autoComplete="new-password"
+            className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
+          />
+        </label>
+        <label className="block text-label-md text-on-surface-variant">
+          Empresa Moni padrão (tenant)
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={defaultEmpresa}
+            onChange={(e) => setDefaultEmpresa(e.target.value)}
+            placeholder="Ex.: 3"
+            className="mt-base w-full rounded-lg border border-outline-variant px-md py-sm"
+          />
+          <span className="mt-2xs block text-label-sm font-normal text-on-surface-variant">
+            Código da empresa no Moni usado por padrão ao vincular contas nos contratos.
+          </span>
+        </label>
+        <div className="flex flex-wrap gap-sm">
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-60"
+          >
+            Salvar Moni
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={async () => {
+              setPending(true);
+              setError(null);
+              setMessage(null);
+              try {
+                const result = await testMoniFn();
+                if (!result.ok) {
+                  setError(result.error);
+                  return;
+                }
+                const sample =
+                  result.sample.length > 0
+                    ? ` Ex.: ${result.sample
+                        .map((s) => `Emp.${s.empresa ?? "?"} #${s.codigo} ${s.nome}`)
+                        .join(" · ")}`
+                    : "";
+                setMessage(
+                  `Conexão ok — leitura de Clientes retornou ${result.countHint} registro(s).${sample}`,
+                );
+              } catch (err) {
+                setError(err instanceof Error ? err.message : "Falha no teste Moni.");
+              } finally {
+                setPending(false);
+              }
+            }}
+            className="rounded-lg border border-outline-variant px-md py-sm text-label-md text-primary disabled:opacity-60"
+          >
+            Testar conexão
+          </button>
+        </div>
+        {message ? <p className="text-body-md text-primary">{message}</p> : null}
+        {error ? <p className="text-body-md text-on-error-container">{error}</p> : null}
+        {!initial.configured ? (
+          <p className="text-label-md text-on-surface-variant">
+            Preencha URL, usuário e senha para habilitar o Sync Moni em Contratos.
+          </p>
+        ) : (
+          <p className="text-label-md text-on-surface-variant">Moni configurado. Pode sincronizar as contas em Contratos.</p>
+        )}
       </form>
     </section>
   );

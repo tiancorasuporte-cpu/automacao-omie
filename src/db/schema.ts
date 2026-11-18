@@ -60,20 +60,57 @@ export type DueItem = {
 export type NotificationKind = "pre_due" | "overdue";
 
 let ready: Promise<void> | undefined;
+/** Evita HMR/cache com SCHEMA_VERSION antigo pulando DDL nova. */
+let readyForVersion: number | undefined;
+
+/** Bump quando adicionar migração real em migrateSchema. Evita ~200 roundtrips a cada boot. */
+const SCHEMA_VERSION = 9;
 
 export function resetSchemaReady() {
   ready = undefined;
+  readyForVersion = undefined;
 }
 
-export async function getDb() {
-  if (!ready) {
-    ready = ensureSchema().catch((error: unknown) => {
+/** Garante schema uma vez (single-flight). Chamadas paralelas compartilham a mesma Promise. */
+export async function ensureSchemaOnce() {
+  if (!ready || readyForVersion !== SCHEMA_VERSION) {
+    readyForVersion = SCHEMA_VERSION;
+    ready = migrateSchema().catch((error: unknown) => {
       ready = undefined;
+      readyForVersion = undefined;
       throw error;
     });
   }
   await ready;
+}
+
+/** Compat: todos os módulos passam pelo single-flight (evita DDL concorrente / UI travada). */
+export async function ensureSchema() {
+  await ensureSchemaOnce();
+}
+
+export async function getDb() {
+  await ensureSchemaOnce();
   return getSql();
+}
+
+async function readSchemaVersion(sql: ReturnType<typeof getSql>) {
+  try {
+    const rows = await sql<{ value: string }[]>`
+      select value from app_settings where key = 'schema_version' limit 1
+    `;
+    return rows[0]?.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeSchemaVersion(sql: ReturnType<typeof getSql>) {
+  await sql`
+    insert into app_settings (key, value, updated_at)
+    values ('schema_version', ${String(SCHEMA_VERSION)}, now())
+    on conflict (key) do update set value = excluded.value, updated_at = now()
+  `;
 }
 
 async function tableExists(name: string) {
@@ -108,8 +145,13 @@ async function columnExists(table: string, column: string) {
   return Boolean(rows[0]?.exists);
 }
 
-export async function ensureSchema() {
+async function migrateSchema() {
   const sql = getSql();
+
+  // Fast path: schema já no ar — não revarre information_schema nem roda ALTER idempotente.
+  if ((await tableExists("app_settings")) && (await readSchemaVersion(sql)) === String(SCHEMA_VERSION)) {
+    return;
+  }
 
   if (!(await tableExists("users"))) {
     await sql`
@@ -438,6 +480,165 @@ export async function ensureSchema() {
     await sql.unsafe("alter table omie_clients add column contato varchar(160)");
   }
 
+  if (!(await tableExists("omie_contratos"))) {
+    await sql`
+      create table omie_contratos (
+        id serial primary key,
+        omie_app_id varchar(64) not null,
+        omie_app_name varchar(160) not null,
+        codigo_contrato bigint not null,
+        codigo_cliente bigint not null,
+        cnpj_cpf varchar(32),
+        cliente_nome varchar(255),
+        numero varchar(60),
+        situacao varchar(2) not null,
+        vigencia_ini date,
+        vigencia_fim date,
+        valor_mensal numeric(14, 2),
+        tipo_fat varchar(2),
+        descricao_resumo text,
+        synced_at timestamptz not null default now(),
+        unique (omie_app_id, codigo_contrato)
+      )
+    `;
+  }
+  if (!(await indexExists("omie_contratos_cliente_idx"))) {
+    await sql.unsafe(
+      "create index omie_contratos_cliente_idx on omie_contratos (omie_app_id, codigo_cliente)",
+    );
+  }
+  if (!(await indexExists("omie_contratos_cnpj_idx"))) {
+    await sql.unsafe("create index omie_contratos_cnpj_idx on omie_contratos (cnpj_cpf)");
+  }
+  if (!(await indexExists("omie_contratos_sit_idx"))) {
+    await sql.unsafe(
+      "create index omie_contratos_sit_idx on omie_contratos (situacao, omie_app_id)",
+    );
+  }
+  if (!(await columnExists("omie_contratos", "dia_fat"))) {
+    await sql.unsafe("alter table omie_contratos add column dia_fat integer");
+  }
+  if (!(await columnExists("omie_contratos", "contato"))) {
+    await sql.unsafe("alter table omie_contratos add column contato varchar(160)");
+  }
+  if (!(await columnExists("omie_contratos", "cidade_prestacao"))) {
+    await sql.unsafe("alter table omie_contratos add column cidade_prestacao varchar(120)");
+  }
+  if (!(await columnExists("omie_contratos", "observacoes"))) {
+    await sql.unsafe("alter table omie_contratos add column observacoes text");
+  }
+  if (!(await columnExists("omie_contratos", "detalhes_json"))) {
+    await sql.unsafe("alter table omie_contratos add column detalhes_json jsonb");
+  }
+
+  if (!(await tableExists("omie_contrato_moni_contas"))) {
+    await sql`
+      create table omie_contrato_moni_contas (
+        id serial primary key,
+        omie_contrato_id integer not null references omie_contratos(id) on delete cascade,
+        moni_empresa smallint not null default 1,
+        moni_conta_codigo varchar(120) not null,
+        moni_conta_nome varchar(255),
+        moni_conta_id_ext varchar(120),
+        observacao text,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (omie_contrato_id, moni_empresa, moni_conta_codigo)
+      )
+    `;
+  }
+  if (!(await indexExists("omie_contrato_moni_contrato_idx"))) {
+    await sql.unsafe(
+      "create index omie_contrato_moni_contrato_idx on omie_contrato_moni_contas (omie_contrato_id)",
+    );
+  }
+  if (
+    (await tableExists("omie_contrato_moni_contas")) &&
+    !(await columnExists("omie_contrato_moni_contas", "moni_empresa"))
+  ) {
+    await sql.unsafe(
+      "alter table omie_contrato_moni_contas add column moni_empresa smallint not null default 1",
+    );
+  }
+  if ((await tableExists("omie_contrato_moni_contas")) && !(await indexExists("omie_contrato_moni_emp_cod_uidx"))) {
+    // Troca unique antigo (contrato, codigo) por (contrato, empresa, codigo).
+    await sql.unsafe(`
+      do $$
+      declare
+        cname text;
+      begin
+        select conname into cname
+        from pg_constraint
+        where conrelid = 'omie_contrato_moni_contas'::regclass
+          and contype = 'u'
+          and pg_get_constraintdef(oid) like '%moni_conta_codigo%'
+          and pg_get_constraintdef(oid) not like '%moni_empresa%'
+        limit 1;
+        if cname is not null then
+          execute format('alter table omie_contrato_moni_contas drop constraint %I', cname);
+        end if;
+      end $$;
+    `);
+    await sql.unsafe(
+      "create unique index if not exists omie_contrato_moni_emp_cod_uidx on omie_contrato_moni_contas (omie_contrato_id, moni_empresa, moni_conta_codigo)",
+    );
+  }
+
+  if (!(await tableExists("moni_contas"))) {
+    await sql`
+      create table moni_contas (
+        id serial primary key,
+        empresa smallint not null default 1,
+        codigo integer not null,
+        segundo_codigo varchar(20),
+        nome varchar(120) not null,
+        razao_social varchar(120),
+        cgc varchar(32),
+        tipo smallint,
+        suspenso boolean not null default false,
+        endereco varchar(120),
+        bairro varchar(60),
+        cep varchar(16),
+        synced_at timestamptz not null default now(),
+        unique (empresa, codigo)
+      )
+    `;
+  }
+  if ((await tableExists("moni_contas")) && !(await columnExists("moni_contas", "empresa"))) {
+    await sql.unsafe("alter table moni_contas add column empresa smallint not null default 1");
+  }
+  if ((await tableExists("moni_contas")) && !(await indexExists("moni_contas_empresa_codigo_uidx"))) {
+    await sql.unsafe(`
+      do $$
+      declare
+        cname text;
+      begin
+        select conname into cname
+        from pg_constraint
+        where conrelid = 'moni_contas'::regclass
+          and contype = 'u'
+          and pg_get_constraintdef(oid) like '%codigo%'
+          and pg_get_constraintdef(oid) not like '%empresa%'
+        limit 1;
+        if cname is not null then
+          execute format('alter table moni_contas drop constraint %I', cname);
+        end if;
+      end $$;
+    `);
+    await sql.unsafe(
+      "create unique index if not exists moni_contas_empresa_codigo_uidx on moni_contas (empresa, codigo)",
+    );
+  }
+  if ((await tableExists("moni_contas")) && !(await indexExists("moni_contas_empresa_idx"))) {
+    await sql.unsafe("create index moni_contas_empresa_idx on moni_contas (empresa)");
+  }
+  if (!(await indexExists("moni_contas_nome_idx"))) {
+    await sql.unsafe("create index moni_contas_nome_idx on moni_contas (nome)");
+  }
+  if (!(await indexExists("moni_contas_cgc_idx"))) {
+    await sql.unsafe("create index moni_contas_cgc_idx on moni_contas (cgc)");
+  }
+
   if (!(await tableExists("quotes"))) {
     await sql`
       create table quotes (
@@ -635,9 +836,25 @@ export async function ensureSchema() {
     );
   }
   if (await tableExists("facilities_substitutions")) {
-    await sql.unsafe(
-      "alter table facilities_substitutions alter column horas type numeric(10, 4)",
-    );
+    const horasType = await sql<{ data_type: string; numeric_precision: number | null; numeric_scale: number | null }[]>`
+      select data_type, numeric_precision, numeric_scale
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'facilities_substitutions'
+        and column_name = 'horas'
+      limit 1
+    `;
+    const h = horasType[0];
+    if (
+      !h ||
+      h.data_type !== "numeric" ||
+      Number(h.numeric_precision) !== 10 ||
+      Number(h.numeric_scale) !== 4
+    ) {
+      await sql.unsafe(
+        "alter table facilities_substitutions alter column horas type numeric(10, 4)",
+      );
+    }
   }
   if (
     (await tableExists("facilities_substitutions")) &&
@@ -657,9 +874,19 @@ export async function ensureSchema() {
   }
   if (await tableExists("facilities_substitutions")) {
     // Lançamento extra: colaborador a mais no posto, sem ausente.
-    await sql.unsafe(
-      "alter table facilities_substitutions alter column ausente_id drop not null",
-    );
+    const ausenteNullable = await sql<{ is_nullable: string }[]>`
+      select is_nullable
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'facilities_substitutions'
+        and column_name = 'ausente_id'
+      limit 1
+    `;
+    if (ausenteNullable[0]?.is_nullable === "NO") {
+      await sql.unsafe(
+        "alter table facilities_substitutions alter column ausente_id drop not null",
+      );
+    }
   }
   if (
     (await tableExists("facilities_substitutions")) &&
@@ -1071,6 +1298,7 @@ export async function ensureSchema() {
         discount numeric(12, 2) not null default 0,
         installments integer,
         location varchar(160),
+        supplier varchar(160),
         reason varchar(160),
         payment_method varchar(80),
         attachment_name varchar(200),
@@ -1121,6 +1349,7 @@ export async function ensureSchema() {
         discount numeric(12, 2) not null default 0,
         installments integer,
         location varchar(160),
+        supplier varchar(160),
         payment_method varchar(80),
         attachment_name varchar(200),
         attachment_data text,
@@ -1160,7 +1389,17 @@ export async function ensureSchema() {
         driver_id integer references fleet_drivers(id) on delete set null,
         occurred_at timestamptz not null,
         odometer numeric(12, 1) not null,
+        previous_odometer numeric(12, 1),
         kind varchar(40) not null default 'daily_km',
+        reason varchar(200),
+        profile varchar(24),
+        opened_at timestamptz,
+        closed_at timestamptz,
+        odometer_open numeric(12, 1),
+        odometer_close numeric(12, 1),
+        monitor_operator_open varchar(120),
+        monitor_operator_close varchar(120),
+        usage_reason varchar(200),
         notes text,
         created_by integer references users(id) on delete set null,
         created_at timestamptz not null default now()
@@ -1177,6 +1416,42 @@ export async function ensureSchema() {
   }
   if ((await tableExists("fleet_readings")) && !(await columnExists("fleet_readings", "reason"))) {
     await sql.unsafe("alter table fleet_readings add column reason varchar(200)");
+  }
+  if ((await tableExists("fleet_readings")) && !(await columnExists("fleet_readings", "profile"))) {
+    await sql.unsafe("alter table fleet_readings add column profile varchar(24)");
+  }
+  if ((await tableExists("fleet_readings")) && !(await columnExists("fleet_readings", "opened_at"))) {
+    await sql.unsafe("alter table fleet_readings add column opened_at timestamptz");
+  }
+  if ((await tableExists("fleet_readings")) && !(await columnExists("fleet_readings", "closed_at"))) {
+    await sql.unsafe("alter table fleet_readings add column closed_at timestamptz");
+  }
+  if ((await tableExists("fleet_readings")) && !(await columnExists("fleet_readings", "odometer_open"))) {
+    await sql.unsafe("alter table fleet_readings add column odometer_open numeric(12, 1)");
+  }
+  if ((await tableExists("fleet_readings")) && !(await columnExists("fleet_readings", "odometer_close"))) {
+    await sql.unsafe("alter table fleet_readings add column odometer_close numeric(12, 1)");
+  }
+  if (
+    (await tableExists("fleet_readings")) &&
+    !(await columnExists("fleet_readings", "monitor_operator_open"))
+  ) {
+    await sql.unsafe("alter table fleet_readings add column monitor_operator_open varchar(120)");
+  }
+  if (
+    (await tableExists("fleet_readings")) &&
+    !(await columnExists("fleet_readings", "monitor_operator_close"))
+  ) {
+    await sql.unsafe("alter table fleet_readings add column monitor_operator_close varchar(120)");
+  }
+  if ((await tableExists("fleet_readings")) && !(await columnExists("fleet_readings", "usage_reason"))) {
+    await sql.unsafe("alter table fleet_readings add column usage_reason varchar(200)");
+  }
+  if ((await tableExists("fleet_expenses")) && !(await columnExists("fleet_expenses", "supplier"))) {
+    await sql.unsafe("alter table fleet_expenses add column supplier varchar(160)");
+  }
+  if ((await tableExists("fleet_services")) && !(await columnExists("fleet_services", "supplier"))) {
+    await sql.unsafe("alter table fleet_services add column supplier varchar(160)");
   }
 
   if (!(await tableExists("fleet_reminders"))) {
@@ -1961,24 +2236,34 @@ export async function ensureSchema() {
     );
   }
 
-  // FK tardia: tickets existe depois de assist_os.ticket_id
-  try {
-    await sql.unsafe(`
-      alter table assist_os
-        add constraint assist_os_ticket_id_fkey
-        foreign key (ticket_id) references tickets(id) on delete set null
-    `);
-  } catch {
-    // already exists
+  // FK tardia: tickets existe depois de assist_os.ticket_id (só se ainda não existir)
+  const assistFk = await sql<{ conname: string }[]>`
+    select conname from pg_constraint
+    where conrelid = 'assist_os'::regclass
+      and conname in ('assist_os_ticket_id_fkey', 'assist_os_ticket_com_id_fkey')
+  `;
+  const assistFkNames = new Set(assistFk.map((r) => r.conname));
+  if (!assistFkNames.has("assist_os_ticket_id_fkey")) {
+    try {
+      await sql.unsafe(`
+        alter table assist_os
+          add constraint assist_os_ticket_id_fkey
+          foreign key (ticket_id) references tickets(id) on delete set null
+      `);
+    } catch {
+      // race / already exists
+    }
   }
-  try {
-    await sql.unsafe(`
-      alter table assist_os
-        add constraint assist_os_ticket_com_id_fkey
-        foreign key (ticket_com_id) references tickets(id) on delete set null
-    `);
-  } catch {
-    // already exists
+  if (!assistFkNames.has("assist_os_ticket_com_id_fkey")) {
+    try {
+      await sql.unsafe(`
+        alter table assist_os
+          add constraint assist_os_ticket_com_id_fkey
+          foreign key (ticket_com_id) references tickets(id) on delete set null
+      `);
+    } catch {
+      // race / already exists
+    }
   }
 
   const teamCount = await sql<{ c: number }[]>`
@@ -2030,6 +2315,153 @@ export async function ensureSchema() {
     );
   }
 
+  if (!(await tableExists("crm_oportunidade"))) {
+    await sql`
+      create table crm_oportunidade (
+        id serial primary key,
+        cod varchar(32) not null unique,
+        cliente text not null,
+        contato text not null default '',
+        tel text not null default '',
+        cidade text not null default '',
+        servico text not null default '',
+        tipo_venda varchar(16),
+        os_origem varchar(64),
+        os_origem_id integer,
+        tecnico text,
+        data_visita date,
+        responsavel text not null,
+        etapa varchar(16) not null default 'montar',
+        etapa_desde date not null,
+        criado_em date not null,
+        valor_mensal numeric(14,2) not null default 0,
+        valor_total numeric(14,2),
+        prazo_meses integer not null default 0,
+        validade date,
+        num_orcamento text,
+        modalidade text,
+        acao_json jsonb,
+        aprov_json jsonb,
+        res_json jsonb,
+        com_regras_json jsonb,
+        contrato_json jsonb,
+        os_instalacao varchar(64),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("crm_oportunidade_etapa_idx"))) {
+    await sql.unsafe("create index crm_oportunidade_etapa_idx on crm_oportunidade (etapa)");
+  }
+  if (!(await indexExists("crm_oportunidade_os_origem_idx"))) {
+    await sql.unsafe(
+      "create index crm_oportunidade_os_origem_idx on crm_oportunidade (os_origem)",
+    );
+  }
+  if (
+    (await tableExists("crm_oportunidade")) &&
+    !(await columnExists("crm_oportunidade", "omie_app_id"))
+  ) {
+    await sql.unsafe("alter table crm_oportunidade add column omie_app_id varchar(64)");
+  }
+  if (
+    (await tableExists("crm_oportunidade")) &&
+    !(await columnExists("crm_oportunidade", "codigo_cliente_omie"))
+  ) {
+    await sql.unsafe("alter table crm_oportunidade add column codigo_cliente_omie bigint");
+  }
+
+  if (!(await tableExists("crm_equipe"))) {
+    await sql`
+      create table crm_equipe (
+        id serial primary key,
+        oportunidade_id integer not null references crm_oportunidade(id) on delete cascade,
+        nome text not null,
+        papel varchar(16) not null,
+        unique (oportunidade_id, nome, papel)
+      )
+    `;
+  }
+
+  if (!(await tableExists("crm_item"))) {
+    await sql`
+      create table crm_item (
+        id serial primary key,
+        oportunidade_id integer not null references crm_oportunidade(id) on delete cascade,
+        qtd numeric(12,2) not null default 1,
+        descricao text not null
+      )
+    `;
+  }
+
+  if (!(await tableExists("crm_documento"))) {
+    await sql`
+      create table crm_documento (
+        id serial primary key,
+        oportunidade_id integer not null references crm_oportunidade(id) on delete cascade,
+        nome text not null,
+        tamanho integer not null default 0,
+        mime text not null default 'application/octet-stream',
+        data_base64 text not null,
+        etiqueta text not null,
+        lido_auto boolean not null default false,
+        autor text not null,
+        criado_em timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("crm_evento"))) {
+    await sql`
+      create table crm_evento (
+        id serial primary key,
+        oportunidade_id integer not null references crm_oportunidade(id) on delete cascade,
+        data date not null,
+        tipo varchar(16) not null,
+        texto text not null,
+        autor text not null,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("crm_regras_comissao"))) {
+    await sql`
+      create table crm_regras_comissao (
+        id serial primary key,
+        vigente_desde date not null,
+        json_regras jsonb not null,
+        autor_id integer,
+        autor text,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+
+  if (!(await tableExists("crm_comissao"))) {
+    await sql`
+      create table crm_comissao (
+        id serial primary key,
+        oportunidade_id integer not null references crm_oportunidade(id) on delete cascade,
+        nome text not null,
+        papel varchar(16) not null,
+        base numeric(14,2) not null default 0,
+        venda numeric(14,2) not null default 0,
+        equipe numeric(14,2) not null default 0,
+        total numeric(14,2) not null default 0,
+        parcelas integer not null default 1,
+        inicio integer not null default 0,
+        impl_venda numeric(14,2) not null default 0,
+        impl_equipe numeric(14,2) not null default 0,
+        regras_json jsonb,
+        fechado_em date not null,
+        contrato_fim date,
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+
   const superUsername = process.env["APP_SUPERADMIN_USERNAME"] ?? "superadmin";
   const superPassword = process.env["APP_SUPERADMIN_PASSWORD"] ?? "ancora";
   const superName = process.env["APP_SUPERADMIN_NAME"] ?? "Super Admin";
@@ -2044,4 +2476,6 @@ export async function ensureSchema() {
       values (${superUsername}, ${passwordHash}, ${superName}, 'superadmin')
     `;
   }
+
+  await writeSchemaVersion(sql);
 }

@@ -10,6 +10,8 @@ export const APP_MODULES = [
   { id: "compras", label: "Compras", path: "/compras" },
   { id: "frota", label: "Frota", path: "/frota" },
   { id: "assistencia", label: "Assistência", path: "/assistencia" },
+  { id: "crm", label: "CRM", path: "/crm" },
+  { id: "contratos", label: "Contratos", path: "/contratos" },
   { id: "equipes", label: "Equipes", path: "/equipes" },
   { id: "tickets", label: "Tickets", path: "/tickets" },
   { id: "notificacoes", label: "Notificações", path: "/notificacoes" },
@@ -87,6 +89,11 @@ export const APP_PERMISSIONS = [
     id: "ticket_com",
     label: "Ticket · Comercial",
     hint: "Atender tickets do setor Comercial.",
+  },
+  {
+    id: "crm_comissoes",
+    label: "CRM · Comissões",
+    hint: "Ver comissões de todos, editar regras e emitir pagamento do vendedor.",
   },
 ] as const;
 

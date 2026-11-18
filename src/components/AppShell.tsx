@@ -44,6 +44,7 @@ type NavPath =
   | "/orcamentos-postos"
   | "/tabela-precos"
   | "/produtos"
+  | "/contratos"
   | "/facilities"
   | "/terceiros"
   | "/uniformes"
@@ -51,6 +52,7 @@ type NavPath =
   | "/compras"
   | "/frota"
   | "/assistencia"
+  | "/crm"
   | "/equipes"
   | "/tickets"
   | "/notificacoes"
@@ -119,6 +121,22 @@ const NAV: NavEntry[] = [
         module: "orcamentos",
       },
       { to: "/produtos", label: "Produtos", icon: "inventory_2", module: "produtos" },
+      { to: "/contratos", label: "Contratos", icon: "handshake", module: "contratos" },
+      { to: "/crm", label: "CRM", icon: "view_kanban", module: "crm", search: "view=quadro" },
+      {
+        to: "/crm",
+        label: "Relatórios",
+        icon: "bar_chart",
+        module: "crm",
+        search: "view=relatorios",
+      },
+      {
+        to: "/crm",
+        label: "Comissões",
+        icon: "payments",
+        module: "crm",
+        search: "view=comissoes",
+      },
     ],
   },
   {
@@ -219,28 +237,38 @@ function canSeeLeaf(user: AppUser | null, item: NavLeaf) {
   return true;
 }
 
-function readSearchParam(key: string) {
-  if (typeof window === "undefined") return null;
-  return new URLSearchParams(window.location.search).get(key);
+type SearchBag = Record<string, unknown>;
+
+function readSearchParam(params: SearchBag | undefined, key: string) {
+  if (!params) return null;
+  const value = params[key];
+  if (value == null) return null;
+  return String(value);
 }
 
-function isPathActive(pathname: string, to: string, search?: string) {
+/** Usa search do router (SSR + client iguais) — nunca `window.location` (causava hydration mismatch / aba travada). */
+function isPathActive(
+  pathname: string,
+  to: string,
+  search: string | undefined,
+  params?: SearchBag,
+) {
   const pathOk = pathname === to || pathname.startsWith(`${to}/`);
   if (!pathOk) return false;
   if (!search) {
     if (to === "/assistencia") {
-      const view = readSearchParam("view");
+      const view = readSearchParam(params, "view");
       return !view || view === "kanban";
     }
     if (to === "/compras") {
-      const tab = readSearchParam("tab");
+      const tab = readSearchParam(params, "tab");
       return !tab || tab === "kanban";
     }
     return true;
   }
   const wanted = new URLSearchParams(search);
   for (const [key, value] of wanted.entries()) {
-    const current = readSearchParam(key);
+    const current = readSearchParam(params, key);
     if (key === "view" && value === "kanban") {
       if (current && current !== "kanban") return false;
       continue;
@@ -329,8 +357,9 @@ function initials(name: string) {
 }
 
 const SIDEBAR_COLLAPSED_KEY = "ancora.sidebar.collapsed";
-const SIDEBAR_WIDTH = 280;
-const SIDEBAR_COLLAPSED_WIDTH = 76;
+/** Largura do menu lateral no visual CRM (.side = 220px). */
+const SIDEBAR_WIDTH = 220;
+const SIDEBAR_COLLAPSED_WIDTH = 64;
 
 function NavBadge({ value }: { value: string | number }) {
   const soon = String(value).toUpperCase() === "EM BREVE";
@@ -338,12 +367,12 @@ function NavBadge({ value }: { value: string | number }) {
   return (
     <span
       className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-semibold tracking-wide",
+        "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide",
         soon
           ? "bg-white/15 uppercase text-white/65"
           : numeric
-            ? "bg-amber-400 text-amber-950"
-            : "bg-secondary-container/90 uppercase text-on-secondary-container",
+            ? "bg-secondary-container text-on-secondary-container"
+            : "bg-secondary-container uppercase text-on-secondary-container",
       )}
     >
       {value}
@@ -354,34 +383,36 @@ function NavBadge({ value }: { value: string | number }) {
 function NavLinkItem({
   item,
   pathname,
+  searchParams,
   onNavigate,
   nested = false,
   collapsed = false,
 }: {
   item: NavLeaf;
   pathname: string;
+  searchParams?: SearchBag;
   onNavigate?: (() => void) | undefined;
   nested?: boolean;
   collapsed?: boolean;
 }) {
   const navigate = useNavigate();
-  const active = !item.comingSoon && isPathActive(pathname, item.to, item.search);
+  const active = !item.comingSoon && isPathActive(pathname, item.to, item.search, searchParams);
   const className = cn(
-    "flex items-center gap-sm rounded-lg py-sm text-label-md transition-colors",
-    collapsed ? "justify-center px-sm" : nested ? "px-md pl-10" : "px-md",
+    "flex items-center gap-2 rounded-[7px] py-[7px] text-[13px] transition-colors",
+    collapsed ? "justify-center px-2" : nested ? "px-2.5 pl-5" : "px-2.5",
     item.comingSoon
-      ? "cursor-default text-white/40"
+      ? "cursor-default text-[#777]"
       : active
-        ? "bg-secondary-container font-bold text-on-secondary-container"
-        : "text-white/70 hover:bg-white/10 hover:text-white",
+        ? "bg-secondary-container font-semibold text-on-secondary-container"
+        : "text-[#ccc] hover:bg-white/10 hover:text-white",
   );
 
   const body = (
     <>
       <span className="relative shrink-0">
-        <Icon name={item.icon} filled={active} className="text-xl" />
+        <Icon name={item.icon} filled={active} className="text-[20px]" />
         {collapsed && item.badge != null ? (
-          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-400" />
+          <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-secondary-container" />
         ) : null}
       </span>
       {!collapsed ? (
@@ -430,16 +461,18 @@ function NavLinkItem({
 function NavGroupItem({
   entry,
   pathname,
+  searchParams,
   onNavigate,
   collapsed = false,
 }: {
   entry: Extract<NavEntry, { kind: "group" }>;
   pathname: string;
+  searchParams?: SearchBag;
   onNavigate?: (() => void) | undefined;
   collapsed?: boolean;
 }) {
   const childActive = entry.children.some((child) =>
-    isPathActive(pathname, child.to, child.search),
+    isPathActive(pathname, child.to, child.search, searchParams),
   );
   const [open, setOpen] = useState(childActive);
 
@@ -455,6 +488,7 @@ function NavGroupItem({
             key={`${child.to}?${child.search ?? ""}:${child.label}`}
             item={child}
             pathname={pathname}
+            searchParams={searchParams}
             onNavigate={onNavigate}
             collapsed
           />
@@ -470,18 +504,18 @@ function NavGroupItem({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          "flex w-full items-center gap-sm rounded-lg px-md py-sm text-left text-label-md transition-colors",
+          "flex w-full items-center gap-2 rounded-[7px] px-2.5 py-[7px] text-left text-[13px] transition-colors",
           childActive
             ? "bg-white/10 font-semibold text-secondary-container"
-            : "text-white/70 hover:bg-white/10 hover:text-white",
+            : "text-[#ccc] hover:bg-white/10 hover:text-white",
         )}
       >
-        <Icon name={entry.icon} filled={childActive} className="text-xl" />
+        <Icon name={entry.icon} filled={childActive} className="text-[20px]" />
         <span className="flex-1">{entry.label}</span>
         {entry.badge != null ? <NavBadge value={entry.badge} /> : null}
         <Icon
           name={open ? "expand_less" : "expand_more"}
-          className="text-lg text-white/50"
+          className="text-lg text-[#888]"
         />
       </button>
       {open ? (
@@ -491,6 +525,7 @@ function NavGroupItem({
               key={`${child.to}?${child.search ?? ""}:${child.label}`}
               item={child}
               pathname={pathname}
+              searchParams={searchParams}
               onNavigate={onNavigate}
               nested
             />
@@ -503,12 +538,14 @@ function NavGroupItem({
 
 function NavList({
   pathname,
+  searchParams,
   user,
   onNavigate,
   collapsed = false,
   comprasUnread = null,
 }: {
   pathname: string;
+  searchParams?: SearchBag;
   user: AppUser | null;
   onNavigate?: (() => void) | undefined;
   collapsed?: boolean;
@@ -516,13 +553,14 @@ function NavList({
 }) {
   const items = visibleNav(user, comprasUnread);
   return (
-    <nav className="flex-1 space-y-1.5 overflow-y-auto pr-1">
+    <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto pr-0.5">
       {items.map((entry) =>
         entry.kind === "link" ? (
           <NavLinkItem
             key={`${entry.to}-${entry.search ?? ""}`}
             item={entry}
             pathname={pathname}
+            searchParams={searchParams}
             onNavigate={onNavigate}
             collapsed={collapsed}
           />
@@ -531,6 +569,7 @@ function NavList({
             key={entry.id}
             entry={entry}
             pathname={pathname}
+            searchParams={searchParams}
             onNavigate={onNavigate}
             collapsed={collapsed}
           />
@@ -542,10 +581,12 @@ function NavList({
 
 function MobileBottomNav({
   pathname,
+  searchParams,
   user,
   comprasUnread = null,
 }: {
   pathname: string;
+  searchParams?: SearchBag;
   user: AppUser | null;
   comprasUnread?: ComprasUnread | null;
 }) {
@@ -555,12 +596,12 @@ function MobileBottomNav({
   return (
     <nav
       aria-label="Módulos"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-outline-variant bg-surface/95 backdrop-blur-md md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-outline-variant bg-white md:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       <div className="flex items-stretch overflow-x-auto px-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {items.map((item) => {
-          const active = isPathActive(pathname, item.to, item.search);
+          const active = isPathActive(pathname, item.to, item.search, searchParams);
           return (
             <Link
               key={`${item.to}?${item.search ?? ""}`}
@@ -568,19 +609,19 @@ function MobileBottomNav({
               className={cn(
                 "flex min-w-[4.5rem] flex-1 flex-col items-center justify-center gap-0.5 px-2 py-2 text-center transition-colors",
                 active
-                  ? "text-primary"
+                  ? "text-on-secondary-container"
                   : "text-on-surface-variant active:bg-surface-container-high",
               )}
             >
               <span
                 className={cn(
-                  "relative flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+                  "relative flex h-8 w-8 items-center justify-center rounded-[7px] transition-colors",
                   active && "bg-secondary-container text-on-secondary-container",
                 )}
               >
                 <Icon name={item.icon} filled={active} className="text-[22px]" />
                 {item.badge != null ? (
-                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-400 px-1 text-[0.6rem] font-bold text-amber-950">
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-secondary-container px-1 text-[0.6rem] font-bold text-on-secondary-container">
                     {item.badge}
                   </span>
                 ) : null}
@@ -588,7 +629,7 @@ function MobileBottomNav({
               <span
                 className={cn(
                   "max-w-[4.75rem] truncate text-[0.65rem] leading-tight",
-                  active ? "font-bold" : "font-medium",
+                  active ? "font-semibold" : "font-medium",
                 )}
               >
                 {item.label}
@@ -604,6 +645,7 @@ function MobileBottomNav({
 function SidebarInner({
   onNavigate,
   pathname,
+  searchParams,
   user,
   collapsed = false,
   onToggleCollapsed,
@@ -611,6 +653,7 @@ function SidebarInner({
 }: {
   onNavigate?: (() => void) | undefined;
   pathname: string;
+  searchParams?: SearchBag;
   user: AppUser | null;
   collapsed?: boolean;
   onToggleCollapsed?: (() => void) | undefined;
@@ -619,17 +662,25 @@ function SidebarInner({
   const navigate = useNavigate();
 
   return (
-    <div className={cn("flex h-full flex-col py-xl", collapsed ? "px-sm" : "px-md")}>
-      <div className={cn("mb-lg flex items-center gap-md", collapsed ? "justify-center px-0" : "px-xs")}>
-        <BrandLogo className={cn("w-auto shrink-0", collapsed ? "h-9" : "h-12")} />
+    <div className={cn("flex h-full flex-col gap-0.5 py-3.5", collapsed ? "px-1.5" : "px-2.5")}>
+      <div
+        className={cn(
+          "mb-4 flex items-center gap-2",
+          collapsed ? "justify-center px-0" : "px-2",
+        )}
+      >
+        <BrandLogo
+          className={cn("w-auto shrink-0", collapsed ? "h-9" : "h-10")}
+        />
         {!collapsed ? (
           <div className="min-w-0 flex-1">
-            <p className="truncate text-title-lg leading-tight text-secondary-container">{APP_NAME}</p>
-            <p className="text-label-md uppercase tracking-wider text-white/55">
-              Sistema de gestão operacional
+            <p className="truncate text-[14px] font-bold tracking-wide text-white">{APP_NAME}</p>
+            <p className="text-[11px] uppercase tracking-[0.08em] text-[#888]">
+              Gestão operacional
             </p>
           </div>
         ) : null}
+        {collapsed ? <span className="sr-only">{APP_NAME}</span> : null}
       </div>
 
       {onToggleCollapsed ? (
@@ -639,24 +690,28 @@ function SidebarInner({
           aria-label={collapsed ? "Expandir menu" : "Encolher menu"}
           title={collapsed ? "Expandir menu" : "Encolher menu"}
           className={cn(
-            "mb-md flex items-center gap-sm rounded-lg py-sm text-label-md text-white/70 transition-colors hover:bg-white/10 hover:text-white",
-            collapsed ? "justify-center px-sm" : "px-md",
+            "mb-2 flex items-center gap-2 rounded-[7px] py-[7px] text-[13px] text-[#ccc] transition-colors hover:bg-white/10 hover:text-white",
+            collapsed ? "justify-center px-2" : "px-2.5",
           )}
         >
-          <Icon name={collapsed ? "keyboard_double_arrow_right" : "keyboard_double_arrow_left"} className="text-xl" />
+          <Icon
+            name={collapsed ? "keyboard_double_arrow_right" : "keyboard_double_arrow_left"}
+            className="text-[20px]"
+          />
           {!collapsed ? <span>Encolher</span> : null}
         </button>
       ) : null}
 
       <NavList
         pathname={pathname}
+        searchParams={searchParams}
         user={user}
         onNavigate={onNavigate}
         collapsed={collapsed}
         comprasUnread={comprasUnread}
       />
 
-      <div className="mt-auto space-y-1 border-t border-white/15 pt-lg">
+      <div className="mt-auto space-y-1 border-t border-white/10 pt-3">
         <button
           type="button"
           title={collapsed ? "Sair" : undefined}
@@ -666,15 +721,15 @@ function SidebarInner({
             await navigate({ to: "/" });
           }}
           className={cn(
-            "flex w-full items-center gap-sm rounded-lg py-sm text-left text-label-md text-white/70 transition-colors hover:bg-white/10 hover:text-white",
-            collapsed ? "justify-center px-sm" : "px-md",
+            "flex w-full items-center gap-2 rounded-[7px] py-[7px] text-left text-[13px] text-[#ccc] transition-colors hover:bg-white/10 hover:text-white",
+            collapsed ? "justify-center px-2" : "px-2.5",
           )}
         >
-          <Icon name="logout" className="text-xl" />
+          <Icon name="logout" className="text-[20px]" />
           {!collapsed ? <span>Sair</span> : null}
         </button>
         {isSuperadmin(user) && !collapsed ? (
-          <p className="px-xs pt-sm text-[0.65rem] uppercase tracking-wider text-white/45">
+          <p className="px-2.5 pt-2 text-[10px] uppercase tracking-[0.08em] text-[#888]">
             Superadmin
           </p>
         ) : null}
@@ -705,25 +760,25 @@ function ProfileMenu({ user }: { user: AppUser | null }) {
         aria-label="Perfil"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        className="flex items-center gap-xs rounded-full p-1 transition-colors hover:bg-surface-container-high focus:outline-none focus:ring-2 focus:ring-secondary-container"
+        className="flex items-center gap-1 rounded-[8px] p-1 transition-colors hover:bg-surface-container-high focus:outline-none focus:ring-2 focus:ring-secondary-container"
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-full border border-outline-variant bg-secondary-container text-label-md font-bold text-on-secondary-container">
+        <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-secondary-container text-[12px] font-bold text-on-secondary-container">
           {initials(user.name)}
         </span>
       </button>
       {open ? (
-        <div className="absolute right-0 top-full z-50 mt-sm w-64 overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-elevation-1">
-          <div className="border-b border-outline-variant px-md py-sm">
-            <p className="truncate text-title-lg text-primary">{user.name}</p>
-            <p className="text-label-md text-on-surface-variant">{roleLabel(user.role)}</p>
-            <p className="mt-xs text-[0.65rem] tabular-nums text-on-surface-variant">
+        <div className="absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-[14px] border border-outline-variant bg-white shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
+          <div className="border-b border-outline-variant px-3.5 py-2.5">
+            <p className="truncate text-[16px] font-semibold text-primary">{user.name}</p>
+            <p className="text-[12px] text-on-surface-variant">{roleLabel(user.role)}</p>
+            <p className="mt-1 text-[11px] tabular-nums text-on-surface-variant">
               Versão {APP_VERSION}
             </p>
           </div>
           <Link
             to="/profile"
             onClick={() => setOpen(false)}
-            className="flex w-full items-center gap-sm px-md py-sm text-left text-label-md text-on-surface hover:bg-surface-container-low"
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[13px] text-on-surface hover:bg-surface-container-low"
           >
             <Icon name="person" className="text-sm" />
             Meu perfil
@@ -732,7 +787,7 @@ function ProfileMenu({ user }: { user: AppUser | null }) {
             <Link
               to="/users"
               onClick={() => setOpen(false)}
-              className="flex w-full items-center gap-sm px-md py-sm text-left text-label-md text-on-surface hover:bg-surface-container-low"
+              className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[13px] text-on-surface hover:bg-surface-container-low"
             >
               <Icon name="manage_accounts" className="text-sm" />
               Usuários
@@ -745,7 +800,7 @@ function ProfileMenu({ user }: { user: AppUser | null }) {
               await logoutFn();
               await navigate({ to: "/" });
             }}
-            className="flex w-full items-center gap-sm px-md py-sm text-left text-label-md text-on-surface hover:bg-surface-container-low"
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[13px] text-on-surface hover:bg-surface-container-low"
           >
             <Icon name="logout" className="text-sm" />
             Sair
@@ -769,16 +824,13 @@ export function AppShell({
   fullHeight?: boolean;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const searchParams = useRouterState({
+    select: (s) => s.location.search as SearchBag,
+  });
   const { user } = RootRoute.useRouteContext();
   const [open, setOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  // Sempre false no 1º paint (SSR=client) — localStorage só depois do mount (evita hydration freeze).
+  const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [enterAnim, setEnterAnim] = useState(false);
   const [comprasUnread, setComprasUnread] = useState<ComprasUnread | null>(null);
@@ -797,7 +849,18 @@ export function AppShell({
     return () => window.clearTimeout(timer);
   }, []);
 
+  const collapsedReady = useRef(false);
   useEffect(() => {
+    try {
+      if (window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1") setCollapsed(true);
+    } catch {
+      // ignore
+    }
+    collapsedReady.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!collapsedReady.current) return;
     try {
       window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
     } catch {
@@ -840,16 +903,18 @@ export function AppShell({
         className={cn(
           "relative flex bg-background text-on-background",
           fullHeight ? "h-dvh overflow-hidden" : "min-h-screen",
-          enterAnim && "animate-[shell-enter_0.85s_cubic-bezier(0.22,1,0.36,1)_both]",
+          /* sem fill-mode both: transform residual cria containing block e corta position:fixed (drawer CRM) */
+          enterAnim && "animate-[shell-enter_0.85s_cubic-bezier(0.22,1,0.36,1)]",
         )}
       >
-        {/* Desktop: sidebar no fluxo (não fixed) — conteúdo nunca passa por baixo. */}
+        {/* Desktop: sidebar CRM (.side) — ink #141414, item ativo brand. */}
         <aside
-          className="sticky top-0 z-40 hidden h-dvh shrink-0 border-r border-white/10 bg-primary transition-[width] duration-200 ease-out md:block"
+          className="sticky top-0 z-40 hidden h-dvh shrink-0 bg-primary transition-[width] duration-200 ease-out md:block"
           style={{ width: sidebarWidth }}
         >
           <SidebarInner
             pathname={pathname}
+            searchParams={searchParams}
             user={user}
             collapsed={collapsed}
             onToggleCollapsed={() => setCollapsed((value) => !value)}
@@ -861,12 +926,13 @@ export function AppShell({
           <div className="fixed inset-0 z-50 md:hidden">
             <button
               aria-label="Fechar menu"
-              className="absolute inset-0 bg-inverse-surface/40"
+              className="absolute inset-0 bg-black/35"
               onClick={() => setOpen(false)}
             />
-            <div className="absolute left-0 top-0 h-full w-[280px] border-r border-white/10 bg-primary">
+            <div className="absolute left-0 top-0 h-full w-[220px] bg-primary">
               <SidebarInner
                 pathname={pathname}
+                searchParams={searchParams}
                 user={user}
                 onNavigate={() => setOpen(false)}
                 comprasUnread={comprasUnread}
@@ -877,16 +943,16 @@ export function AppShell({
 
         <div
           className={cn(
-            "flex min-w-0 flex-1 flex-col",
+            "flex min-w-0 flex-1 flex-col bg-background",
             fullHeight ? "h-dvh min-h-0 overflow-hidden" : "min-h-screen",
           )}
         >
-          <header className="z-30 flex w-full shrink-0 items-center justify-between border-b-4 border-secondary-container bg-surface px-margin-mobile py-md md:sticky md:top-0 md:px-margin-desktop">
+          <header className="z-30 flex w-full shrink-0 items-center justify-between gap-3 border-b border-outline-variant bg-white px-4 py-3.5 md:sticky md:top-0 md:px-5">
             <button
               type="button"
               aria-label="Abrir menu"
               onClick={() => setOpen(true)}
-              className="rounded-full p-2 text-on-surface transition-colors hover:bg-surface-container md:hidden"
+              className="rounded-[8px] p-2 text-on-surface transition-colors hover:bg-surface-container md:hidden"
             >
               <Icon name="menu" />
             </button>
@@ -895,19 +961,19 @@ export function AppShell({
               <div className="relative w-full">
                 <Icon
                   name="search"
-                  className="absolute left-sm top-1/2 -translate-y-1/2 text-on-surface-variant"
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-on-surface-variant"
                 />
                 <input
                   type="search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder={searchPlaceholder}
-                  className="input-glow w-full rounded-full border border-transparent bg-surface-container-low py-sm pl-[40px] pr-sm text-body-md text-on-surface outline-none transition-all placeholder:text-on-surface-variant focus:border-outline focus:bg-surface-container-lowest"
+                  className="input-glow w-full rounded-[8px] border border-outline-variant bg-white py-[7px] pl-9 pr-2.5 text-[14px] text-on-surface outline-none transition-all placeholder:text-on-surface-variant focus:border-primary focus:bg-white"
                 />
               </div>
             </div>
 
-            <div className="text-headline-md font-bold tracking-tight text-primary md:hidden">
+            <div className="text-[18px] font-bold tracking-tight text-primary md:hidden">
               {mobileTitle}
             </div>
             <ProfileMenu user={user} />
@@ -922,7 +988,12 @@ export function AppShell({
             </div>
           )}
         </div>
-        <MobileBottomNav pathname={pathname} user={user} comprasUnread={comprasUnread} />
+        <MobileBottomNav
+          pathname={pathname}
+          searchParams={searchParams}
+          user={user}
+          comprasUnread={comprasUnread}
+        />
         {!fullHeight ? <HelpChat /> : null}
       </div>
     </ShellSearchContext.Provider>

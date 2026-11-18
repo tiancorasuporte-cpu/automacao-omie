@@ -24,6 +24,7 @@ import {
 import { APP_NAME } from "@/lib/brand";
 import { FLEET_BRAND_LABELS, FLEET_BRAND_OPTIONS } from "@/lib/fleet-brands";
 import {
+  closeReadingFn,
   createChecklistFn,
   createExpenseFn,
   createIncomeFn,
@@ -38,6 +39,7 @@ import {
   getFrotaHistoryFn,
   getFrotaReportFn,
   getRefuelingAttachmentsFn,
+  listOpenReadingsFn,
   saveFleetDriverFn,
   saveFleetReminderFn,
   saveFleetVehicleFn,
@@ -45,6 +47,7 @@ import {
 } from "@/lib/frota";
 import {
   FLEET_ENTRY_LABELS,
+  KM_PROFILE_LABELS,
   formatBRL,
   formatKm,
   formatKmPerLiter,
@@ -52,6 +55,7 @@ import {
   monthLabelPt,
   parseMoney,
   type FleetEntryType,
+  type KmProfile,
 } from "@/lib/frota-domain";
 import { downloadFrotaKmExcel } from "@/lib/frota-km-excel";
 import { downloadFrotaKmPdf } from "@/lib/frota-km-pdf";
@@ -589,7 +593,7 @@ function DailyKmPanel({
         <div>
           <h3 className="text-title-md text-primary">KM do dia</h3>
           <p className="text-body-sm text-on-surface-variant">
-            Controle diário com odômetro anterior/atual, motivo e quem lançou.
+            Monitoramento e Assistência/RH — abertura e fechamento com KM/hora.
           </p>
         </div>
         <div className="flex flex-wrap gap-sm">
@@ -724,19 +728,31 @@ function DailyKmPanel({
                   </p>
                 </div>
                 <div className="mt-sm grid gap-xs text-body-md">
-                  <p>
-                    <span className="text-on-surface-variant">Anterior: </span>
-                    {row.previousOdometer != null ? formatKm(row.previousOdometer) : "—"}
-                    <span className="text-on-surface-variant"> → Atual: </span>
-                    {formatKm(row.odometer)}
+                  <p className="text-label-md text-on-surface-variant">
+                    {row.profile === "monitoramento"
+                      ? "Monitoramento"
+                      : row.profile === "assistencia"
+                        ? "Assistência / RH"
+                        : "Legado"}
+                    {row.closedAt ? " · fechado" : row.profile ? " · aberto" : ""}
                   </p>
                   <p>
-                    <span className="text-on-surface-variant">Motivo: </span>
-                    {row.reason || "—"}
+                    <span className="text-on-surface-variant">Abertura: </span>
+                    {row.odometerOpen != null ? formatKm(row.odometerOpen) : formatKm(row.previousOdometer)}
+                    <span className="text-on-surface-variant"> → Fechamento: </span>
+                    {row.odometerClose != null ? formatKm(row.odometerClose) : formatKm(row.odometer)}
+                  </p>
+                  <p>
+                    <span className="text-on-surface-variant">
+                      {row.usageReason ? "Motivo do uso: " : "Motivo: "}
+                    </span>
+                    {row.usageReason || row.reason || "—"}
                   </p>
                   <p className="text-label-md text-on-surface-variant">
                     {[
                       row.driverName ? `Motorista: ${row.driverName}` : null,
+                      row.monitorOperatorOpen ? `Op. abert.: ${row.monitorOperatorOpen}` : null,
+                      row.monitorOperatorClose ? `Op. fech.: ${row.monitorOperatorClose}` : null,
                       row.createdByName ? `Lançado por: ${row.createdByName}` : null,
                     ]
                       .filter(Boolean)
@@ -769,14 +785,15 @@ function DailyKmPanel({
             <table className="min-w-full text-left text-body-md">
               <thead className="bg-primary text-label-md font-semibold uppercase tracking-wide text-on-primary">
                 <tr>
-                  <th className="px-md py-sm">Data/hora</th>
+                  <th className="px-md py-sm">Perfil</th>
+                  <th className="px-md py-sm">Abertura</th>
+                  <th className="px-md py-sm">Fechamento</th>
                   <th className="px-md py-sm">Veículo</th>
-                  <th className="px-md py-sm">KM anterior</th>
-                  <th className="px-md py-sm">KM atual</th>
+                  <th className="px-md py-sm">KM abert.</th>
+                  <th className="px-md py-sm">KM fech.</th>
                   <th className="px-md py-sm">KM do dia</th>
+                  <th className="px-md py-sm">Motorista / operadores</th>
                   <th className="px-md py-sm">Motivo</th>
-                  <th className="px-md py-sm">Motorista</th>
-                  <th className="px-md py-sm">Lançado por</th>
                   <th className="px-md py-sm">Ações</th>
                 </tr>
               </thead>
@@ -784,7 +801,20 @@ function DailyKmPanel({
                 {rows.map((row) => (
                   <tr key={row.id} className="border-t border-outline-variant/60">
                     <td className="px-md py-sm whitespace-nowrap">
-                      {new Date(row.occurredAt).toLocaleString("pt-BR")}
+                      {row.profile === "monitoramento"
+                        ? "Monitoramento"
+                        : row.profile === "assistencia"
+                          ? "Assistência/RH"
+                          : "—"}
+                      {!row.closedAt && row.profile ? (
+                        <div className="text-label-sm text-amber-700">Aberto</div>
+                      ) : null}
+                    </td>
+                    <td className="px-md py-sm whitespace-nowrap">
+                      {new Date(row.openedAt ?? row.occurredAt).toLocaleString("pt-BR")}
+                    </td>
+                    <td className="px-md py-sm whitespace-nowrap">
+                      {row.closedAt ? new Date(row.closedAt).toLocaleString("pt-BR") : "—"}
                     </td>
                     <td className="px-md py-sm text-primary">
                       <div>{row.vehicleName}</div>
@@ -793,18 +823,31 @@ function DailyKmPanel({
                       ) : null}
                     </td>
                     <td className="px-md py-sm">
-                      {row.previousOdometer != null ? formatKm(row.previousOdometer) : "—"}
+                      {row.odometerOpen != null
+                        ? formatKm(row.odometerOpen)
+                        : row.previousOdometer != null
+                          ? formatKm(row.previousOdometer)
+                          : "—"}
                     </td>
-                    <td className="px-md py-sm font-semibold">{formatKm(row.odometer)}</td>
+                    <td className="px-md py-sm font-semibold">
+                      {row.odometerClose != null ? formatKm(row.odometerClose) : formatKm(row.odometer)}
+                    </td>
                     <td className="px-md py-sm font-semibold text-primary">
                       {row.kmDay != null ? `+${formatKm(row.kmDay)}` : "—"}
                     </td>
-                    <td className="px-md py-sm max-w-[14rem]">
-                      <span className="line-clamp-2">{row.reason || "—"}</span>
+                    <td className="px-md py-sm text-on-surface-variant max-w-[12rem]">
+                      <div className="line-clamp-3">
+                        {[
+                          row.driverName,
+                          row.monitorOperatorOpen ? `Op.A: ${row.monitorOperatorOpen}` : null,
+                          row.monitorOperatorClose ? `Op.F: ${row.monitorOperatorClose}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
+                      </div>
                     </td>
-                    <td className="px-md py-sm text-on-surface-variant">{row.driverName || "—"}</td>
-                    <td className="px-md py-sm text-on-surface-variant">
-                      {row.createdByName || "—"}
+                    <td className="px-md py-sm max-w-[14rem]">
+                      <span className="line-clamp-2">{row.usageReason || row.reason || "—"}</span>
                     </td>
                     <td className="px-md py-sm">
                       <div className="flex flex-wrap gap-xs">
@@ -1536,12 +1579,14 @@ function DriversPanel({
 function Field({
   label,
   children,
+  className,
 }: {
   label: string;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <label className="grid gap-xs text-label-sm">
+    <label className={cn("grid min-w-0 gap-xs text-label-sm", className)}>
       <span className="text-on-surface-variant">{label}</span>
       {children}
     </label>
@@ -1584,14 +1629,14 @@ function EntryFormDialog({
   const [amount, setAmount] = useState("");
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
-  const [reason, setReason] = useState("");
-  const [fuelType, setFuelType] = useState(catalog.fuels[0]?.name ?? "Gas. Comum");
+  const [fuelType, setFuelType] = useState(catalog.fuels[0]?.name ?? "Diesel");
   const [pricePerLiter, setPricePerLiter] = useState("");
   const [liters, setLiters] = useState("");
   const [fullTank, setFullTank] = useState(true);
-  const [station, setStation] = useState("");
+  const [station, setStation] = useState(catalog.stations[0]?.name ?? "");
   const [expenseType, setExpenseType] = useState(catalog.expenses[0]?.name ?? "Outros");
   const [serviceType, setServiceType] = useState(catalog.services[0]?.name ?? "Outros");
+  const [supplier, setSupplier] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [location, setLocation] = useState("");
   const [origin, setOrigin] = useState("");
@@ -1603,15 +1648,54 @@ function EntryFormDialog({
   const [intervalDays, setIntervalDays] = useState("180");
   const [checklistText, setChecklistText] = useState("Pneus\nFaróis\nÓleo\nDocumentos");
   const [photos, setPhotos] = useState<CapturedPhoto[]>([]);
+  const [kmProfile, setKmProfile] = useState<KmProfile>("monitoramento");
+  const [kmAction, setKmAction] = useState<"open" | "close">("open");
+  const [monitorOperatorOpen, setMonitorOperatorOpen] = useState("");
+  const [monitorOperatorClose, setMonitorOperatorClose] = useState("");
+  const [usageReason, setUsageReason] = useState("");
+  const [openReadingId, setOpenReadingId] = useState<number | "">("");
+  const [openReadings, setOpenReadings] = useState<
+    Awaited<ReturnType<typeof listOpenReadingsFn>>
+  >([]);
 
   const selectedVehicle = vehicles.find((v) => v.id === vehicleId);
+  const selectedOpenReading = openReadings.find((r) => r.id === openReadingId);
   const readingKmDay = useMemo(() => {
     if (type !== "reading") return null;
     const next = Number(odometer);
-    const prev = selectedVehicle?.currentOdometer ?? 0;
     if (!Number.isFinite(next)) return null;
+    if (kmAction === "close" && selectedOpenReading) {
+      return Math.max(0, Math.round((next - selectedOpenReading.odometerOpen) * 10) / 10);
+    }
+    const prev = selectedVehicle?.currentOdometer ?? 0;
     return Math.max(0, Math.round((next - prev) * 10) / 10);
-  }, [type, odometer, selectedVehicle?.currentOdometer]);
+  }, [type, odometer, selectedVehicle?.currentOdometer, kmAction, selectedOpenReading]);
+
+  useEffect(() => {
+    if (type !== "reading" || !vehicleId || kmAction !== "close") {
+      setOpenReadings([]);
+      setOpenReadingId("");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await listOpenReadingsFn({ data: { vehicleId } });
+        if (cancelled) return;
+        setOpenReadings(rows);
+        setOpenReadingId(rows[0]?.id ?? "");
+        if (rows[0]) setOdometer(String(rows[0].odometerOpen));
+      } catch {
+        if (!cancelled) {
+          setOpenReadings([]);
+          setOpenReadingId("");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [type, vehicleId, kmAction]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -1657,6 +1741,7 @@ function EntryFormDialog({
             expenseType,
             amount: parseMoney(amount),
             location: location || null,
+            supplier: supplier || null,
             paymentMethod: paymentMethod || null,
             notes: notes || null,
           },
@@ -1686,6 +1771,7 @@ function EntryFormDialog({
             serviceType,
             amount: parseMoney(amount),
             location: location || null,
+            supplier: supplier || null,
             paymentMethod: paymentMethod || null,
             notes: notes || null,
           },
@@ -1705,21 +1791,46 @@ function EntryFormDialog({
           },
         });
       } else if (type === "reading") {
-        if (!reason.trim()) {
-          setErr("Informe o motivo da atualização do KM.");
-          setBusy(false);
-          return;
+        if (kmAction === "close") {
+          if (!openReadingId) {
+            setErr("Selecione um turno aberto para fechar.");
+            setBusy(false);
+            return;
+          }
+          await closeReadingFn({
+            data: {
+              id: Number(openReadingId),
+              closedAt: iso,
+              odometerClose: Number(odometer),
+              monitorOperatorClose:
+                (selectedOpenReading?.profile ?? kmProfile) === "monitoramento"
+                  ? monitorOperatorClose.trim() || null
+                  : null,
+              notes: notes || null,
+            },
+          });
+        } else {
+          await createReadingFn({
+            data: {
+              vehicleId,
+              driverId: driver,
+              occurredAt: iso,
+              odometer: Number(odometer),
+              profile: kmProfile,
+              odometerOpen: Number(odometer),
+              monitorOperatorOpen:
+                kmProfile === "monitoramento" ? monitorOperatorOpen.trim() || null : null,
+              usageReason: kmProfile === "assistencia" ? usageReason.trim() || null : null,
+              reason:
+                kmProfile === "assistencia"
+                  ? usageReason.trim() || null
+                  : monitorOperatorOpen.trim()
+                    ? `Monitoramento · ${monitorOperatorOpen.trim()}`
+                    : null,
+              notes: notes || null,
+            },
+          });
         }
-        await createReadingFn({
-          data: {
-            vehicleId,
-            driverId: driver,
-            occurredAt: iso,
-            odometer: Number(odometer),
-            reason: reason.trim(),
-            notes: notes || null,
-          },
-        });
       } else if (type === "checklist") {
         const items = checklistText
           .split(/\r?\n/)
@@ -1825,25 +1936,94 @@ function EntryFormDialog({
             </Field>
           ) : null}
 
-          {["refueling", "expense", "income", "service", "reading", "checklist", "route"].includes(
-            type,
-          ) ? (
-            <div className="space-y-xs">
-              <Field label={type === "reading" ? "Odômetro atual (km)" : "Odômetro (km)"}>
-                <input
-                  className={inputClass}
-                  value={odometer}
-                  onChange={(e) => setOdometer(e.target.value)}
-                  required={type === "refueling" || type === "reading"}
-                  inputMode="decimal"
-                  placeholder={
-                    type === "reading" && selectedVehicle
-                      ? `Atual no sistema: ${selectedVehicle.currentOdometer}`
-                      : undefined
+          {["refueling", "expense", "income", "service", "checklist", "route"].includes(type) ? (
+            <Field label="Odômetro (km)">
+              <input
+                className={inputClass}
+                value={odometer}
+                onChange={(e) => setOdometer(e.target.value)}
+                required={type === "refueling"}
+                inputMode="decimal"
+              />
+            </Field>
+          ) : null}
+
+          {type === "reading" ? (
+            <>
+              <div className="grid gap-sm sm:grid-cols-2">
+                <Field label="Perfil">
+                  <select
+                    className={inputClass}
+                    value={kmProfile}
+                    onChange={(e) => setKmProfile(e.target.value as KmProfile)}
+                    disabled={kmAction === "close"}
+                  >
+                    <option value="monitoramento">{KM_PROFILE_LABELS.monitoramento}</option>
+                    <option value="assistencia">{KM_PROFILE_LABELS.assistencia}</option>
+                  </select>
+                </Field>
+                <Field label="Ação">
+                  <select
+                    className={inputClass}
+                    value={kmAction}
+                    onChange={(e) => setKmAction(e.target.value as "open" | "close")}
+                  >
+                    <option value="open">Abrir turno</option>
+                    <option value="close">Fechar turno</option>
+                  </select>
+                </Field>
+              </div>
+
+              {kmAction === "close" ? (
+                <Field label="Turno aberto">
+                  <select
+                    className={inputClass}
+                    value={openReadingId === "" ? "" : String(openReadingId)}
+                    onChange={(e) => {
+                      const id = e.target.value ? Number(e.target.value) : "";
+                      setOpenReadingId(id);
+                      const row = openReadings.find((r) => r.id === id);
+                      if (row) {
+                        setOdometer(String(row.odometerOpen));
+                        if (row.profile === "monitoramento" || row.profile === "assistencia") {
+                          setKmProfile(row.profile);
+                        }
+                      }
+                    }}
+                    required
+                  >
+                    <option value="">
+                      {openReadings.length ? "Selecione…" : "Nenhum turno aberto neste veículo"}
+                    </option>
+                    {openReadings.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {(r.profile === "assistencia" ? "Assistência" : "Monitoramento") +
+                          ` · ${formatKm(r.odometerOpen)} · ${new Date(r.openedAt).toLocaleString("pt-BR")}`}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : null}
+
+              <div className="space-y-xs">
+                <Field
+                  label={
+                    kmAction === "close" ? "Odômetro / hora fechamento (km)" : "Odômetro / hora abertura (km)"
                   }
-                />
-              </Field>
-              {type === "reading" ? (
+                >
+                  <input
+                    className={inputClass}
+                    value={odometer}
+                    onChange={(e) => setOdometer(e.target.value)}
+                    required
+                    inputMode="decimal"
+                    placeholder={
+                      selectedVehicle
+                        ? `Atual no sistema: ${selectedVehicle.currentOdometer}`
+                        : undefined
+                    }
+                  />
+                </Field>
                 <p className="text-body-sm text-on-surface-variant">
                   Odômetro no sistema:{" "}
                   <span className="font-semibold text-on-surface">
@@ -1852,25 +2032,50 @@ function EntryFormDialog({
                   {readingKmDay != null ? (
                     <>
                       {" "}
-                      · KM do dia:{" "}
+                      · KM do turno:{" "}
                       <span className="font-semibold text-primary">+{formatKm(readingKmDay)}</span>
                     </>
                   ) : null}
                 </p>
-              ) : null}
-            </div>
-          ) : null}
+              </div>
 
-          {type === "reading" ? (
-            <Field label="Motivo da atualização">
-              <input
-                className={inputClass}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                required
-                placeholder="Ex.: Fim do expediente, troca de motorista, correção…"
-              />
-            </Field>
+              {kmAction === "open" && kmProfile === "monitoramento" ? (
+                <Field label="Operador monitoramento (abertura)">
+                  <input
+                    className={inputClass}
+                    value={monitorOperatorOpen}
+                    onChange={(e) => setMonitorOperatorOpen(e.target.value)}
+                    required
+                    placeholder="Nome do operador"
+                  />
+                </Field>
+              ) : null}
+
+              {kmAction === "close" &&
+              (selectedOpenReading?.profile ?? kmProfile) === "monitoramento" ? (
+                <Field label="Operador monitoramento (fechamento)">
+                  <input
+                    className={inputClass}
+                    value={monitorOperatorClose}
+                    onChange={(e) => setMonitorOperatorClose(e.target.value)}
+                    required
+                    placeholder="Nome do operador"
+                  />
+                </Field>
+              ) : null}
+
+              {kmAction === "open" && kmProfile === "assistencia" ? (
+                <Field label="Motivo do uso">
+                  <input
+                    className={inputClass}
+                    value={usageReason}
+                    onChange={(e) => setUsageReason(e.target.value)}
+                    required
+                    placeholder="Ex.: Visita a cliente, supervisão RH…"
+                  />
+                </Field>
+              ) : null}
+            </>
           ) : null}
 
           {type === "refueling" ? (
@@ -1880,7 +2085,7 @@ function EntryFormDialog({
                   value={fuelType}
                   onChange={setFuelType}
                   freeText
-                  placeholder="Ex.: Gas. Comum, Diesel…"
+                  placeholder="Ex.: Diesel, Gasolina Comum…"
                   options={catalog.fuels.map((f) => ({ value: f.name, label: f.name }))}
                 />
               </Field>
@@ -1917,7 +2122,13 @@ function EntryFormDialog({
                 Completando o tanque?
               </label>
               <Field label="Posto">
-                <input className={inputClass} value={station} onChange={(e) => setStation(e.target.value)} />
+                <SuggestInput
+                  value={station}
+                  onChange={setStation}
+                  freeText
+                  placeholder="Selecione ou digite o posto…"
+                  options={(catalog.stations ?? []).map((s) => ({ value: s.name, label: s.name }))}
+                />
               </Field>
               <PhotoCapture
                 photos={photos}
@@ -1939,8 +2150,17 @@ function EntryFormDialog({
                   value={expenseType}
                   onChange={setExpenseType}
                   freeText
-                  placeholder="Ex.: Pedágio, Seguro…"
+                  placeholder="Ex.: Seguro, Multa…"
                   options={catalog.expenses.map((f) => ({ value: f.name, label: f.name }))}
+                />
+              </Field>
+              <Field label="Fornecedor">
+                <SuggestInput
+                  value={supplier}
+                  onChange={setSupplier}
+                  freeText
+                  placeholder="Selecione ou digite o fornecedor…"
+                  options={(catalog.suppliers ?? []).map((s) => ({ value: s.name, label: s.name }))}
                 />
               </Field>
               <Field label="Valor">
@@ -1985,6 +2205,15 @@ function EntryFormDialog({
                   freeText
                   placeholder="Ex.: Troca de óleo, Revisão…"
                   options={catalog.services.map((f) => ({ value: f.name, label: f.name }))}
+                />
+              </Field>
+              <Field label="Fornecedor">
+                <SuggestInput
+                  value={supplier}
+                  onChange={setSupplier}
+                  freeText
+                  placeholder="Selecione ou digite o fornecedor…"
+                  options={(catalog.suppliers ?? []).map((s) => ({ value: s.name, label: s.name }))}
                 />
               </Field>
               <Field label="Valor">
@@ -2167,7 +2396,7 @@ function VehicleFormDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="p-lg" style={{ width: "min(28rem, 100%)" }}>
+      <DialogContent className="dialog-sm p-lg">
         <DialogHeader>
           <DialogTitle>{editing ? "Editar veículo" : "Novo veículo"}</DialogTitle>
         </DialogHeader>
@@ -2175,29 +2404,30 @@ function VehicleFormDialog({
           <Field label="Nome / código">
             <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} required />
           </Field>
+          <Field label="Marca">
+            <SuggestInput
+              value={brand}
+              onChange={setBrand}
+              freeText
+              placeholder="Digite a marca…"
+              leading={<FleetBrandMark brand={brand || null} size="sm" />}
+              options={FLEET_BRAND_OPTIONS.map((id) => ({
+                value: FLEET_BRAND_LABELS[id],
+                label: FLEET_BRAND_LABELS[id],
+              }))}
+            />
+          </Field>
+          <Field label="Modelo">
+            <input className={inputClass} value={model} onChange={(e) => setModel(e.target.value)} />
+          </Field>
           <div className="grid grid-cols-2 gap-sm">
-            <Field label="Marca">
-              <SuggestInput
-                value={brand}
-                onChange={setBrand}
-                freeText
-                placeholder="Digite a marca…"
-                leading={<FleetBrandMark brand={brand || null} size="sm" />}
-                options={FLEET_BRAND_OPTIONS.map((id) => ({
-                  value: FLEET_BRAND_LABELS[id],
-                  label: FLEET_BRAND_LABELS[id],
-                }))}
-              />
-            </Field>
-            <Field label="Modelo">
-              <input className={inputClass} value={model} onChange={(e) => setModel(e.target.value)} />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-sm">
-            <Field label="Placa">
+            <Field label="Placa" className="min-w-0">
               <input className={inputClass} value={plate} onChange={(e) => setPlate(e.target.value)} />
             </Field>
-            <Field label={editing ? "Odômetro atual (km)" : "Odômetro inicial"}>
+            <Field
+              label={editing ? "Odômetro atual (km)" : "Odômetro inicial"}
+              className="min-w-0"
+            >
               <input
                 className={inputClass}
                 type="number"
@@ -2248,6 +2478,7 @@ function EditReadingDialog({
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const canClose = Boolean(reading.profile && !reading.closedAt);
   const occurredLocal = useMemo(() => {
     const d = new Date(reading.occurredAt);
     if (Number.isNaN(d.getTime())) return "";
@@ -2256,8 +2487,12 @@ function EditReadingDialog({
   }, [reading.occurredAt]);
   const [occurredAt, setOccurredAt] = useState(occurredLocal);
   const [odometer, setOdometer] = useState(String(reading.odometer));
-  const [reason, setReason] = useState(reading.reason ?? "");
+  const [reason, setReason] = useState(reading.usageReason || reading.reason || "");
   const [notes, setNotes] = useState(reading.notes ?? "");
+  const [monitorOperatorClose, setMonitorOperatorClose] = useState(
+    reading.monitorOperatorClose ?? "",
+  );
+  const [mode, setMode] = useState<"edit" | "close">(canClose ? "close" : "edit");
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -2268,15 +2503,28 @@ function EditReadingDialog({
       if (!Number.isFinite(km) || km < 0) {
         throw new Error("Informe um odômetro válido.");
       }
-      await updateReadingFn({
-        data: {
-          id: reading.id,
-          odometer: km,
-          occurredAt: occurredAt ? new Date(occurredAt).toISOString() : null,
-          reason: reason.trim(),
-          notes: notes.trim() || null,
-        },
-      });
+      if (mode === "close" && canClose) {
+        await closeReadingFn({
+          data: {
+            id: reading.id,
+            closedAt: occurredAt ? new Date(occurredAt).toISOString() : new Date().toISOString(),
+            odometerClose: km,
+            monitorOperatorClose:
+              reading.profile === "monitoramento" ? monitorOperatorClose.trim() || null : null,
+            notes: notes.trim() || null,
+          },
+        });
+      } else {
+        await updateReadingFn({
+          data: {
+            id: reading.id,
+            odometer: km,
+            occurredAt: occurredAt ? new Date(occurredAt).toISOString() : null,
+            reason: reason.trim(),
+            notes: notes.trim() || null,
+          },
+        });
+      }
       await onSaved();
     } catch (error) {
       setErr(error instanceof Error ? error.message : "Falha ao salvar KM.");
@@ -2289,14 +2537,31 @@ function EditReadingDialog({
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="p-lg" style={{ width: "min(28rem, 100%)" }}>
         <DialogHeader>
-          <DialogTitle>Editar lançamento de KM</DialogTitle>
+          <DialogTitle>
+            {mode === "close" ? "Fechar turno de KM" : "Editar lançamento de KM"}
+          </DialogTitle>
           <p className="text-body-sm text-on-surface-variant">
             {reading.vehicleName}
             {reading.vehiclePlate ? ` · ${reading.vehiclePlate}` : ""}
+            {reading.profile
+              ? ` · ${reading.profile === "assistencia" ? "Assistência/RH" : "Monitoramento"}`
+              : ""}
           </p>
         </DialogHeader>
         <form className="grid gap-md" onSubmit={onSubmit}>
-          <Field label="Data/hora">
+          {canClose ? (
+            <Field label="Ação">
+              <select
+                className={inputClass}
+                value={mode}
+                onChange={(e) => setMode(e.target.value as "edit" | "close")}
+              >
+                <option value="close">Fechar turno</option>
+                <option value="edit">Editar dados</option>
+              </select>
+            </Field>
+          ) : null}
+          <Field label={mode === "close" ? "Data/hora fechamento" : "Data/hora"}>
             <input
               className={inputClass}
               type="datetime-local"
@@ -2304,7 +2569,7 @@ function EditReadingDialog({
               onChange={(e) => setOccurredAt(e.target.value)}
             />
           </Field>
-          <Field label="Odômetro (km)">
+          <Field label={mode === "close" ? "Odômetro fechamento (km)" : "Odômetro (km)"}>
             <input
               className={inputClass}
               type="number"
@@ -2315,14 +2580,26 @@ function EditReadingDialog({
               required
             />
           </Field>
-          <Field label="Motivo">
-            <input
-              className={inputClass}
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              required
-            />
-          </Field>
+          {mode === "close" && reading.profile === "monitoramento" ? (
+            <Field label="Operador monitoramento (fechamento)">
+              <input
+                className={inputClass}
+                value={monitorOperatorClose}
+                onChange={(e) => setMonitorOperatorClose(e.target.value)}
+                required
+              />
+            </Field>
+          ) : null}
+          {mode === "edit" ? (
+            <Field label="Motivo">
+              <input
+                className={inputClass}
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                required
+              />
+            </Field>
+          ) : null}
           <Field label="Observação">
             <textarea
               className={inputClass}
@@ -2341,7 +2618,7 @@ function EditReadingDialog({
               disabled={busy}
               className="rounded-lg bg-secondary-container px-md py-sm font-semibold text-on-secondary-container"
             >
-              {busy ? "Salvando…" : "Salvar KM"}
+              {busy ? "Salvando…" : mode === "close" ? "Fechar turno" : "Salvar KM"}
             </button>
           </DialogFooter>
         </form>

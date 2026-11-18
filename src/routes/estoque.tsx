@@ -18,6 +18,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { APP_NAME } from "@/lib/brand";
 import { osStageName, osTipoLabel } from "@/lib/assistencia-domain";
 import {
@@ -1144,36 +1150,35 @@ function EstoquePage() {
                         </button>
                       </td>
                       <td className="px-sm py-sm">
-                        <div className="flex flex-wrap gap-xs">
-                          <button
-                            type="button"
-                            onClick={() => openMove(item, "entrada")}
-                            className="rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary"
-                          >
-                            Entrada
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openMove(item, "saida")}
-                            className="rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary"
-                          >
-                            Saída
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openMove(item, "ajuste")}
-                            className="rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary"
-                          >
-                            Ajuste
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void openHistory(item)}
-                            className="rounded-lg border border-outline-variant px-sm py-xs text-label-md text-on-surface-variant"
-                          >
-                            Histórico
-                          </button>
-                        </div>
+                        <DropdownMenu modal={false}>
+                          <DropdownMenuTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-outline-variant bg-white text-on-surface hover:bg-surface-container-high"
+                              aria-label={`Ações de ${item.descricao}`}
+                            >
+                              <Icon name="more_vert" className="text-[20px]" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="min-w-[11rem]">
+                            <DropdownMenuItem onSelect={() => openMove(item, "entrada")}>
+                              <Icon name="add" className="text-[16px]" />
+                              Entrada
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => openMove(item, "saida")}>
+                              <Icon name="remove" className="text-[16px]" />
+                              Saída
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => openMove(item, "ajuste")}>
+                              <Icon name="tune" className="text-[16px]" />
+                              Ajuste
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onSelect={() => void openHistory(item)}>
+                              <Icon name="history" className="text-[16px]" />
+                              Histórico
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </td>
                     </tr>
                   );

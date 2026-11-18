@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
-/** Painel padrão Orçamentos: borda + surface-container-lowest. */
+/** Painel padrão: borda CRM (#e4e4e0) + card branco. */
 export function PageSection({
   children,
   className,
@@ -16,7 +16,7 @@ export function PageSection({
   return (
     <section
       className={cn(
-        "rounded-xl border border-outline-variant bg-surface-container-lowest",
+        "rounded-[12px] border border-outline-variant bg-white",
         padded && "p-md",
         className,
       )}
@@ -44,7 +44,7 @@ export function PageTitle({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center justify-between gap-md rounded-xl bg-primary px-md py-md text-on-primary md:px-lg",
+        "flex flex-wrap items-center justify-between gap-md rounded-xl bg-primary px-lg py-lg text-on-primary md:px-xl md:py-lg",
         className,
       )}
     >
@@ -91,38 +91,38 @@ export function SectionHeader({
 }
 
 export const fieldClass =
-  "mt-xs w-full rounded-lg border border-outline-variant bg-surface px-sm py-xs text-body-md outline-none focus:border-primary disabled:opacity-60";
+  "mt-xs w-full rounded-[8px] border border-outline-variant bg-white px-sm py-[7px] text-[14px] outline-none focus:border-primary disabled:opacity-60";
 
 export const filterControlClass =
-  "rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md";
+  "rounded-[8px] border border-outline-variant bg-white px-sm py-[7px] text-[14px]";
 
 /** Outline cinza — Editar / Duplicar / Ver */
 export const btnOutline =
-  "inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-primary hover:bg-surface-container-high disabled:opacity-50";
+  "inline-flex items-center gap-xs rounded-[8px] border border-outline-variant bg-white px-3 py-[7px] text-[13px] text-primary hover:border-[#bbb] disabled:opacity-50";
 
 /** Outline claro — ações secundárias no PageTitle (faixa preta). */
 export const btnOnPrimaryOutline =
-  "inline-flex items-center gap-xs rounded-lg border border-white/40 px-sm py-xs text-label-md text-on-primary hover:bg-white/10 disabled:opacity-50";
+  "inline-flex items-center gap-xs rounded-[8px] border border-white/40 px-3 py-[7px] text-[13px] text-on-primary hover:bg-white/10 disabled:opacity-50";
 
-/** Botão preto sólido — Salvar / ação principal escura (como Orçamentos). */
+/** Botão preto sólido — Salvar / ação principal escura. */
 export const btnDark =
-  "inline-flex items-center gap-xs rounded-lg bg-primary px-sm py-xs text-label-md font-semibold text-on-primary disabled:opacity-50";
+  "inline-flex items-center gap-xs rounded-[8px] bg-primary px-3 py-[7px] text-[13px] font-semibold text-on-primary disabled:opacity-50";
 
-/** CTA amarelo Âncora — Novo / Omie / Adicionar (como Orçamentos). */
+/** CTA amarelo brand CRM (#FFD200). */
 export const btnPrimary =
-  "inline-flex items-center gap-xs rounded-lg bg-secondary-container px-sm py-xs text-label-md font-semibold text-on-secondary-container disabled:opacity-50";
+  "inline-flex items-center gap-xs rounded-[8px] border border-secondary-container bg-secondary-container px-3 py-[7px] text-[13px] font-semibold text-on-secondary-container disabled:opacity-50";
 
 /** Alias: amarelo brand */
 export const btnSecondary = btnPrimary;
 
 export const btnMuted =
-  "inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md text-on-surface-variant hover:bg-surface-container-high disabled:opacity-50";
+  "inline-flex items-center gap-xs rounded-[8px] border border-outline-variant bg-white px-3 py-[7px] text-[13px] text-on-surface-variant hover:border-[#bbb] disabled:opacity-50";
 
 export const btnDanger =
-  "inline-flex items-center gap-xs rounded-lg border border-red-200 bg-red-50 px-sm py-xs text-label-md text-red-700 hover:bg-red-100 disabled:opacity-50";
+  "inline-flex items-center gap-xs rounded-[8px] border border-[#f0b4b4] bg-white px-3 py-[7px] text-[13px] text-[#d64040] hover:bg-[#fdecec] disabled:opacity-50";
 
 export const mobileCardClass =
-  "rounded-xl border border-outline-variant bg-surface p-md";
+  "rounded-[12px] border border-outline-variant bg-white p-md";
 
 /** Cabeçalho de tabela escuro com texto branco (como Orçamentos). */
 export const tableHeadClass =

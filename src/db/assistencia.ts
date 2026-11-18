@@ -1964,7 +1964,32 @@ export async function finishVisita(input: {
     userId: input.userId,
     acao: "Visita concluída · Executado",
   });
-  return getOsById(os.id);
+  const done = await getOsById(os.id);
+  if (done?.lev) {
+    try {
+      const { createOportunidadeFromOs } = await import("@/db/crm");
+      const { getDb } = await import("@/db/schema");
+      await getDb();
+      await createOportunidadeFromOs({
+        osNum: done.num,
+        osId: done.id,
+        cliente: done.clientName,
+        cidade: done.clientCity,
+        servico: done.servico || null,
+        tecnico: done.tecnicoNome || done.teamName || input.quem,
+        dataVisita: done.coAt ? new Date(done.coAt).toISOString().slice(0, 10) : null,
+        vendedor: done.createdByName || input.quem,
+        autor: input.quem,
+        itens: (done.lev.itens || []).map((it) => ({
+          qtd: Number(it.qtd) || 1,
+          nome: String(it.nome || "").trim() || "Item",
+        })),
+      });
+    } catch {
+      // CRM best-effort: não impede finalizar a visita
+    }
+  }
+  return done;
 }
 
 /** Skip conference for OS without material after checkout. */

@@ -6,6 +6,8 @@ import {
   DEFAULT_FUEL_TYPES,
   DEFAULT_PAYMENT_METHODS,
   DEFAULT_SERVICE_TYPES,
+  DEFAULT_STATIONS,
+  DEFAULT_SUPPLIERS,
 } from "@/lib/frota-domain";
 
 function num(v: unknown) {
@@ -191,6 +193,8 @@ export async function ensureFleetCatalogDefaults() {
     { kind: "expense", names: DEFAULT_EXPENSE_TYPES },
     { kind: "service", names: DEFAULT_SERVICE_TYPES },
     { kind: "payment", names: DEFAULT_PAYMENT_METHODS },
+    { kind: "station", names: DEFAULT_STATIONS },
+    { kind: "supplier", names: DEFAULT_SUPPLIERS },
   ];
   for (const group of seeds) {
     for (const name of group.names) {
@@ -259,7 +263,8 @@ async function syncVehicleOdometerFromReadings(vehicleId: number) {
   await db`
     update fleet_vehicles v
     set current_odometer = coalesce((
-      select max(r.odometer)::float from fleet_readings r where r.vehicle_id = v.id
+      select max(coalesce(r.odometer_close, r.odometer))::float
+      from fleet_readings r where r.vehicle_id = v.id
     ), v.current_odometer),
         updated_at = now()
     where v.id = ${vehicleId}
@@ -485,6 +490,7 @@ export async function createExpense(input: {
   discount?: number;
   installments?: number | null;
   location?: string | null;
+  supplier?: string | null;
   reason?: string | null;
   paymentMethod?: string | null;
   notes?: string | null;
@@ -494,11 +500,12 @@ export async function createExpense(input: {
   const [row] = (await db`
     insert into fleet_expenses (
       vehicle_id, driver_id, occurred_at, odometer, title, expense_type, amount,
-      discount, installments, location, reason, payment_method, notes, created_by
+      discount, installments, location, supplier, reason, payment_method, notes, created_by
     ) values (
       ${input.vehicleId}, ${input.driverId ?? null}, ${input.occurredAt}, ${input.odometer ?? null},
       ${nullableStr(input.title)}, ${input.expenseType}, ${input.amount}, ${input.discount ?? 0},
-      ${input.installments ?? null}, ${nullableStr(input.location)}, ${nullableStr(input.reason)},
+      ${input.installments ?? null}, ${nullableStr(input.location)}, ${nullableStr(input.supplier)},
+      ${nullableStr(input.reason)},
       ${nullableStr(input.paymentMethod)}, ${nullableStr(input.notes)}, ${input.createdBy ?? null}
     )
     returning id
@@ -548,6 +555,7 @@ export async function createService(input: {
   discount?: number;
   installments?: number | null;
   location?: string | null;
+  supplier?: string | null;
   paymentMethod?: string | null;
   notes?: string | null;
   createdBy?: number | null;
@@ -556,11 +564,11 @@ export async function createService(input: {
   const [row] = (await db`
     insert into fleet_services (
       vehicle_id, driver_id, occurred_at, odometer, title, service_type, amount,
-      discount, installments, location, payment_method, notes, created_by
+      discount, installments, location, supplier, payment_method, notes, created_by
     ) values (
       ${input.vehicleId}, ${input.driverId ?? null}, ${input.occurredAt}, ${input.odometer ?? null},
       ${nullableStr(input.title)}, ${input.serviceType}, ${input.amount}, ${input.discount ?? 0},
-      ${input.installments ?? null}, ${nullableStr(input.location)},
+      ${input.installments ?? null}, ${nullableStr(input.location)}, ${nullableStr(input.supplier)},
       ${nullableStr(input.paymentMethod)}, ${nullableStr(input.notes)}, ${input.createdBy ?? null}
     )
     returning id
@@ -609,12 +617,30 @@ export async function createReading(input: {
   reason?: string | null;
   notes?: string | null;
   createdBy?: number | null;
+  profile?: "monitoramento" | "assistencia" | null;
+  odometerOpen?: number | null;
+  monitorOperatorOpen?: string | null;
+  usageReason?: string | null;
 }) {
-  if (!Number.isFinite(input.odometer) || input.odometer < 0) {
+  const profile = input.profile === "monitoramento" || input.profile === "assistencia" ? input.profile : null;
+  const odometerOpen = Number(input.odometerOpen ?? input.odometer);
+  if (!Number.isFinite(odometerOpen) || odometerOpen < 0) {
     throw new Error("Informe o odômetro (km) válido.");
   }
-  const reason = nullableStr(input.reason);
-  if (!reason) throw new Error("Informe o motivo da atualização do KM.");
+
+  const monitorOperatorOpen = nullableStr(input.monitorOperatorOpen);
+  const usageReason = nullableStr(input.usageReason);
+  let reason = nullableStr(input.reason);
+  if (profile === "monitoramento") {
+    if (!monitorOperatorOpen) throw new Error("Informe o operador de monitoramento na abertura.");
+    reason = reason || `Monitoramento · ${monitorOperatorOpen}`;
+  } else if (profile === "assistencia") {
+    if (!usageReason) throw new Error("Informe o motivo do uso.");
+    reason = reason || usageReason;
+  } else if (!reason) {
+    throw new Error("Informe o motivo da atualização do KM.");
+  }
+
   const db = await getDb();
   const [vehicle] = (await db`
     select current_odometer::float as current_odometer
@@ -624,23 +650,121 @@ export async function createReading(input: {
   `) as Array<{ current_odometer: number }>;
   if (!vehicle) throw new Error("Veículo não encontrado.");
   const previousOdometer = Number(vehicle.current_odometer ?? 0);
-  if (input.odometer + 0.05 < previousOdometer) {
+  if (odometerOpen + 0.05 < previousOdometer) {
     throw new Error(
-      `Odômetro (${input.odometer} km) não pode ser menor que o atual do veículo (${previousOdometer} km).`,
+      `Odômetro (${odometerOpen} km) não pode ser menor que o atual do veículo (${previousOdometer} km).`,
     );
   }
   const [row] = (await db`
     insert into fleet_readings (
-      vehicle_id, driver_id, occurred_at, odometer, previous_odometer, kind, reason, notes, created_by
+      vehicle_id, driver_id, occurred_at, odometer, previous_odometer, kind, reason, notes, created_by,
+      profile, opened_at, odometer_open, monitor_operator_open, usage_reason
     ) values (
-      ${input.vehicleId}, ${input.driverId ?? null}, ${input.occurredAt}, ${input.odometer},
-      ${previousOdometer}, ${input.kind ?? "daily_km"}, ${reason.slice(0, 200)},
-      ${nullableStr(input.notes)}, ${input.createdBy ?? null}
+      ${input.vehicleId}, ${input.driverId ?? null}, ${input.occurredAt}, ${odometerOpen},
+      ${previousOdometer}, ${input.kind ?? "daily_km"}, ${reason!.slice(0, 200)},
+      ${nullableStr(input.notes)}, ${input.createdBy ?? null},
+      ${profile}, ${input.occurredAt}, ${odometerOpen},
+      ${monitorOperatorOpen ? monitorOperatorOpen.slice(0, 120) : null},
+      ${usageReason ? usageReason.slice(0, 200) : null}
     )
     returning id
   `) as Array<{ id: number }>;
-  await bumpVehicleOdometer(input.vehicleId, input.odometer);
+  await bumpVehicleOdometer(input.vehicleId, odometerOpen);
   return row!.id;
+}
+
+export async function closeReading(input: {
+  id: number;
+  closedAt: string;
+  odometerClose: number;
+  monitorOperatorClose?: string | null;
+  notes?: string | null;
+}) {
+  if (!Number.isFinite(input.id) || input.id <= 0) {
+    throw new Error("Lançamento inválido.");
+  }
+  if (!Number.isFinite(input.odometerClose) || input.odometerClose < 0) {
+    throw new Error("Informe o odômetro de fechamento válido.");
+  }
+  const db = await getDb();
+  const [row] = (await db`
+    select
+      id, vehicle_id, profile, odometer_open::float as odometer_open, odometer::float as odometer,
+      closed_at::text as closed_at
+    from fleet_readings
+    where id = ${input.id}
+    limit 1
+  `) as Array<{
+    id: number;
+    vehicle_id: number;
+    profile: string | null;
+    odometer_open: number | null;
+    odometer: number;
+    closed_at: string | null;
+  }>;
+  if (!row) throw new Error("Lançamento de KM não encontrado.");
+  if (row.closed_at) throw new Error("Este lançamento já está fechado.");
+
+  const openKm = Number(row.odometer_open ?? row.odometer);
+  if (input.odometerClose + 0.05 < openKm) {
+    throw new Error(
+      `Odômetro de fechamento (${input.odometerClose} km) não pode ser menor que a abertura (${openKm} km).`,
+    );
+  }
+
+  const operatorClose = nullableStr(input.monitorOperatorClose);
+  if (row.profile === "monitoramento" && !operatorClose) {
+    throw new Error("Informe o operador de monitoramento no fechamento.");
+  }
+
+  await db`
+    update fleet_readings
+    set odometer = ${input.odometerClose},
+        odometer_close = ${input.odometerClose},
+        closed_at = ${input.closedAt},
+        monitor_operator_close = ${operatorClose ? operatorClose.slice(0, 120) : null},
+        notes = coalesce(${nullableStr(input.notes)}, notes)
+    where id = ${input.id}
+  `;
+  await bumpVehicleOdometer(row.vehicle_id, input.odometerClose);
+  return { ok: true as const, id: input.id, vehicleId: row.vehicle_id };
+}
+
+export async function listOpenReadings(vehicleId: number) {
+  if (!Number.isFinite(vehicleId) || vehicleId <= 0) return [];
+  const db = await getDb();
+  const rows = (await db`
+    select
+      r.id,
+      r.vehicle_id,
+      r.profile,
+      r.opened_at::text as opened_at,
+      r.occurred_at::text as occurred_at,
+      coalesce(r.odometer_open, r.odometer)::float as odometer_open,
+      r.monitor_operator_open,
+      r.usage_reason,
+      r.reason,
+      d.name as driver_name
+    from fleet_readings r
+    left join fleet_drivers d on d.id = r.driver_id
+    where r.vehicle_id = ${vehicleId}
+      and r.odometer_close is null
+      and r.profile is not null
+    order by coalesce(r.opened_at, r.occurred_at) desc, r.id desc
+    limit 50
+  `) as Array<Record<string, unknown>>;
+
+  return rows.map((r) => ({
+    id: num(r["id"]),
+    vehicleId: num(r["vehicle_id"]),
+    profile: r["profile"] == null ? null : str(r["profile"]),
+    openedAt: str(r["opened_at"] ?? r["occurred_at"]),
+    odometerOpen: num(r["odometer_open"]),
+    monitorOperatorOpen: r["monitor_operator_open"] == null ? null : str(r["monitor_operator_open"]),
+    usageReason: r["usage_reason"] == null ? null : str(r["usage_reason"]),
+    reason: r["reason"] == null ? null : str(r["reason"]),
+    driverName: r["driver_name"] == null ? null : str(r["driver_name"]),
+  }));
 }
 
 export type FleetDailyKmRow = {
@@ -656,6 +780,14 @@ export type FleetDailyKmRow = {
   notes: string | null;
   driverName: string | null;
   createdByName: string | null;
+  profile: string | null;
+  openedAt: string | null;
+  closedAt: string | null;
+  odometerOpen: number | null;
+  odometerClose: number | null;
+  monitorOperatorOpen: string | null;
+  monitorOperatorClose: string | null;
+  usageReason: string | null;
 };
 
 export async function listDailyKmReadings(input: {
@@ -684,6 +816,14 @@ export async function listDailyKmReadings(input: {
         r.notes,
         r.driver_id,
         r.created_by,
+        r.profile,
+        r.opened_at,
+        r.closed_at,
+        r.odometer_open,
+        r.odometer_close,
+        r.monitor_operator_open,
+        r.monitor_operator_close,
+        r.usage_reason,
         lag(r.odometer) over (partition by r.vehicle_id order by r.occurred_at, r.id) as lag_odometer
       from fleet_readings r
       where (${vehicleId}::int is null or r.vehicle_id = ${vehicleId})
@@ -697,16 +837,26 @@ export async function listDailyKmReadings(input: {
       v.name as vehicle_name,
       v.plate as vehicle_plate,
       b.occurred_at::text as occurred_at,
-      coalesce(b.previous_odometer, b.lag_odometer)::float as previous_odometer,
+      coalesce(b.odometer_open, b.previous_odometer, b.lag_odometer)::float as previous_odometer,
       b.odometer::float as odometer,
       case
+        when b.odometer_open is not null and b.odometer_close is not null
+          then greatest(b.odometer_close - b.odometer_open, 0)::float
         when coalesce(b.previous_odometer, b.lag_odometer) is null then null
         else greatest(b.odometer - coalesce(b.previous_odometer, b.lag_odometer), 0)::float
       end as km_day,
       b.reason,
       b.notes,
       d.name as driver_name,
-      u.name as created_by_name
+      u.name as created_by_name,
+      b.profile,
+      b.opened_at::text as opened_at,
+      b.closed_at::text as closed_at,
+      b.odometer_open::float as odometer_open,
+      b.odometer_close::float as odometer_close,
+      b.monitor_operator_open,
+      b.monitor_operator_close,
+      b.usage_reason
     from base b
     join fleet_vehicles v on v.id = b.vehicle_id
     left join fleet_drivers d on d.id = b.driver_id
@@ -728,6 +878,14 @@ export async function listDailyKmReadings(input: {
     notes: r["notes"] == null ? null : str(r["notes"]),
     driverName: r["driver_name"] == null ? null : str(r["driver_name"]),
     createdByName: r["created_by_name"] == null ? null : str(r["created_by_name"]),
+    profile: r["profile"] == null ? null : str(r["profile"]),
+    openedAt: r["opened_at"] == null ? null : str(r["opened_at"]),
+    closedAt: r["closed_at"] == null ? null : str(r["closed_at"]),
+    odometerOpen: r["odometer_open"] == null ? null : num(r["odometer_open"]),
+    odometerClose: r["odometer_close"] == null ? null : num(r["odometer_close"]),
+    monitorOperatorOpen: r["monitor_operator_open"] == null ? null : str(r["monitor_operator_open"]),
+    monitorOperatorClose: r["monitor_operator_close"] == null ? null : str(r["monitor_operator_close"]),
+    usageReason: r["usage_reason"] == null ? null : str(r["usage_reason"]),
   }));
 }
 

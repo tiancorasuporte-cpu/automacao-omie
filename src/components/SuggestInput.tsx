@@ -102,10 +102,10 @@ export function SuggestInput({
   }
 
   return (
-    <div ref={rootRef} className={cn("relative", className)}>
+    <div ref={rootRef} className={cn("relative min-w-0 w-full", className)}>
       <div
         className={cn(
-          "flex w-full items-center gap-sm rounded-xl border border-outline-variant bg-surface px-md py-sm outline-none transition focus-within:border-primary",
+          "flex w-full min-w-0 items-center gap-sm rounded-lg border border-outline-variant bg-surface px-md py-sm outline-none transition focus-within:border-primary",
           disabled && "opacity-60",
           inputClassName,
         )}

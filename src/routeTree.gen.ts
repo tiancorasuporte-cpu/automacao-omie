@@ -12,7 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AssistenciaRouteImport } from './routes/assistencia'
 import { Route as ComprasRouteImport } from './routes/compras'
+import { Route as ContratosRouteImport } from './routes/contratos'
 import { Route as ConversasRouteImport } from './routes/conversas'
+import { Route as CrmRouteImport } from './routes/crm'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as EquipesRouteImport } from './routes/equipes'
 import { Route as EstoqueRouteImport } from './routes/estoque'
@@ -73,9 +75,19 @@ const ComprasRoute = ComprasRouteImport.update({
   path: '/compras',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ContratosRoute = ContratosRouteImport.update({
+  id: '/contratos',
+  path: '/contratos',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConversasRoute = ConversasRouteImport.update({
   id: '/conversas',
   path: '/conversas',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CrmRoute = CrmRouteImport.update({
+  id: '/crm',
+  path: '/crm',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -307,7 +319,9 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/assistencia': typeof AssistenciaRoute
   '/compras': typeof ComprasRoute
+  '/contratos': typeof ContratosRoute
   '/conversas': typeof ConversasRoute
+  '/crm': typeof CrmRoute
   '/dashboard': typeof DashboardRoute
   '/equipes': typeof EquipesRoute
   '/estoque': typeof EstoqueRoute
@@ -357,7 +371,9 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/assistencia': typeof AssistenciaRoute
   '/compras': typeof ComprasRoute
+  '/contratos': typeof ContratosRoute
   '/conversas': typeof ConversasRoute
+  '/crm': typeof CrmRoute
   '/dashboard': typeof DashboardRoute
   '/equipes': typeof EquipesRoute
   '/estoque': typeof EstoqueRoute
@@ -408,7 +424,9 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/assistencia': typeof AssistenciaRoute
   '/compras': typeof ComprasRoute
+  '/contratos': typeof ContratosRoute
   '/conversas': typeof ConversasRoute
+  '/crm': typeof CrmRoute
   '/dashboard': typeof DashboardRoute
   '/equipes': typeof EquipesRoute
   '/estoque': typeof EstoqueRoute
@@ -460,7 +478,9 @@ export interface FileRouteTypes {
     | '/'
     | '/assistencia'
     | '/compras'
+    | '/contratos'
     | '/conversas'
+    | '/crm'
     | '/dashboard'
     | '/equipes'
     | '/estoque'
@@ -510,7 +530,9 @@ export interface FileRouteTypes {
     | '/'
     | '/assistencia'
     | '/compras'
+    | '/contratos'
     | '/conversas'
+    | '/crm'
     | '/dashboard'
     | '/equipes'
     | '/estoque'
@@ -560,7 +582,9 @@ export interface FileRouteTypes {
     | '/'
     | '/assistencia'
     | '/compras'
+    | '/contratos'
     | '/conversas'
+    | '/crm'
     | '/dashboard'
     | '/equipes'
     | '/estoque'
@@ -611,7 +635,9 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AssistenciaRoute: typeof AssistenciaRoute
   ComprasRoute: typeof ComprasRoute
+  ContratosRoute: typeof ContratosRoute
   ConversasRoute: typeof ConversasRoute
+  CrmRoute: typeof CrmRoute
   DashboardRoute: typeof DashboardRoute
   EquipesRoute: typeof EquipesRoute
   EstoqueRoute: typeof EstoqueRoute
@@ -681,11 +707,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ComprasRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/contratos': {
+      id: '/contratos'
+      path: '/contratos'
+      fullPath: '/contratos'
+      preLoaderRoute: typeof ContratosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/conversas': {
       id: '/conversas'
       path: '/conversas'
       fullPath: '/conversas'
       preLoaderRoute: typeof ConversasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/crm': {
+      id: '/crm'
+      path: '/crm'
+      fullPath: '/crm'
+      preLoaderRoute: typeof CrmRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -1003,7 +1043,9 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AssistenciaRoute: AssistenciaRoute,
   ComprasRoute: ComprasRoute,
+  ContratosRoute: ContratosRoute,
   ConversasRoute: ConversasRoute,
+  CrmRoute: CrmRoute,
   DashboardRoute: DashboardRoute,
   EquipesRoute: EquipesRoute,
   EstoqueRoute: EstoqueRoute,

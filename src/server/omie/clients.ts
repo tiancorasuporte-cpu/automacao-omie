@@ -429,3 +429,130 @@ export async function syncAllOmieClients() {
   }
   return { total, perApp };
 }
+
+export type IncluirClienteOmieInput = {
+  razaoSocial: string;
+  nomeFantasia?: string | null;
+  cnpjCpf: string;
+  email?: string | null;
+  telefone: string;
+  contato?: string | null;
+  endereco: string;
+  enderecoNumero: string;
+  complemento?: string | null;
+  bairro: string;
+  cidade: string;
+  estado: string;
+  cep: string;
+};
+
+/**
+ * Cadastra cliente novo na Omie (IncluirCliente) e faz upsert local em omie_clients.
+ * App: tipicamente Belfer/orçamentos.
+ */
+export async function incluirClienteOmie(app: OmieAppConfig, input: IncluirClienteOmieInput) {
+  const razao = input.razaoSocial.trim();
+  if (!razao) throw new Error("Informe a razão social / nome.");
+
+  const cnpjCpf = input.cnpjCpf.replace(/\D/g, "");
+  if (cnpjCpf.length !== 11 && cnpjCpf.length !== 14) {
+    throw new Error("CNPJ/CPF inválido (11 ou 14 dígitos).");
+  }
+
+  const split = splitBrazilPhone(input.telefone);
+  if (!split) {
+    throw new Error("Informe um telefone válido com DDD (10 ou 11 dígitos).");
+  }
+
+  const estado = input.estado.trim().toUpperCase().slice(0, 2);
+  if (estado.length !== 2) throw new Error("Informe a UF (2 letras).");
+
+  const cep = input.cep.replace(/\D/g, "").slice(0, 8);
+  if (cep.length !== 8) throw new Error("CEP inválido (8 dígitos).");
+
+  const endereco = input.endereco.trim();
+  const numero = input.enderecoNumero.trim();
+  const bairro = input.bairro.trim();
+  const cidade = input.cidade.trim();
+  if (!endereco || !numero || !bairro || !cidade) {
+    throw new Error("Preencha endereço, número, bairro e cidade.");
+  }
+
+  const pessoaFisica = cnpjCpf.length === 11 ? "S" : "N";
+  const integracao = `CRM-${Date.now()}`;
+
+  const payload: Record<string, unknown> = {
+    codigo_cliente_integracao: integracao,
+    razao_social: razao.slice(0, 60),
+    nome_fantasia: (input.nomeFantasia?.trim() || razao).slice(0, 100),
+    cnpj_cpf: cnpjCpf,
+    pessoa_fisica: pessoaFisica,
+    email: (input.email?.trim() || "").slice(0, 500) || undefined,
+    contato: (input.contato?.trim() || "").slice(0, 100) || undefined,
+    telefone1_ddd: split.ddd,
+    telefone1_numero: split.numero,
+    endereco: endereco.slice(0, 60),
+    endereco_numero: numero.slice(0, 10),
+    complemento: (input.complemento?.trim() || "").slice(0, 60) || undefined,
+    bairro: bairro.slice(0, 60),
+    cidade: cidade.slice(0, 40),
+    estado,
+    cep,
+    bloqueado: "N",
+    inativo: "N",
+  };
+
+  // Remove undefined para não mandar campos vazios desnecessários.
+  for (const key of Object.keys(payload)) {
+    if (payload[key] === undefined) delete payload[key];
+  }
+
+  const response = await omieCall<Record<string, unknown>>(app, "/geral/clientes/", "IncluirCliente", [
+    payload,
+  ]);
+
+  const code = Number(
+    response["codigo_cliente_omie"] ??
+      (response["codigo_cliente"] as unknown) ??
+      0,
+  );
+  if (!Number.isFinite(code) || code <= 0) {
+    throw new Error("Omie não retornou o código do cliente.");
+  }
+
+  const enderecoFmt = formatClienteEndereco({
+    endereco,
+    endereco_numero: numero,
+    complemento: input.complemento?.trim() || "",
+    bairro,
+    cidade,
+    estado,
+    cep,
+  });
+
+  await upsertOmieClient({
+    omieAppId: app.id,
+    omieAppName: app.name,
+    codigoCliente: code,
+    razaoSocial: razao,
+    nomeFantasia: input.nomeFantasia?.trim() || razao,
+    cnpjCpf,
+    endereco: enderecoFmt,
+    contato: input.contato?.trim() || null,
+    inactive: false,
+  });
+
+  return {
+    omieAppId: app.id,
+    omieAppName: app.name,
+    codigoClienteOmie: code,
+    razaoSocial: razao,
+    nomeFantasia: (input.nomeFantasia?.trim() || razao),
+    cnpjCpf,
+    telefone: split.digits,
+    contato: input.contato?.trim() || "",
+    cidade,
+    estado,
+    cep,
+  };
+}

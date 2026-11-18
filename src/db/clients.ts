@@ -124,6 +124,17 @@ export async function updateOmieClientDetails(input: {
   `;
 }
 
+export async function getOmieClientByCodigo(omieAppId: string, codigoCliente: number) {
+  const db = await getDb();
+  const rows = (await db`
+    select *
+    from omie_clients
+    where omie_app_id = ${omieAppId} and codigo_cliente = ${codigoCliente}
+    limit 1
+  `) as ClientRow[];
+  return rows[0] ? toClient(rows[0]) : null;
+}
+
 export async function countOmieClients(omieAppId?: string) {
   const db = await getDb();
   const appId = omieAppId?.trim() || null;

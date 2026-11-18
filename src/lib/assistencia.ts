@@ -44,7 +44,7 @@ import {
   updateOsItemStatus,
 } from "@/db/assistencia";
 import { createTicket } from "@/db/tickets";
-import { ensureSchema } from "@/db/schema";
+import { ensureSchemaOnce } from "@/db/schema";
 import {
   OS_ITEM_STATUS,
   OS_PERIODOS,
@@ -90,7 +90,7 @@ async function authEquipes() {
 }
 
 async function boot() {
-  await ensureSchema();
+  await ensureSchemaOnce();
 }
 
 function roleFns(user: Parameters<typeof canOsWorkflow>[0]) {

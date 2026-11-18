@@ -9,6 +9,14 @@ export type FrotaKmExcelRow = {
   driverName: string | null;
   createdByName: string | null;
   notes: string | null;
+  profile?: string | null;
+  openedAt?: string | null;
+  closedAt?: string | null;
+  odometerOpen?: number | null;
+  odometerClose?: number | null;
+  monitorOperatorOpen?: string | null;
+  monitorOperatorClose?: string | null;
+  usageReason?: string | null;
 };
 
 export type FrotaKmExcelInput = {
@@ -40,10 +48,17 @@ function row(cells: string) {
   return `<Row>${cells}</Row>`;
 }
 
-function formatDateBr(value: string) {
+function formatDateBr(value: string | null | undefined) {
+  if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleString("pt-BR");
+}
+
+function profileLabel(profile: string | null | undefined) {
+  if (profile === "monitoramento") return "Monitoramento";
+  if (profile === "assistencia") return "Assistência / RH";
+  return profile || "—";
 }
 
 export function buildFrotaKmExcelXml(input: FrotaKmExcelInput) {
@@ -54,27 +69,37 @@ export function buildFrotaKmExcelXml(input: FrotaKmExcelInput) {
     row(cellString("Registros") + cellNumber(input.rows.length) + cellString("KM total") + cellNumber(totalKm, "Num")),
     row(""),
     row(
-      cellString("Data/hora", "Header") +
+      cellString("Perfil", "Header") +
+        cellString("Abertura", "Header") +
+        cellString("Fechamento", "Header") +
         cellString("Veículo", "Header") +
         cellString("Placa", "Header") +
-        cellString("KM anterior", "Header") +
-        cellString("KM atual", "Header") +
+        cellString("KM abertura", "Header") +
+        cellString("KM fechamento", "Header") +
         cellString("KM do dia", "Header") +
-        cellString("Motivo", "Header") +
         cellString("Motorista", "Header") +
+        cellString("Operador abert.", "Header") +
+        cellString("Operador fech.", "Header") +
+        cellString("Motivo uso", "Header") +
+        cellString("Motivo", "Header") +
         cellString("Lançado por", "Header") +
         cellString("Observação", "Header"),
     ),
     ...input.rows.map((item) =>
       row(
-        cellString(formatDateBr(item.occurredAt)) +
+        cellString(profileLabel(item.profile)) +
+          cellString(formatDateBr(item.openedAt ?? item.occurredAt)) +
+          cellString(formatDateBr(item.closedAt)) +
           cellString(item.vehicleName) +
           cellString(item.vehiclePlate ?? "") +
-          cellNumber(item.previousOdometer, "Num") +
-          cellNumber(item.odometer, "Num") +
+          cellNumber(item.odometerOpen ?? item.previousOdometer, "Num") +
+          cellNumber(item.odometerClose ?? item.odometer, "Num") +
           cellNumber(item.kmDay, "Num") +
-          cellString(item.reason ?? "") +
           cellString(item.driverName ?? "") +
+          cellString(item.monitorOperatorOpen ?? "") +
+          cellString(item.monitorOperatorClose ?? "") +
+          cellString(item.usageReason ?? "") +
+          cellString(item.reason ?? "") +
           cellString(item.createdByName ?? "") +
           cellString(item.notes ?? ""),
       ),

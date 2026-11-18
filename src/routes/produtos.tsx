@@ -375,7 +375,8 @@ function ProdutosPage() {
 
   return (
     <AppShell mobileTitle="Produtos" searchPlaceholder="Buscar produtos ou cód. fornecedor...">
-      <div className="space-y-lg">
+      <main className="flex-1 p-margin-mobile md:p-margin-desktop">
+      <div className="mx-auto max-w-6xl space-y-lg">
         <PageTitle
           title="Produtos"
           subtitle="CMC Omie/interno, markup e códigos de fornecedor (Route 66 e outros)."
@@ -648,6 +649,7 @@ function ProdutosPage() {
           </>
         )}
       </div>
+      </main>
 
       <Dialog
         open={linksProduct != null}

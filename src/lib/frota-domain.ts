@@ -1,4 +1,4 @@
-/** Domínio do módulo Frota (paridade funcional com Drivvo). */
+/** Domínio do módulo Frota (catálogos Âncora + paridade Drivvo). */
 
 export const FLEET_ENTRY_TYPES = [
   "refueling",
@@ -24,35 +24,119 @@ export const FLEET_ENTRY_LABELS: Record<FleetEntryType, string> = {
   reminder: "Lembrete",
 };
 
+export const KM_PROFILES = ["monitoramento", "assistencia"] as const;
+export type KmProfile = (typeof KM_PROFILES)[number];
+
+export const KM_PROFILE_LABELS: Record<KmProfile, string> = {
+  monitoramento: "Monitoramento",
+  assistencia: "Assistência / Supervisão RH",
+};
+
+/** Combustíveis — documento Categorias Frota */
 export const DEFAULT_FUEL_TYPES = [
-  "Gas. Comum",
-  "Gas. Aditivada",
-  "Etanol",
   "Diesel",
-  "Diesel S10",
-  "GNV",
+  "Etanol",
+  "Gasolina Aditivada",
+  "Gasolina Comum",
 ] as const;
 
+/** Postos de combustível */
+export const DEFAULT_STATIONS = [
+  "Auto Posto Monte Alto",
+  "Externo",
+  "Posto RAF (Fernando Prestes)",
+] as const;
+
+/** Fornecedores */
+export const DEFAULT_SUPPLIERS = [
+  "Allianz Seguros",
+  "Atlas",
+  "Auto Peças Mecânica do Waguinho",
+  "Auto Posto Monte Alto",
+  "Avenida Auto Center (Taquaritinga)",
+  "Barros",
+  "Cândido e Aleixo Vistoria",
+  "Oficina do Cardoso",
+  "Carlinhos Auto Peças",
+  "Detran",
+  "Fiat",
+  "Forte Pneus",
+  "Injetec",
+  "João Socorro Pneus",
+  "Borracharia Limão",
+  "Morita",
+  "Rh Seguros",
+  "Ocrinho",
+  "Yellow Mountain Distribuidora",
+  "Zezé Pneus",
+] as const;
+
+/** Tipos de despesa */
 export const DEFAULT_EXPENSE_TYPES = [
-  "Seguro",
-  "Licenciamento",
   "Impostos (IPVA/DPVAT)",
-  "Lava-rápido",
-  "Estacionamento",
-  "Pedágio",
+  "Licenciamento",
   "Multa",
-  "Outros",
+  "Seguro",
+  "Transferência",
+  "Vistoria",
 ] as const;
 
+/** Tipos de serviço */
 export const DEFAULT_SERVICE_TYPES = [
-  "Troca de Óleo",
-  "Filtro de óleo",
+  "Air Bag",
+  "Alarme",
   "Alinhamento/Balanceamento",
+  "Ar Condicionado",
+  "Bateria",
+  "Bicos",
+  "Bloco do Farol",
+  "Bomba De Combustível",
+  "Cabo Acelerador",
+  "Cabo de Freio",
+  "Cabo do velocímetro",
+  "Cabo Embreagem",
+  "Caixa De Direção",
+  "Câmara de ar",
+  "Câmera De Ar (Remendo)",
+  "Capa Para Banco Comum",
+  "Capa para Banco Térmica",
+  "Carcaça Interna Do Painel",
+  "Corrente",
+  "Disco de freio",
+  "Embreagem Completa",
+  "Engrenagem",
+  "Esticador De Corrente",
+  "Filtro de Ar",
+  "Filtro de Combustível",
+  "Filtro de óleo",
+  "Guarda Pó Bengala",
+  "Guarnição Tampa Válvula",
+  "Interruptor De Freio",
+  "Kit Partida",
+  "Lava-rápido",
+  "Luzes",
+  "Manete",
+  "Motor",
+  "Outros",
+  "Painel",
+  "Pastilha Freio (D)",
+  "Pastilha Freio (T)",
+  "Patim Freio (Dianteiro)",
+  "Patim Freio (Traseiro)",
+  "Patim Freio/Pastilha",
+  "Pedal De Partida",
   "Pneu (Dianteiro)",
   "Pneu (Traseiro)",
-  "Freios",
+  "Pneus",
+  "Relação",
+  "Retentor Da Bengala",
+  "Retrovisor",
   "Revisão",
-  "Outros",
+  "Serviço - Frete",
+  "Serviços (Mão de Obra)",
+  "Suspensão",
+  "Troca de Óleo",
+  "Vela",
 ] as const;
 
 export const DEFAULT_PAYMENT_METHODS = [

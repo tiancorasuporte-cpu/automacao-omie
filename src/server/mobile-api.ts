@@ -733,6 +733,10 @@ export async function handleMobileFrotaKm(request: Request) {
       kind?: string;
       notes?: string;
       clientActionId?: string;
+      profile?: string;
+      odometerOpen?: number;
+      monitorOperatorOpen?: string;
+      usageReason?: string;
     }>(request);
     const vehicle = await requireDefaultVehicle(auth.user);
     const driver = await ensureFleetDriverForUser(auth.user);
@@ -745,6 +749,8 @@ export async function handleMobileFrotaKm(request: Request) {
         : "daily_km";
     const defaultReason =
       kind === "entrada" ? "Entrada" : kind === "saida" ? "Saída" : "Lançamento app técnico";
+    const profile =
+      body?.profile === "monitoramento" || body?.profile === "assistencia" ? body.profile : null;
     const id = await createReading({
       vehicleId: vehicle.id,
       driverId: driver.id,
@@ -754,6 +760,10 @@ export async function handleMobileFrotaKm(request: Request) {
       reason: body?.reason?.trim() || defaultReason,
       notes: body?.notes ?? null,
       createdBy: auth.user.id,
+      profile,
+      odometerOpen: body?.odometerOpen != null ? Number(body.odometerOpen) : Number(body?.odometer),
+      monitorOperatorOpen: body?.monitorOperatorOpen ?? null,
+      usageReason: body?.usageReason ?? null,
     });
     return jsonOk({ ok: true, id, clientActionId: body?.clientActionId ?? null });
   } catch (error) {
@@ -1035,6 +1045,9 @@ async function applySyncAction(
           : kind === "saida"
             ? "Saída"
             : "Lançamento offline app técnico";
+      const profileRaw = payload.profile == null ? null : String(payload.profile);
+      const profile =
+        profileRaw === "monitoramento" || profileRaw === "assistencia" ? profileRaw : null;
       const id = await createReading({
         vehicleId: vehicle.id,
         driverId: driver.id,
@@ -1044,6 +1057,12 @@ async function applySyncAction(
         reason: String(payload.reason || defaultReason),
         notes: payload.notes == null ? null : String(payload.notes),
         createdBy: user.id,
+        profile,
+        odometerOpen:
+          payload.odometerOpen != null ? Number(payload.odometerOpen) : Number(payload.odometer),
+        monitorOperatorOpen:
+          payload.monitorOperatorOpen == null ? null : String(payload.monitorOperatorOpen),
+        usageReason: payload.usageReason == null ? null : String(payload.usageReason),
       });
       return { id };
     }

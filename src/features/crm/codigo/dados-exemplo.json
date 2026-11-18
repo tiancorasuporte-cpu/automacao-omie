@@ -1,0 +1,841 @@
+[
+ {
+  "id": 1,
+  "cod": "OP-00031",
+  "cliente": "Condomínio Residencial Bela Vista",
+  "contato": "Sr. Antônio (síndico)",
+  "tel": "(16) 99812-4410",
+  "cidade": "Ribeirão Preto",
+  "servico": "Portaria remota",
+  "os": "OS-00142",
+  "tecnico": "Alex Souza",
+  "visita": "2026-11-15",
+  "vendedor": "Marcos Lima",
+  "etapa": "montar",
+  "desde": "2026-11-15",
+  "valor": 0,
+  "prazo": 36,
+  "validade": "",
+  "prox": "",
+  "itens": [
+   {
+    "q": 1,
+    "d": "Kit portaria remota (DVR 16 canais + nobreak)"
+   },
+   {
+    "q": 8,
+    "d": "Câmera IP 4 MP bullet"
+   },
+   {
+    "q": 2,
+    "d": "Controladora de acesso facial"
+   },
+   {
+    "q": 1,
+    "d": "Interfone IP para portão social"
+   },
+   {
+    "q": 2,
+    "d": "Fechadura eletroímã 600 kgf"
+   },
+   {
+    "q": 1,
+    "d": "Automatizador de portão deslizante"
+   }
+  ],
+  "hist": [
+   {
+    "data": "2026-11-15",
+    "tipo": "sis",
+    "texto": "Criada automaticamente ao finalizar a OS-00142 (visita de orçamento).",
+    "autor": "Sistema"
+   }
+  ]
+ },
+ {
+  "id": 2,
+  "cod": "OP-00030",
+  "cliente": "Indústria Metalúrgica Santa Rita",
+  "contato": "Fernanda (compras)",
+  "tel": "(16) 3242-1180",
+  "cidade": "Jaboticabal",
+  "servico": "CFTV",
+  "os": "OS-00139",
+  "tecnico": "Diego Ramos",
+  "visita": "2026-11-12",
+  "vendedor": "Juliana Prado",
+  "etapa": "montar",
+  "desde": "2026-11-12",
+  "valor": 0,
+  "prazo": 24,
+  "validade": "",
+  "prox": "",
+  "itens": [
+   {
+    "q": 1,
+    "d": "NVR 8 canais"
+   },
+   {
+    "q": 6,
+    "d": "Câmera IP 2 MP dome"
+   },
+   {
+    "q": 1,
+    "d": "HD 2 TB"
+   },
+   {
+    "q": 120,
+    "d": "Cabo UTP Cat6 (m)"
+   }
+  ],
+  "hist": [
+   {
+    "data": "2026-11-12",
+    "tipo": "sis",
+    "texto": "Criada automaticamente ao finalizar a OS-00139 (visita de orçamento).",
+    "autor": "Sistema"
+   }
+  ]
+ },
+ {
+  "id": 3,
+  "cod": "OP-00029",
+  "cliente": "Clínica Odonto Sorriso",
+  "contato": "Dra. Patrícia",
+  "tel": "(17) 99140-2231",
+  "cidade": "Barretos",
+  "servico": "Alarme monitorado",
+  "os": "OS-00137",
+  "tecnico": "Paulo Henrique",
+  "visita": "2026-11-13",
+  "vendedor": "Rafael Teixeira",
+  "etapa": "montado",
+  "desde": "2026-11-15",
+  "valor": 189.9,
+  "prazo": 24,
+  "validade": "2026-11-30",
+  "prox": "",
+  "itens": [
+   {
+    "q": 1,
+    "d": "Central de alarme monitorada"
+   },
+   {
+    "q": 6,
+    "d": "Sensor IVP"
+   },
+   {
+    "q": 2,
+    "d": "Sensor magnético"
+   },
+   {
+    "q": 1,
+    "d": "Sirene"
+   }
+  ],
+  "hist": [
+   {
+    "data": "2026-11-13",
+    "tipo": "sis",
+    "texto": "Criada automaticamente ao finalizar a OS-00137.",
+    "autor": "Sistema"
+   },
+   {
+    "data": "2026-11-15",
+    "tipo": "etapa",
+    "texto": "Orçamento montado. ORC-2026-00129.",
+    "autor": "Rafael Teixeira"
+   }
+  ]
+ },
+ {
+  "id": 4,
+  "cod": "OP-00028",
+  "cliente": "Condomínio Villa Toscana",
+  "contato": "Sra. Regina (síndica)",
+  "tel": "(16) 99701-5532",
+  "cidade": "Franca",
+  "servico": "Portaria híbrida",
+  "os": "OS-00133",
+  "tecnico": "Alex Souza",
+  "visita": "2026-11-07",
+  "vendedor": "Marcos Lima",
+  "etapa": "enviado",
+  "desde": "2026-11-11",
+  "valor": 4850,
+  "total": 2500,
+  "aux": [
+   "Juliana Prado"
+  ],
+  "apoio": [
+   "Alex Souza"
+  ],
+  "prazo": 36,
+  "validade": "2026-11-26",
+  "itens": [
+   {
+    "q": 1,
+    "d": "Kit portaria remota (DVR 16 canais + nobreak)"
+   },
+   {
+    "q": 8,
+    "d": "Câmera IP 4 MP bullet"
+   },
+   {
+    "q": 2,
+    "d": "Controladora de acesso facial"
+   },
+   {
+    "q": 1,
+    "d": "Interfone IP para portão social"
+   },
+   {
+    "q": 2,
+    "d": "Fechadura eletroímã 600 kgf"
+   },
+   {
+    "q": 1,
+    "d": "Automatizador de portão deslizante"
+   }
+  ],
+  "hist": [
+   {
+    "data": "2026-11-07",
+    "tipo": "sis",
+    "texto": "Criada a partir da OS-00133.",
+    "autor": "Sistema"
+   },
+   {
+    "data": "2026-11-10",
+    "tipo": "etapa",
+    "texto": "Orçamento montado. ORC-2026-00125.",
+    "autor": "Marcos Lima"
+   },
+   {
+    "data": "2026-11-11",
+    "tipo": "contato",
+    "texto": "E-mail: proposta enviada para a síndica, que vai levar para o conselho.",
+    "autor": "Marcos Lima"
+   }
+  ]
+ },
+ {
+  "id": 5,
+  "cod": "OP-00027",
+  "cliente": "Supermercado Bom Preço",
+  "contato": "Sr. Wagner (gerente)",
+  "tel": "(16) 3242-7781",
+  "cidade": "Monte Alto",
+  "servico": "CFTV",
+  "os": "OS-00130",
+  "tecnico": "Diego Ramos",
+  "visita": "2026-11-06",
+  "vendedor": "Juliana Prado",
+  "etapa": "acao2",
+  "desde": "2026-11-15",
+  "tv": "execucao",
+  "valor": 0,
+  "total": 4380,
+  "orc": "ORC-2026-00122",
+  "docs": [
+   {
+    "id": "ex1",
+    "nome": "Proposta 00122 - Supermercado Bom Preço.pdf",
+    "tam": 182000,
+    "data": "2026-11-13",
+    "autor": "Juliana Prado",
+    "etiqueta": "Proposta enviada",
+    "lido": true
+   }
+  ],
+  "prazo": 24,
+  "validade": "2026-11-28",
+  "acao": {
+   "n": 2,
+   "tipo": "ligacao",
+   "data": "2026-11-16",
+   "hora": "14:00",
+   "obj": "Confirmar se analisou a proposta e tirar dúvidas."
+  },
+  "itens": [
+   {
+    "q": 1,
+    "d": "NVR 8 canais"
+   },
+   {
+    "q": 6,
+    "d": "Câmera IP 2 MP dome"
+   },
+   {
+    "q": 1,
+    "d": "HD 2 TB"
+   },
+   {
+    "q": 120,
+    "d": "Cabo UTP Cat6 (m)"
+   }
+  ],
+  "hist": [
+   {
+    "data": "2026-11-06",
+    "tipo": "sis",
+    "texto": "Criada a partir da OS-00130.",
+    "autor": "Sistema"
+   },
+   {
+    "data": "2026-11-12",
+    "tipo": "etapa",
+    "texto": "Orçamento montado. ORC-2026-00122.",
+    "autor": "Juliana Prado"
+   },
+   {
+    "data": "2026-11-13",
+    "tipo": "contato",
+    "texto": "1ª ação · WhatsApp: proposta enviada em PDF. Pediu prazo até sexta.",
+    "autor": "Juliana Prado"
+   },
+   {
+    "data": "2026-11-15",
+    "tipo": "acao",
+    "texto": "2ª ação agendada: 📞 Ligação telefônica para 16/11/2026 14:00.",
+    "autor": "Juliana Prado"
+   }
+  ]
+ },
+ {
+  "id": 6,
+  "cod": "OP-00026",
+  "cliente": "Transportadora Rota Norte",
+  "contato": "Carlos (operações)",
+  "tel": "(16) 99623-0098",
+  "cidade": "Ribeirão Preto",
+  "servico": "Controle de acesso",
+  "os": "OS-00126",
+  "tecnico": "Paulo Henrique",
+  "visita": "2026-11-01",
+  "vendedor": "Rafael Teixeira",
+  "etapa": "acao2",
+  "desde": "2026-11-14",
+  "tv": "recorrente",
+  "valor": 1320,
+  "total": 3900,
+  "apoio": [
+   "Paulo Henrique"
+  ],
+  "prazo": 36,
+  "validade": "2026-11-21",
+  "acao": {
+   "n": 2,
+   "tipo": "apresent",
+   "data": "2026-11-19",
+   "hora": "09:30",
+   "obj": "Apresentar o sistema de controle de acesso para a diretoria e a nova condição de pagamento."
+  },
+  "itens": [
+   {
+    "q": 3,
+    "d": "Catraca com leitor facial"
+   },
+   {
+    "q": 1,
+    "d": "Software de controle de acesso"
+   },
+   {
+    "q": 2,
+    "d": "Cancela automática"
+   }
+  ],
+  "hist": [
+   {
+    "data": "2026-11-01",
+    "tipo": "sis",
+    "texto": "Criada a partir da OS-00126.",
+    "autor": "Sistema"
+   },
+   {
+    "data": "2026-11-04",
+    "tipo": "contato",
+    "texto": "E-mail: proposta enviada.",
+    "autor": "Rafael Teixeira"
+   },
+   {
+    "data": "2026-11-14",
+    "tipo": "acao",
+    "texto": "2ª ação agendada: 📊 Reunião de apresentação para 19/11/2026 09:30.",
+    "autor": "Rafael Teixeira"
+   }
+  ]
+ },
+ {
+  "id": 7,
+  "cod": "OP-00025",
+  "cliente": "Condomínio Jardim das Flores",
+  "contato": "Sr. Osvaldo (síndico)",
+  "tel": "(16) 99455-6670",
+  "cidade": "Jaboticabal",
+  "servico": "Portaria remota",
+  "os": "OS-00121",
+  "tecnico": "Alex Souza",
+  "visita": "2026-10-25",
+  "vendedor": "Marcos Lima",
+  "etapa": "acao3",
+  "desde": "2026-11-10",
+  "valor": 5200,
+  "prazo": 36,
+  "validade": "2026-11-15",
+  "acao": {
+   "n": 3,
+   "tipo": "assemb",
+   "data": "2026-11-15",
+   "hora": "19:30",
+   "obj": "Apresentar a portaria remota na assembleia dos moradores."
+  },
+  "itens": [
+   {
+    "q": 1,
+    "d": "Kit portaria remota (DVR 16 canais + nobreak)"
+   },
+   {
+    "q": 8,
+    "d": "Câmera IP 4 MP bullet"
+   },
+   {
+    "q": 2,
+    "d": "Controladora de acesso facial"
+   },
+   {
+    "q": 1,
+    "d": "Interfone IP para portão social"
+   },
+   {
+    "q": 2,
+    "d": "Fechadura eletroímã 600 kgf"
+   },
+   {
+    "q": 1,
+    "d": "Automatizador de portão deslizante"
+   }
+  ],
+  "hist": [
+   {
+    "data": "2026-10-25",
+    "tipo": "sis",
+    "texto": "Criada a partir da OS-00121.",
+    "autor": "Sistema"
+   },
+   {
+    "data": "2026-10-29",
+    "tipo": "contato",
+    "texto": "E-mail: proposta enviada.",
+    "autor": "Marcos Lima"
+   },
+   {
+    "data": "2026-11-04",
+    "tipo": "feito",
+    "texto": "2ª ação realizada (📞 Ligação): síndico vai levar para assembleia.",
+    "autor": "Marcos Lima"
+   },
+   {
+    "data": "2026-11-10",
+    "tipo": "acao",
+    "texto": "3ª ação agendada: 🏢 Apresentação em assembleia para 15/11/2026 19:30.",
+    "autor": "Marcos Lima"
+   }
+  ]
+ },
+ {
+  "id": 8,
+  "cod": "OP-00024",
+  "cliente": "Escola Pequeno Saber",
+  "contato": "Diretora Lúcia",
+  "tel": "(16) 3244-1012",
+  "cidade": "Monte Alto",
+  "servico": "CFTV",
+  "os": "OS-00118",
+  "tecnico": "Diego Ramos",
+  "visita": "2026-10-22",
+  "vendedor": "Juliana Prado",
+  "etapa": "final",
+  "desde": "2026-11-13",
+  "tv": "execucao",
+  "valor": 0,
+  "total": 12800,
+  "apoio": [
+   "Diego Ramos"
+  ],
+  "prazo": 24,
+  "validade": "2026-11-11",
+  "prox": "",
+  "itens": [
+   {
+    "q": 1,
+    "d": "NVR 8 canais"
+   },
+   {
+    "q": 6,
+    "d": "Câmera IP 2 MP dome"
+   },
+   {
+    "q": 1,
+    "d": "HD 2 TB"
+   },
+   {
+    "q": 120,
+    "d": "Cabo UTP Cat6 (m)"
+   }
+  ],
+  "res": {
+   "st": "ganho",
+   "motivo": "",
+   "obs": "Assinou contrato de 24 meses. Instalação para a próxima semana.",
+   "data": "2026-11-13"
+  },
+  "hist": [
+   {
+    "data": "2026-10-22",
+    "tipo": "sis",
+    "texto": "Criada a partir da OS-00118.",
+    "autor": "Sistema"
+   },
+   {
+    "data": "2026-10-27",
+    "tipo": "contato",
+    "texto": "E-mail: proposta enviada.",
+    "autor": "Juliana Prado"
+   },
+   {
+    "data": "2026-11-13",
+    "tipo": "final",
+    "texto": "FECHADO. OS de instalação gerada (Pedido aprovado).",
+    "autor": "Juliana Prado"
+   }
+  ]
+ },
+ {
+  "id": 9,
+  "cod": "OP-00023",
+  "cliente": "Posto Estrela Rodovia",
+  "contato": "Sr. Renato",
+  "tel": "(17) 99211-3301",
+  "cidade": "Barretos",
+  "servico": "Alarme monitorado",
+  "os": "OS-00115",
+  "tecnico": "Paulo Henrique",
+  "visita": "2026-10-19",
+  "vendedor": "Rafael Teixeira",
+  "etapa": "final",
+  "desde": "2026-11-10",
+  "valor": 210,
+  "prazo": 24,
+  "validade": "2026-11-08",
+  "prox": "",
+  "itens": [
+   {
+    "q": 1,
+    "d": "Central de alarme monitorada"
+   },
+   {
+    "q": 6,
+    "d": "Sensor IVP"
+   },
+   {
+    "q": 2,
+    "d": "Sensor magnético"
+   },
+   {
+    "q": 1,
+    "d": "Sirene"
+   }
+  ],
+  "res": {
+   "st": "perdido",
+   "motivo": "Fechou com concorrente",
+   "obs": "Concorrente ofereceu R$ 160/mês sem taxa de implantação.",
+   "concorrente": "Concorrente local",
+   "data": "2026-11-10"
+  },
+  "hist": [
+   {
+    "data": "2026-10-19",
+    "tipo": "sis",
+    "texto": "Criada a partir da OS-00115.",
+    "autor": "Sistema"
+   },
+   {
+    "data": "2026-10-25",
+    "tipo": "contato",
+    "texto": "WhatsApp: proposta enviada.",
+    "autor": "Rafael Teixeira"
+   },
+   {
+    "data": "2026-11-10",
+    "tipo": "final",
+    "texto": "NÃO FECHADO — Fechou com concorrente.",
+    "autor": "Rafael Teixeira"
+   }
+  ]
+ },
+ {
+  "id": 10,
+  "cod": "OP-00022",
+  "cliente": "Condomínio Parque dos Ipês",
+  "contato": "Sra. Márcia",
+  "tel": "(16) 99102-7788",
+  "cidade": "Franca",
+  "servico": "Portaria remota",
+  "os": "OS-00110",
+  "tecnico": "Alex Souza",
+  "visita": "2026-10-12",
+  "vendedor": "Marcos Lima",
+  "etapa": "final",
+  "desde": "2026-11-06",
+  "valor": 4600,
+  "prazo": 36,
+  "validade": "2026-11-01",
+  "prox": "",
+  "itens": [
+   {
+    "q": 1,
+    "d": "Kit portaria remota (DVR 16 canais + nobreak)"
+   },
+   {
+    "q": 8,
+    "d": "Câmera IP 4 MP bullet"
+   },
+   {
+    "q": 2,
+    "d": "Controladora de acesso facial"
+   },
+   {
+    "q": 1,
+    "d": "Interfone IP para portão social"
+   },
+   {
+    "q": 2,
+    "d": "Fechadura eletroímã 600 kgf"
+   },
+   {
+    "q": 1,
+    "d": "Automatizador de portão deslizante"
+   }
+  ],
+  "res": {
+   "st": "perdido",
+   "motivo": "Reprovado em assembleia (condomínio)",
+   "obs": "Moradores preferiram manter o porteiro presencial por mais 1 ano. Retomar em 2027.",
+   "data": "2026-11-06"
+  },
+  "hist": [
+   {
+    "data": "2026-10-12",
+    "tipo": "sis",
+    "texto": "Criada a partir da OS-00110.",
+    "autor": "Sistema"
+   },
+   {
+    "data": "2026-11-06",
+    "tipo": "final",
+    "texto": "NÃO FECHADO — Reprovado em assembleia.",
+    "autor": "Marcos Lima"
+   }
+  ]
+ },
+ {
+  "id": 11,
+  "cod": "OP-00021",
+  "cliente": "Agropecuária Vale Verde",
+  "contato": "Sr. Hélio",
+  "tel": "(16) 99334-8812",
+  "cidade": "Monte Alto",
+  "servico": "Cerca elétrica",
+  "os": "OS-00104",
+  "tecnico": "Diego Ramos",
+  "visita": "2026-10-17",
+  "vendedor": "Juliana Prado",
+  "etapa": "final",
+  "desde": "2026-11-04",
+  "tv": "execucao",
+  "valor": 0,
+  "total": 9600,
+  "prazo": 24,
+  "validade": "2026-11-06",
+  "prox": "",
+  "itens": [
+   {
+    "q": 1,
+    "d": "Central de choque"
+   },
+   {
+    "q": 400,
+    "d": "Fio de aço inox (m)"
+   }
+  ],
+  "res": {
+   "st": "ganho",
+   "motivo": "",
+   "obs": "Fechou na 2ª ação (reunião de apresentação).",
+   "data": "2026-11-04"
+  },
+  "hist": [
+   {
+    "data": "2026-11-04",
+    "tipo": "final",
+    "texto": "FECHADO. OS de instalação gerada.",
+    "autor": "Juliana Prado"
+   }
+  ]
+ },
+ {
+  "id": 13,
+  "cod": "OP-00019",
+  "cliente": "Residencial Monte Verde",
+  "contato": "Sra. Cláudia (síndica)",
+  "tel": "(16) 99377-2210",
+  "cidade": "Monte Alto",
+  "servico": "Portaria híbrida",
+  "tv": "recorrente",
+  "aux": [
+   "Juliana Prado"
+  ],
+  "apoio": [
+   "Alex Souza"
+  ],
+  "os": "OS-00112",
+  "tecnico": "Alex Souza",
+  "visita": "2026-10-21",
+  "vendedor": "Marcos Lima",
+  "etapa": "aprovado",
+  "desde": "2026-11-14",
+  "valor": 3980,
+  "total": 1800,
+  "prazo": 36,
+  "validade": "2026-11-19",
+  "itens": [
+   {
+    "q": 1,
+    "d": "Kit portaria remota (DVR 16 canais + nobreak)"
+   },
+   {
+    "q": 8,
+    "d": "Câmera IP 4 MP bullet"
+   },
+   {
+    "q": 2,
+    "d": "Controladora de acesso facial"
+   },
+   {
+    "q": 1,
+    "d": "Interfone IP para portão social"
+   },
+   {
+    "q": 2,
+    "d": "Fechadura eletroímã 600 kgf"
+   },
+   {
+    "q": 1,
+    "d": "Automatizador de portão deslizante"
+   }
+  ],
+  "acao": {
+   "n": 3,
+   "tipo": "apresent",
+   "data": "2026-11-14",
+   "hora": "19:00",
+   "obj": "Apresentar ao conselho",
+   "feita": true,
+   "resultado": "Cliente aprovou a proposta."
+  },
+  "aprov": {
+   "data": "2026-11-14",
+   "aguardando": "Assinatura do contrato",
+   "prev": "2026-11-18",
+   "obs": "Conselho aprovou; contrato enviado para assinatura digital."
+  },
+  "hist": [
+   {
+    "data": "2026-10-21",
+    "tipo": "sis",
+    "texto": "Criada a partir da OS-00112.",
+    "autor": "Sistema"
+   },
+   {
+    "data": "2026-10-27",
+    "tipo": "contato",
+    "texto": "1ª ação · Proposta enviada por E-mail.",
+    "autor": "Marcos Lima"
+   },
+   {
+    "data": "2026-11-14",
+    "tipo": "feito",
+    "texto": "✍️ CLIENTE APROVOU. Aguardando assinatura do contrato.",
+    "autor": "Marcos Lima"
+   }
+  ]
+ },
+ {
+  "id": 12,
+  "cod": "OP-00020",
+  "cliente": "Condomínio Recanto das Águas",
+  "contato": "Sr. Jorge (síndico)",
+  "tel": "(16) 99288-1450",
+  "cidade": "Ribeirão Preto",
+  "servico": "Portaria remota",
+  "tv": "recorrente",
+  "aux": [
+   "Rafael Teixeira"
+  ],
+  "apoio": [
+   "Alex Souza"
+  ],
+  "os": "OS-00101",
+  "tecnico": "Alex Souza",
+  "visita": "2026-10-07",
+  "vendedor": "Marcos Lima",
+  "etapa": "final",
+  "desde": "2026-11-08",
+  "valor": 5400,
+  "total": 3000,
+  "prazo": 36,
+  "validade": "2026-11-04",
+  "itens": [
+   {
+    "q": 1,
+    "d": "Kit portaria remota (DVR 16 canais + nobreak)"
+   },
+   {
+    "q": 8,
+    "d": "Câmera IP 4 MP bullet"
+   },
+   {
+    "q": 2,
+    "d": "Controladora de acesso facial"
+   },
+   {
+    "q": 1,
+    "d": "Interfone IP para portão social"
+   },
+   {
+    "q": 2,
+    "d": "Fechadura eletroímã 600 kgf"
+   },
+   {
+    "q": 1,
+    "d": "Automatizador de portão deslizante"
+   }
+  ],
+  "res": {
+   "st": "ganho",
+   "motivo": "",
+   "obs": "Contrato de 36 meses assinado após a apresentação em assembleia.",
+   "data": "2026-11-08"
+  },
+  "hist": [
+   {
+    "data": "2026-11-08",
+    "tipo": "final",
+    "texto": "FECHADO. OS de instalação gerada (Pedido aprovado).",
+    "autor": "Marcos Lima"
+   }
+  ]
+ }
+]
