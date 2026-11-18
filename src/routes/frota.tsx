@@ -114,7 +114,21 @@ function nowLocalInput() {
 }
 
 function vehicleLabel(v: Vehicle) {
-  const bits = [v.name, v.brand, v.model].filter(Boolean);
+  const name = v.name?.trim() || "";
+  const brand = v.brand?.trim() || "";
+  const model = v.model?.trim() || "";
+  const title =
+    name ||
+    [brand, model].filter(Boolean).join(" ") ||
+    "Veículo";
+  // Evita "Fiat · Fiat" quando o nome é só a marca.
+  const extra =
+    brand && name && brand.toLowerCase() !== name.toLowerCase()
+      ? [brand, model].filter(Boolean).join(" ")
+      : model && model.toLowerCase() !== name.toLowerCase()
+        ? model
+        : "";
+  const bits = [title, extra, v.plate?.trim()].filter(Boolean);
   return bits.join(" · ");
 }
 
@@ -285,15 +299,16 @@ function FrotaPage() {
                 }))}
               />
               {selected ? (
-                <div className="flex flex-wrap items-center gap-sm pt-2xs">
-                  {selected.brand ? <FleetBrandMark brand={selected.brand} size="sm" showLabel /> : null}
-                  <p className="text-body-sm text-on-surface-variant">
-                    Odômetro atual:{" "}
-                    <span className="font-semibold text-on-surface">
-                      {formatKm(selected.currentOdometer)}
-                    </span>
-                  </p>
-                </div>
+                <p className="pt-2xs text-body-sm text-on-surface-variant">
+                  {(() => {
+                    const meta = [selected.plate, selected.model].filter(Boolean).join(" · ");
+                    return meta ? `${meta} · ` : "";
+                  })()}
+                  Odômetro atual:{" "}
+                  <span className="font-semibold tabular-nums text-on-surface">
+                    {formatKm(selected.currentOdometer)}
+                  </span>
+                </p>
               ) : null}
             </div>
             <div className="flex flex-wrap gap-sm">
