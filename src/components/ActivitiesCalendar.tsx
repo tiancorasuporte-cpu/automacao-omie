@@ -250,9 +250,9 @@ export function ActivitiesCalendar({
         ) : null}
       </div>
 
-      <div className="grid gap-md lg:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="flex flex-col gap-md">
-          <PageSection className="p-sm">
+      <div className="grid gap-md lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)]">
+        <aside className="flex min-w-0 flex-col gap-md">
+          <PageSection className="overflow-hidden p-sm">
             <Calendar
               mode="single"
               month={monthStart}
@@ -261,7 +261,7 @@ export function ActivitiesCalendar({
               onSelect={(d) => {
                 if (d) onMonthChange(d);
               }}
-              className="w-full [--cell-size:2rem]"
+              className="w-full max-w-full"
             />
           </PageSection>
 
