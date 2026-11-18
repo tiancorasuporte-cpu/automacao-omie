@@ -11,6 +11,8 @@ import { httpsCert } from "./scripts/https-cert";
 const https = await httpsCert();
 
 export default defineConfig({
+  // Self-host (VPS/Bun): não usar o default cloudflare-module do Lovable.
+  nitro: { preset: "bun" },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
