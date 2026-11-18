@@ -185,6 +185,8 @@ export const getDueItemBoletoViewFn = createServerFn({ method: "GET" })
     const filename =
       `${(item.documentNumber ?? "documento").replace(/[^\w.-]+/g, "_")}.pdf`;
 
+    const { closedReceivablePublicMessage } = await import("@/server/omie/status");
+
     if (item.itemType === "boleto") {
       const result = await resolveBoletoPdfWithStatus(app, {
         omieCode: item.omieCode ?? 0,
@@ -195,9 +197,15 @@ export const getDueItemBoletoViewFn = createServerFn({ method: "GET" })
       if (url) {
         return { ok: true as const, mode: "link" as const, url, filename: result.document?.filename ?? filename };
       }
+      const closed = closedReceivablePublicMessage({
+        itemType: item.itemType,
+        status: item.status,
+        omieStatus: result.status,
+        documentNumber: result.documentNumber ?? item.documentNumber,
+      });
       return {
         ok: false as const,
-        error: result.status ?? "Link do boleto indisponível no Omie.",
+        error: closed ?? result.status ?? "Link do boleto indisponível no Omie.",
       };
     }
 
@@ -216,9 +224,15 @@ export const getDueItemBoletoViewFn = createServerFn({ method: "GET" })
       return { ok: true as const, mode: "download" as const, filename: pdfFilename, base64 };
     }
 
+    const closed = closedReceivablePublicMessage({
+      itemType: item.itemType,
+      status: item.status,
+      omieStatus: result.status,
+      documentNumber: result.documentNumber ?? item.documentNumber,
+    });
     return {
       ok: false as const,
-      error: result.status ?? "PDF do documento indisponível no Omie.",
+      error: closed ?? result.status ?? "PDF do documento indisponível no Omie.",
     };
   });
 

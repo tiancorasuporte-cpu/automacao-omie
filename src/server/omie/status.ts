@@ -31,6 +31,35 @@ export function normalizeOmieStatus(status: string | null | undefined) {
     .trim();
 }
 
+export function isCancelledReceivableStatus(status: string | null | undefined) {
+  const value = normalizeOmieStatus(status);
+  if (!value) return false;
+  if (value === "CANCELADO" || value === "C") return true;
+  return value.includes("CANCEL");
+}
+
+export function isPaidReceivableStatus(status: string | null | undefined) {
+  const value = normalizeOmieStatus(status);
+  if (!value || isCancelledReceivableStatus(value)) return false;
+  if (
+    value === "RECEBIDO" ||
+    value === "BAIXADO" ||
+    value === "LIQUIDADO" ||
+    value === "PAGO" ||
+    value === "R" ||
+    value === "L" ||
+    value === "F"
+  ) {
+    return true;
+  }
+  return (
+    value.includes("RECEBID") ||
+    value.includes("LIQUID") ||
+    value.includes("BAIXAD") ||
+    value.includes("PAGO")
+  );
+}
+
 export function isClosedReceivableStatus(status: string | null | undefined) {
   const value = normalizeOmieStatus(status);
   if (!value) return false;
@@ -39,6 +68,44 @@ export function isClosedReceivableStatus(status: string | null | undefined) {
     return true;
   }
   return false;
+}
+
+/** Mensagem amigável quando Omie/DB indicam título quitado ou cancelado (sem PDF renovável). */
+export function closedReceivablePublicMessage(input: {
+  itemType?: string | null;
+  status?: string | null;
+  omieStatus?: string | null;
+  documentNumber?: string | null;
+}) {
+  const blob = `${input.status ?? ""} ${input.omieStatus ?? ""}`;
+  const cancelled = isCancelledReceivableStatus(input.status) || isCancelledReceivableStatus(input.omieStatus) || /cancel/i.test(blob);
+  const paid =
+    !cancelled &&
+    (isPaidReceivableStatus(input.status) ||
+      isPaidReceivableStatus(input.omieStatus) ||
+      /liquidada|liquidado|recebido|baixado|\bpago\b/i.test(blob));
+  if (!cancelled && !paid) return null;
+
+  const kind =
+    String(input.itemType ?? "").toLowerCase() === "nfe"
+      ? "documento"
+      : String(input.itemType ?? "").toLowerCase() === "boleto"
+        ? "boleto"
+        : "título";
+  const doc = input.documentNumber?.trim();
+  const lines = cancelled
+    ? [
+        `Este ${kind} foi cancelado.`,
+        "Por isso a Omie não gera mais o PDF para este link.",
+      ]
+    : [
+        `Este ${kind} já foi pago.`,
+        "A Omie liquidou o título e não gera mais o PDF.",
+      ];
+  if (doc) lines.push(`Documento: ${doc}`);
+  const detail = input.omieStatus?.trim();
+  if (detail && !cancelled) lines.push(detail);
+  return lines.join("\n");
 }
 
 /** Só notifica/lista como aberto se o status for claramente cobrável. Null/F/NFe sem status = fora. */
