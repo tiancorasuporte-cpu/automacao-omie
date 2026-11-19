@@ -44,18 +44,60 @@ function isH3SwallowedErrorBody(body: string): boolean {
   }
 }
 
+/** Expo web (localhost) chama a API mobile cross-origin — sem CORS o login vira "Failed to fetch". */
+function isMobileApiPath(pathname: string) {
+  return pathname === "/api/mobile" || pathname.startsWith("/api/mobile/");
+}
+
+function mobileCorsHeaders(request: Request): Headers {
+  const origin = request.headers.get("origin")?.trim() || "*";
+  const headers = new Headers();
+  headers.set("Access-Control-Allow-Origin", origin);
+  headers.set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  headers.set(
+    "Access-Control-Allow-Headers",
+    request.headers.get("access-control-request-headers") ||
+      "Authorization, Content-Type, Accept",
+  );
+  headers.set("Access-Control-Max-Age", "86400");
+  if (origin !== "*") headers.set("Vary", "Origin");
+  return headers;
+}
+
+function withMobileCors(request: Request, response: Response): Response {
+  if (!isMobileApiPath(new URL(request.url).pathname)) return response;
+  const headers = new Headers(response.headers);
+  const cors = mobileCorsHeaders(request);
+  cors.forEach((value, key) => headers.set(key, value));
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      const url = new URL(request.url);
+      if (request.method === "OPTIONS" && isMobileApiPath(url.pathname)) {
+        return new Response(null, {
+          status: 204,
+          headers: mobileCorsHeaders(request),
+        });
+      }
+
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
+      const normalized = await normalizeCatastrophicSsrResponse(response);
+      return withMobileCors(request, normalized);
     } catch (error) {
       console.error(error);
-      return new Response(renderErrorPage(), {
+      const fail = new Response(renderErrorPage(), {
         status: 500,
         headers: { "content-type": "text/html; charset=utf-8" },
       });
+      return withMobileCors(request, fail);
     }
   },
 };
