@@ -1,4 +1,4 @@
-﻿import { createFileRoute } from "@tanstack/react-router";
+﻿import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -39,6 +39,7 @@ import {
   acceptConferenceFn,
   addOsItemFn,
   advanceOsFn,
+  assignOsTecnicoFn,
   backfillOsClientLocationsFn,
   checkInOsFn,
   checkOutOsFn,
@@ -49,7 +50,9 @@ import {
   finishVisitaFn,
   getAssistenciaBootstrapFn,
   getOsFn,
+  linkOsMoniFn,
   listOsFn,
+  listOsMoniEmpresasFn,
   listTecnicosProximosFn,
   markExecutedFn,
   moveOsKanbanFn,
@@ -64,24 +67,31 @@ import {
   scheduleOsFn,
   searchAssistClientsFn,
   searchAssistProductsFn,
+  searchOsMoniContasFn,
   searchQuotesFn,
   startExecOsFn,
   submitConferenceFn,
   syncOsClientLocationFn,
   updateOsItemFn,
+  updateOsPrioridadeFn,
 } from "@/lib/assistencia";
+import { moniDetailLines, moniShortLabel } from "@/lib/moni-display";
 import { notifyComprasUnreadChanged } from "@/lib/compras";
 import {
   OS_ITEM_STATUS_CLASS,
   OS_ITEM_STATUS_LABEL,
+  OS_PRIO_ORD,
+  OS_PRIOS,
   OS_STAGES,
   OS_TIPOS,
   osKanbanColumnStyle,
+  osPrioridadeDotClass,
   osStageMoverLabel,
   osStageName,
   osTipoBadgeLabel,
   osTipoLabel,
   type OsItemStatus,
+  type OsPrio,
 } from "@/lib/assistencia-domain";
 import {
   downloadAssistOsPdf,
@@ -169,6 +179,28 @@ function osAgendaHint(os: OsRow) {
   }
   if (os.stage === 3 || os.stage === 4) return "A reagendar";
   return null;
+}
+
+function osAgendaDates(os: OsRow) {
+  const recent = os.agDate;
+  const oldest = os.agDateFirst || os.agDate;
+  return { recent, oldest };
+}
+
+function compareOsByDate(a: OsRow, b: OsRow) {
+  const da = a.agDate || a.agDateFirst || "";
+  const db = b.agDate || b.agDateFirst || "";
+  if (da && db && da !== db) return db.localeCompare(da); // mais recente em cima
+  if (da && !db) return -1;
+  if (!da && db) return 1;
+  return b.updatedAt.localeCompare(a.updatedAt);
+}
+
+function compareOsByUrgencia(a: OsRow, b: OsRow) {
+  const pa = OS_PRIO_ORD[(a.prioridade as OsPrio) ?? "Normal"] ?? 9;
+  const pb = OS_PRIO_ORD[(b.prioridade as OsPrio) ?? "Normal"] ?? 9;
+  if (pa !== pb) return pa - pb;
+  return compareOsByDate(a, b);
 }
 
 /** Equipe primeiro; depois técnico. */
@@ -289,7 +321,13 @@ function AssistenciaPage() {
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [feedbackOk, setFeedbackOk] = useState(false);
+  const [baixaAlert, setBaixaAlert] = useState<{
+    ok: boolean;
+    title: string;
+    message: string;
+  } | null>(null);
   const [kanbanFilters, setKanbanFilters] = useState(emptyKanbanFilters);
+  const [kanbanSort, setKanbanSort] = useState<"data" | "urgencia">("data");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [openColFilter, setOpenColFilter] = useState<number | null>(null);
   const [globalTipo, setGlobalTipo] = useState("");
@@ -308,9 +346,62 @@ function AssistenciaPage() {
   const dragOsIdRef = useRef<number | null>(null);
   const suppressCardClickRef = useRef(false);
 
+  const [newOpen, setNewOpen] = useState(false);
+  const [tipo, setTipo] = useState<"pedido" | "manut" | "monit" | "visita">("manut");
+  const [subtipo, setSubtipo] = useState("");
+  const [newPrio, setNewPrio] = useState<OsPrio>("Normal");
+  const [assignTeamId, setAssignTeamId] = useState<number | "">("");
+  const [assignTecnicoNome, setAssignTecnicoNome] = useState("");
+  const [osMoniEmpresa, setOsMoniEmpresa] = useState(1);
+  const [osMoniEmpresas, setOsMoniEmpresas] = useState<number[]>([1]);
+  const [osMoniQuery, setOsMoniQuery] = useState("");
+  const [osMoniSugestoes, setOsMoniSugestoes] = useState<
+    Awaited<ReturnType<typeof searchOsMoniContasFn>>["items"]
+  >([]);
+  const [buscandoOsMoni, setBuscandoOsMoni] = useState(false);
+
   useEffect(() => {
     setOsList(boot.osList);
   }, [boot.osList]);
+
+  useEffect(() => {
+    void listOsMoniEmpresasFn()
+      .then((res) => {
+        setOsMoniEmpresa(res.defaultMoniEmpresa || 1);
+        setOsMoniEmpresas(
+          res.moniEmpresas.length ? res.moniEmpresas : [res.defaultMoniEmpresa || 1],
+        );
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setOsMoniSugestoes([]);
+      return;
+    }
+    const q = osMoniQuery.trim();
+    if (q.length < 1) {
+      setOsMoniSugestoes([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        setBuscandoOsMoni(true);
+        try {
+          const res = await searchOsMoniContasFn({
+            data: { query: q, empresa: osMoniEmpresa, limit: 30 },
+          });
+          setOsMoniSugestoes(res.items);
+        } catch {
+          setOsMoniSugestoes([]);
+        } finally {
+          setBuscandoOsMoni(false);
+        }
+      })();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [osMoniQuery, osMoniEmpresa, selectedId]);
 
   useEffect(() => {
     if (boot.companyLocation) setCompanyLocation(boot.companyLocation);
@@ -333,10 +424,6 @@ function AssistenciaPage() {
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
-
-  const [newOpen, setNewOpen] = useState(false);
-  const [tipo, setTipo] = useState<"pedido" | "manut" | "monit" | "visita">("manut");
-  const [subtipo, setSubtipo] = useState("");
   const [newProblemTypeId, setNewProblemTypeId] = useState<number | null>(null);
   const [newChecklistIds, setNewChecklistIds] = useState<number[]>([]);
   const [addChecklistIdDraft, setAddChecklistIdDraft] = useState("");
@@ -702,7 +789,7 @@ function AssistenciaPage() {
   }
 
   function osNeedsDisposition(os: OsRow) {
-    if ((os.stage !== 5 && os.stage !== 6) || !os.coAt) return false;
+    if ((os.stage < 5 || os.stage > 7) || !os.coAt) return false;
     const items = os.items.filter((i) =>
       ["campo", "extra", "aplicado", "separado", "recebido"].includes(i.status),
     );
@@ -737,8 +824,12 @@ function AssistenciaPage() {
     if (!selected) {
       setMatDisp({});
       setMatDispErrors({});
+      setAssignTeamId("");
+      setAssignTecnicoNome("");
       return;
     }
+    setAssignTeamId(selected.teamId ?? "");
+    setAssignTecnicoNome(selected.tecnicoNome ?? "");
     const next: Record<number, { usado: string; sobraDestino: "" | "devolver" | "equipe" }> =
       {};
     for (const it of selected.items) {
@@ -752,11 +843,12 @@ function AssistenciaPage() {
     }
     setMatDisp(next);
     setMatDispErrors({});
-  }, [selected?.id, selected?.items]);
+  }, [selected?.id, selected?.items, selected?.teamId, selected?.tecnicoNome]);
 
   function openNewOs() {
     setTipo("manut");
     setSubtipo("");
+    setNewPrio("Normal");
     setNewProblemTypeId(null);
     setNewChecklistIds([]);
     setAddChecklistIdDraft("");
@@ -908,7 +1000,7 @@ function AssistenciaPage() {
 
   async function run(
     action: () => Promise<OsRow | null | undefined>,
-    opts?: { okMessage?: string },
+    opts?: { okMessage?: string; openDetail?: boolean },
   ) {
     setBusy(true);
     setFeedback(null);
@@ -923,8 +1015,16 @@ function AssistenciaPage() {
           copy[idx] = updated;
           return copy;
         });
-        setSelectedId(updated.id);
-        if (updated.stage === 5) {
+        if (opts?.openDetail !== false) {
+          setSelectedId(updated.id);
+          if (updated.stage === 5) {
+            setCheckoutText(updated.resolucao ?? updated.rel?.texto ?? "");
+            setCheckoutFotos(
+              (updated.rel?.fotos ?? []).map((foto) => ({ foto, thumb: foto })),
+            );
+            setCheckoutAnexos(updated.rel?.anexos ?? []);
+          }
+        } else if (selectedId === updated.id && updated.stage === 5) {
           setCheckoutText(updated.resolucao ?? updated.rel?.texto ?? "");
           setCheckoutFotos(
             (updated.rel?.fotos ?? []).map((foto) => ({ foto, thumb: foto })),
@@ -941,6 +1041,59 @@ function AssistenciaPage() {
     } catch (e) {
       setFeedbackOk(false);
       setFeedback(e instanceof Error ? e.message : "Falha na ação");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runBaixa(
+    action: () => Promise<OsRow | null | undefined>,
+    opts?: { okTitle?: string; okMessage?: string },
+  ) {
+    setBusy(true);
+    setFeedback(null);
+    setFeedbackOk(false);
+    try {
+      const updated = await action();
+      if (updated) {
+        setOsList((prev) => {
+          const idx = prev.findIndex((o) => o.id === updated.id);
+          if (idx < 0) return [updated, ...prev];
+          const copy = [...prev];
+          copy[idx] = updated;
+          return copy;
+        });
+        // Mantém o detalhe só se já estiver aberto nesta OS — não “pula” a tela.
+        if (selectedId === updated.id) {
+          if (updated.stage === 5) {
+            setCheckoutText(updated.resolucao ?? updated.rel?.texto ?? "");
+            setCheckoutFotos(
+              (updated.rel?.fotos ?? []).map((foto) => ({ foto, thumb: foto })),
+            );
+            setCheckoutAnexos(updated.rel?.anexos ?? []);
+          }
+        }
+      } else {
+        await reload();
+      }
+      setBaixaAlert({
+        ok: true,
+        title: opts?.okTitle ?? "Baixa confirmada",
+        message: opts?.okMessage ?? "Baixa no estoque da empresa confirmada.",
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Falha na baixa.";
+      const stockIssue =
+        /estoque|saldo|zerad|insuficiente|alimente/i.test(message);
+      setBaixaAlert({
+        ok: false,
+        title: stockIssue
+          ? "Não foi possível dar baixa"
+          : "Falha ao confirmar baixa",
+        message,
+      });
+      setFeedbackOk(false);
+      setFeedback(message);
     } finally {
       setBusy(false);
     }
@@ -1265,7 +1418,14 @@ function AssistenciaPage() {
                       {selected.quoteNumero ? ` · ${selected.quoteNumero}` : ""}
                     </div>
                     <p className="mt-xs whitespace-pre-wrap text-body-md">{selected.servico}</p>
-                    <div className="mt-sm flex items-center gap-xs text-label-md text-on-surface">
+                    <div className="mt-sm flex flex-wrap items-center gap-sm text-label-md text-on-surface">
+                      <span
+                        className={cn(
+                          "inline-block size-2.5 rounded-full",
+                          osPrioridadeDotClass(selected.prioridade),
+                        )}
+                        title={`Prioridade: ${selected.prioridade || "Normal"}`}
+                      />
                       {osResponsavelInitial(selected) ? (
                         <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-neutral-900 text-[10px] font-bold text-white">
                           {osResponsavelInitial(selected)}
@@ -1278,10 +1438,25 @@ function AssistenciaPage() {
                         {osResponsavelLabel(selected) ?? "Sem responsável"}
                       </span>
                     </div>
-                    {selected.agDate ? (
-                      <div className="mt-2xs flex items-center gap-xs text-label-sm text-on-surface-variant">
-                        <Icon name="calendar_month" className="text-[15px]" />
-                        <span>{osAgendaHint(selected)}</span>
+                    {selected.agDate || selected.agDateFirst ? (
+                      <div className="mt-2xs flex items-start gap-xs text-label-sm text-on-surface-variant">
+                        <Icon name="calendar_month" className="mt-2xs text-[15px]" />
+                        <div className="flex flex-col leading-tight">
+                          <span>
+                            {selected.agDate
+                              ? formatOsDateBr(selected.agDate)
+                              : "—"}
+                            {selected.periodo ? ` · ${selected.periodo}` : ""}
+                            {selected.hora ? ` · ${selected.hora}` : ""}
+                          </span>
+                          {selected.agDateFirst &&
+                          selected.agDate &&
+                          selected.agDateFirst !== selected.agDate ? (
+                            <span className="text-[11px] opacity-80">
+                              1ª agenda: {formatOsDateBr(selected.agDateFirst)}
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                     ) : null}
                   </div>
@@ -1295,6 +1470,245 @@ function AssistenciaPage() {
                   </button>
                 </div>
                 )}
+
+                {(boot.user.canAssistencia || boot.user.isAdmin) && selected.stage < 7 ? (
+                  <div className="rounded-xl border border-outline-variant bg-white p-md">
+                    {selected.stage >= 3 && selected.stage <= 6 ? (
+                      <>
+                        <div className="text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                          Equipe / técnico
+                        </div>
+                        <p className="mt-2xs text-label-sm text-on-surface-variant">
+                          Pode escolher ou trocar o responsável nesta fase — mesmo se a OS avançou sem técnico.
+                        </p>
+                        <div className="mt-sm grid gap-sm sm:grid-cols-2">
+                          <label className="block text-label-md text-on-surface-variant">
+                            Equipe
+                            <select
+                              value={assignTeamId}
+                              disabled={busy}
+                              className={cn(fieldClass, "mt-xs")}
+                              onChange={(e) => {
+                                const next = e.target.value ? Number(e.target.value) : "";
+                                setAssignTeamId(next);
+                                setAssignTecnicoNome(resolveTecnicoForTeam(next, ""));
+                              }}
+                            >
+                              <option value="">Sem equipe</option>
+                              {boot.teams.map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="block text-label-md text-on-surface-variant">
+                            Técnico
+                            {membersOfTeam(assignTeamId).length > 0 ? (
+                              <select
+                                value={assignTecnicoNome}
+                                disabled={busy}
+                                className={cn(fieldClass, "mt-xs")}
+                                onChange={(e) => setAssignTecnicoNome(e.target.value)}
+                              >
+                                <option value="">Selecionar técnico</option>
+                                {membersOfTeam(assignTeamId).map((m) => (
+                                  <option key={m.id ?? m.name} value={m.name}>
+                                    {m.name}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                value={assignTecnicoNome}
+                                disabled={busy || !assignTeamId}
+                                placeholder={
+                                  assignTeamId
+                                    ? "Equipe sem técnicos cadastrados"
+                                    : "Escolha a equipe"
+                                }
+                                className={cn(fieldClass, "mt-xs")}
+                                onChange={(e) => setAssignTecnicoNome(e.target.value)}
+                              />
+                            )}
+                          </label>
+                        </div>
+                        <div className="mt-sm">
+                          <button
+                            type="button"
+                            disabled={
+                              busy ||
+                              ((selected.teamId ?? null) ===
+                                (assignTeamId === "" ? null : assignTeamId) &&
+                                (selected.tecnicoNome ?? "") === (assignTecnicoNome || ""))
+                            }
+                            className={btnPrimary}
+                            onClick={() =>
+                              run(() =>
+                                assignOsTecnicoFn({
+                                  data: {
+                                    osId: selected.id,
+                                    teamId: assignTeamId === "" ? null : assignTeamId,
+                                    tecnicoNome: assignTecnicoNome || null,
+                                  },
+                                }),
+                              )
+                            }
+                          >
+                            Salvar responsável
+                          </button>
+                        </div>
+                      </>
+                    ) : null}
+                    <label
+                      className={cn(
+                        "flex flex-col gap-2xs text-label-md text-on-surface-variant sm:inline-flex sm:flex-row sm:items-center sm:gap-xs",
+                        selected.stage >= 3 && selected.stage <= 6 ? "mt-md" : "",
+                      )}
+                    >
+                      Prioridade
+                      <select
+                        value={(selected.prioridade as OsPrio) || "Normal"}
+                        disabled={busy}
+                        className={cn(fieldClass, "mt-0 w-full sm:w-auto")}
+                        onChange={(e) => {
+                          const next = e.target.value as OsPrio;
+                          void run(
+                            () =>
+                              updateOsPrioridadeFn({
+                                data: {
+                                  osId: selected.id,
+                                  prioridade: next,
+                                },
+                              }),
+                            { okMessage: `Prioridade atualizada para ${next}.` },
+                          );
+                        }}
+                      >
+                        {OS_PRIOS.map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="mt-md rounded-xl border border-outline-variant/70 bg-surface-container-low/40 p-md">
+                      <div className="flex flex-wrap items-start justify-between gap-sm">
+                        <div>
+                          <div className="text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                            Conta Moni
+                          </div>
+                          <p className="mt-2xs text-label-sm text-on-surface-variant">
+                            Vincule a conta do Moni a esta O.S.
+                          </p>
+                        </div>
+                        {selected.moniContaCodigo ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            className={btnMuted}
+                            onClick={() =>
+                              run(
+                                () =>
+                                  linkOsMoniFn({
+                                    data: {
+                                      osId: selected.id,
+                                      moniEmpresa: null,
+                                      moniContaCodigo: null,
+                                    },
+                                  }),
+                                { okMessage: "Conta Moni removida." },
+                              ).then(() => {
+                                setOsMoniQuery("");
+                                setOsMoniSugestoes([]);
+                              })
+                            }
+                          >
+                            Remover
+                          </button>
+                        ) : null}
+                      </div>
+                      {selected.moniContaCodigo ? (
+                        <div className="mt-sm text-body-md text-on-surface">
+                          <p>{moniShortLabel(selected)}</p>
+                          {moniDetailLines(selected.moniDetalhe).map((line) => (
+                            <p key={line} className="text-label-md text-on-surface-variant">
+                              {line}
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="relative mt-sm grid gap-sm sm:grid-cols-[minmax(0,9rem)_1fr]">
+                          <label className="text-label-md text-on-surface-variant">
+                            Empresa
+                            <select
+                              value={osMoniEmpresa}
+                              disabled={busy}
+                              className={cn(fieldClass, "mt-xs")}
+                              onChange={(e) => setOsMoniEmpresa(Number(e.target.value) || 1)}
+                            >
+                              {osMoniEmpresas.map((e) => (
+                                <option key={e} value={e}>
+                                  {e}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="text-label-md text-on-surface-variant">
+                            Buscar conta
+                            <input
+                              value={osMoniQuery}
+                              disabled={busy}
+                              placeholder="Código, nome ou CNPJ"
+                              className={cn(fieldClass, "mt-xs")}
+                              onChange={(e) => setOsMoniQuery(e.target.value)}
+                            />
+                          </label>
+                          {buscandoOsMoni ? (
+                            <p className="sm:col-span-2 text-label-sm text-on-surface-variant">
+                              Buscando…
+                            </p>
+                          ) : null}
+                          {osMoniSugestoes.length > 0 ? (
+                            <ul className="absolute left-0 right-0 top-full z-20 mt-xs max-h-48 overflow-auto rounded-lg border border-outline-variant bg-white shadow-lg sm:col-span-2">
+                              {osMoniSugestoes.map((conta) => (
+                                <li key={`${conta.empresa}-${conta.codigo}`}>
+                                  <button
+                                    type="button"
+                                    className="block w-full px-md py-sm text-left text-body-md hover:bg-surface-container"
+                                    onClick={() =>
+                                      run(
+                                        () =>
+                                          linkOsMoniFn({
+                                            data: {
+                                              osId: selected.id,
+                                              moniEmpresa: conta.empresa || osMoniEmpresa,
+                                              moniContaCodigo: String(conta.codigo),
+                                              moniContaNome: conta.nome,
+                                              moniContaIdExt: conta.segundoCodigo,
+                                            },
+                                          }),
+                                        { okMessage: "Conta Moni vinculada." },
+                                      ).then(() => {
+                                        setOsMoniQuery("");
+                                        setOsMoniSugestoes([]);
+                                      })
+                                    }
+                                  >
+                                    Emp.{conta.empresa || osMoniEmpresa} ·{" "}
+                                    {conta.segundoCodigo || conta.codigo}
+                                    {conta.nome ? ` · ${conta.nome}` : ""}
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
 
                 {selected.pending ? (
                   <div className="rounded-lg border border-error/40 bg-error-container/20 p-sm">
@@ -1607,14 +2021,37 @@ function AssistenciaPage() {
                     </button>
                   ) : null}
                   {selected.stage === 0 || selected.stage === 1 || selected.stage === 6 ? (
-                    <button
-                      type="button"
-                      disabled={busy || Boolean(selected.pending)}
-                      onClick={() => run(() => advanceOsFn({ data: { osId: selected.id } }))}
-                      className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
-                    >
-                      Avançar
-                    </button>
+                    (() => {
+                      const blockFinalize =
+                        selected.stage === 6 &&
+                        (osNeedsDisposition(selected) ||
+                          osPendingBaixaItems(selected).length > 0);
+                      return (
+                        <div className="flex flex-col gap-2xs">
+                          <button
+                            type="button"
+                            disabled={
+                              busy || Boolean(selected.pending) || blockFinalize
+                            }
+                            onClick={() =>
+                              run(() =>
+                                advanceOsFn({ data: { osId: selected.id } }),
+                              )
+                            }
+                            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
+                          >
+                            {selected.stage === 6 ? "Finalizar O.S." : "Avançar"}
+                          </button>
+                          {blockFinalize ? (
+                            <p className="max-w-xs text-label-sm text-amber-900">
+                              {osNeedsDisposition(selected)
+                                ? "Antes: informe uso/sobra dos materiais (bloco abaixo)."
+                                : "Antes: Estoque precisa confirmar ou ignorar a baixa."}
+                            </p>
+                          ) : null}
+                        </div>
+                      );
+                    })()
                   ) : null}
                   {(selected.stage === 3 || selected.stage === 4) &&
                   (boot.user.canAssistencia || boot.user.isAdmin) ? (
@@ -1677,10 +2114,18 @@ function AssistenciaPage() {
                                 confirmLabel: "Iniciar",
                               });
                               if (!ok) return;
-                              await run(() =>
-                                startExecOsFn({
-                                  data: { osId: selected.id, materialOk: true },
-                                }),
+                              await run(
+                                () =>
+                                  startExecOsFn({
+                                    data: {
+                                      osId: selected.id,
+                                      materialOk: true,
+                                    },
+                                  }),
+                                {
+                                  okMessage:
+                                    "Materiais confirmados · OS em execução.",
+                                },
                               );
                             })();
                           }}
@@ -1736,6 +2181,112 @@ function AssistenciaPage() {
                     </button>
                   ) : null}
                 </div>
+
+                {(selected.stage === 5 ||
+                  selected.stage === 6 ||
+                  selected.stage === 7) &&
+                selected.coAt &&
+                (osNeedsDisposition(selected) ||
+                  osPendingBaixaItems(selected).length > 0) ? (
+                  <div className="rounded-xl border border-amber-400 bg-amber-50 p-md">
+                    <p className="text-title-md font-semibold text-amber-950">
+                      {osNeedsDisposition(selected)
+                        ? "Falta fechar os materiais"
+                        : "Falta dar baixa no estoque"}
+                    </p>
+                    <p className="mt-2xs text-label-md text-amber-900/80">
+                      {osNeedsDisposition(selected)
+                        ? "Role até o bloco “Fechar materiais” e informe o que foi usado e a sobra. Só depois o Estoque dá baixa."
+                        : "O uso já foi informado. Confirme a baixa no estoque da empresa (não use Finalizar antes)."}
+                    </p>
+                    {osPendingBaixaItems(selected).length > 0 &&
+                    (boot.user.canEstoque || boot.user.isAdmin) &&
+                    !osNeedsDisposition(selected) ? (
+                      <div className="mt-sm flex flex-wrap gap-xs">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className={btnPrimary}
+                          onClick={() =>
+                            void runBaixa(
+                              () =>
+                                resolveOsMaterialBaixaFn({
+                                  data: {
+                                    osId: selected.id,
+                                    itemIds: osPendingBaixaItems(selected).map(
+                                      (i) => i.id,
+                                    ),
+                                    action: "baixar",
+                                  },
+                                }),
+                              {
+                                okMessage:
+                                  "Baixa no estoque da empresa confirmada.",
+                              },
+                            )
+                          }
+                        >
+                          Dar baixa agora
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className={btnOutline}
+                          onClick={() =>
+                            void runBaixa(
+                              () =>
+                                resolveOsMaterialBaixaFn({
+                                  data: {
+                                    osId: selected.id,
+                                    itemIds: osPendingBaixaItems(selected).map(
+                                      (i) => i.id,
+                                    ),
+                                    action: "ignorar",
+                                  },
+                                }),
+                              {
+                                okTitle: "Baixa ignorada",
+                                okMessage:
+                                  "Baixa ignorada — estoque da empresa não foi alterado.",
+                              },
+                            )
+                          }
+                        >
+                          Não baixar
+                        </button>
+                        <button
+                          type="button"
+                          className={btnMuted}
+                          onClick={() => {
+                            document
+                              .getElementById("os-fechar-materiais")
+                              ?.scrollIntoView({
+                                behavior: "smooth",
+                                block: "start",
+                              });
+                          }}
+                        >
+                          Ver detalhes
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className={cn(btnPrimary, "mt-sm")}
+                        onClick={() => {
+                          document
+                            .getElementById("os-fechar-materiais")
+                            ?.scrollIntoView({
+                              behavior: "smooth",
+                              block: "start",
+                            });
+                        }}
+                      >
+                        Ir para fechar materiais
+                      </button>
+                    )}
+                  </div>
+                ) : null}
 
                 {selected.stage === 5 && selected.pausedAt ? (
                   <div className="rounded-lg border border-amber-300 bg-amber-50 px-md py-sm text-body-md text-amber-950">
@@ -2015,7 +2566,9 @@ function AssistenciaPage() {
                   </div>
                 ) : null}
 
-                {(selected.stage === 5 || selected.stage === 6) &&
+                {(selected.stage === 5 ||
+                  selected.stage === 6 ||
+                  selected.stage === 7) &&
                 selected.coAt &&
                 selected.items.some((i) =>
                   ["campo", "extra", "aplicado", "separado", "recebido"].includes(i.status),
@@ -2048,7 +2601,10 @@ function AssistenciaPage() {
                     );
 
                     return (
-                      <div className="rounded-xl border border-violet-300 bg-violet-50 p-md">
+                      <div
+                        id="os-fechar-materiais"
+                        className="rounded-xl border border-violet-300 bg-violet-50 p-md"
+                      >
                         <h3 className="text-title-md font-semibold text-violet-950">
                           Fechar materiais desta O.S.
                         </h3>
@@ -2409,7 +2965,7 @@ function AssistenciaPage() {
                                     disabled={busy}
                                     className={btnPrimary}
                                     onClick={() =>
-                                      run(
+                                      void runBaixa(
                                         () =>
                                           resolveOsMaterialBaixaFn({
                                             data: {
@@ -2418,7 +2974,10 @@ function AssistenciaPage() {
                                               action: "baixar",
                                             },
                                           }),
-                                        { okMessage: "Baixa no estoque da empresa confirmada." },
+                                        {
+                                          okMessage:
+                                            "Baixa no estoque da empresa confirmada.",
+                                        },
                                       )
                                     }
                                   >
@@ -2429,7 +2988,7 @@ function AssistenciaPage() {
                                     disabled={busy}
                                     className={btnOutline}
                                     onClick={() =>
-                                      run(
+                                      void runBaixa(
                                         () =>
                                           resolveOsMaterialBaixaFn({
                                             data: {
@@ -2439,6 +2998,7 @@ function AssistenciaPage() {
                                             },
                                           }),
                                         {
+                                          okTitle: "Baixa ignorada",
                                           okMessage:
                                             "Baixa ignorada — estoque da empresa não foi alterado.",
                                         },
@@ -2944,14 +3504,19 @@ function AssistenciaPage() {
                           disabled={busy}
                           className={btnPrimary}
                           onClick={() =>
-                            run(() =>
-                              resolveOsMaterialBaixaFn({
-                                data: {
-                                  osId: os.id,
-                                  itemIds: itens.map((i) => i.id),
-                                  action: "baixar",
-                                },
-                              }),
+                            void runBaixa(
+                              () =>
+                                resolveOsMaterialBaixaFn({
+                                  data: {
+                                    osId: os.id,
+                                    itemIds: itens.map((i) => i.id),
+                                    action: "baixar",
+                                  },
+                                }),
+                              {
+                                okMessage:
+                                  "Baixa no estoque da empresa confirmada.",
+                              },
                             )
                           }
                         >
@@ -2962,14 +3527,20 @@ function AssistenciaPage() {
                           disabled={busy}
                           className={btnOutline}
                           onClick={() =>
-                            run(() =>
-                              resolveOsMaterialBaixaFn({
-                                data: {
-                                  osId: os.id,
-                                  itemIds: itens.map((i) => i.id),
-                                  action: "ignorar",
-                                },
-                              }),
+                            void runBaixa(
+                              () =>
+                                resolveOsMaterialBaixaFn({
+                                  data: {
+                                    osId: os.id,
+                                    itemIds: itens.map((i) => i.id),
+                                    action: "ignorar",
+                                  },
+                                }),
+                              {
+                                okTitle: "Baixa ignorada",
+                                okMessage:
+                                  "Baixa ignorada — estoque da empresa não foi alterado.",
+                              },
                             )
                           }
                         >
@@ -3033,6 +3604,41 @@ function AssistenciaPage() {
         ) : null}
 
         {tab === "kanban" ? (
+          <>
+          <div className="flex flex-wrap items-center gap-sm">
+            <span className="text-label-md text-on-surface-variant">Ordenar por</span>
+            <div className="inline-flex rounded-lg border border-outline-variant bg-white p-2xs">
+              <button
+                type="button"
+                className={cn(
+                  "rounded-md px-md py-xs text-label-md font-medium",
+                  kanbanSort === "data"
+                    ? "bg-neutral-900 text-white"
+                    : "text-on-surface-variant hover:bg-surface-container",
+                )}
+                onClick={() => setKanbanSort("data")}
+              >
+                Data
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  "rounded-md px-md py-xs text-label-md font-medium",
+                  kanbanSort === "urgencia"
+                    ? "bg-neutral-900 text-white"
+                    : "text-on-surface-variant hover:bg-surface-container",
+                )}
+                onClick={() => setKanbanSort("urgencia")}
+              >
+                Urgência
+              </button>
+            </div>
+            <span className="text-label-sm text-on-surface-variant">
+              {kanbanSort === "data"
+                ? "Mais recente agendada em cima"
+                : "Urgente → Baixa"}
+            </span>
+          </div>
           <div className="flex min-h-[70vh] gap-md overflow-x-auto pb-md">
             {OS_STAGES.map((stage) => {
               const mine = isMySectorStage(stage.idx);
@@ -3046,14 +3652,17 @@ function AssistenciaPage() {
               const dateFrom = colFilter.dateFrom.trim();
               const dateTo = colFilter.dateTo.trim();
               const stageRows = byStage.get(stage.idx) ?? [];
-              const visibleRows = stageRows.filter((os) => {
-                if (nameQ) {
-                  const hay = `${os.clientName} ${os.num} ${os.servico} ${os.tecnicoNome ?? ""} ${os.teamName ?? ""}`.toLowerCase();
-                  if (!hay.includes(nameQ)) return false;
-                }
-                if (!inDateRange(osKanbanDate(os), dateFrom, dateTo)) return false;
-                return true;
-              });
+              const visibleRows = stageRows
+                .filter((os) => {
+                  if (nameQ) {
+                    const hay = `${os.clientName} ${os.num} ${os.servico} ${os.tecnicoNome ?? ""} ${os.teamName ?? ""}`.toLowerCase();
+                    if (!hay.includes(nameQ)) return false;
+                  }
+                  if (!inDateRange(osKanbanDate(os), dateFrom, dateTo)) return false;
+                  return true;
+                })
+                .slice()
+                .sort(kanbanSort === "urgencia" ? compareOsByUrgencia : compareOsByDate);
               const totalCount = stageRows.length;
               const count = visibleRows.length;
               const filteredCol = Boolean(nameQ || dateFrom || dateTo);
@@ -3196,6 +3805,7 @@ function AssistenciaPage() {
                       const mineCard = isMySectorStage(os.stage);
                       const cta = osCardPrimaryCta(os);
                       const agendaHint = osAgendaHint(os);
+                      const dates = osAgendaDates(os);
                       return (
                         <div
                           key={os.id}
@@ -3251,6 +3861,13 @@ function AssistenciaPage() {
                                   name="drag_indicator"
                                   className="text-[16px] text-on-surface-variant"
                                 />
+                                <span
+                                  className={cn(
+                                    "inline-block size-2.5 shrink-0 rounded-full",
+                                    osPrioridadeDotClass(os.prioridade),
+                                  )}
+                                  title={`Prioridade: ${os.prioridade || "Normal"}`}
+                                />
                                 {os.num}
                               </span>
                               <span
@@ -3289,7 +3906,30 @@ function AssistenciaPage() {
                                 />
                                 <span>{osMaterialHint(os)}</span>
                               </div>
-                              {agendaHint ? (
+                              {dates.recent || dates.oldest ? (
+                                <div className="flex items-start gap-xs">
+                                  <Icon name="calendar_month" className="mt-2xs text-[15px]" />
+                                  <div className="flex min-w-0 flex-col leading-tight">
+                                    <span title="Data mais recente agendada">
+                                      {dates.recent
+                                        ? formatOsDateBr(dates.recent)
+                                        : "—"}
+                                      {os.periodo ? ` · ${os.periodo}` : ""}
+                                      {os.hora ? ` · ${os.hora}` : ""}
+                                    </span>
+                                    {dates.oldest &&
+                                    dates.recent &&
+                                    dates.oldest !== dates.recent ? (
+                                      <span
+                                        className="text-[11px] opacity-80"
+                                        title="Data mais antiga agendada"
+                                      >
+                                        {formatOsDateBr(dates.oldest)}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              ) : agendaHint ? (
                                 <div className="flex items-center gap-xs">
                                   <Icon name="calendar_month" className="text-[15px]" />
                                   <span>{agendaHint}</span>
@@ -3307,6 +3947,26 @@ function AssistenciaPage() {
                                   {osResponsavelLabel(os) ?? "Sem responsável"}
                                 </span>
                               </div>
+                              {moniShortLabel(os) ? (
+                                <div className="flex items-start gap-xs">
+                                  <Icon name="sensors" className="mt-2xs text-[15px]" />
+                                  <div className="min-w-0 leading-tight">
+                                    <span className="truncate block">
+                                      Moni · {moniShortLabel(os)}
+                                    </span>
+                                    {moniDetailLines(os.moniDetalhe)
+                                      .slice(0, 1)
+                                      .map((line) => (
+                                        <span
+                                          key={line}
+                                          className="block text-[11px] opacity-80"
+                                        >
+                                          {line}
+                                        </span>
+                                      ))}
+                                  </div>
+                                </div>
+                              ) : null}
                             </div>
                             {os.items.length ? (
                               <ul className="mt-sm space-y-2xs border-t border-black/5 pt-sm text-label-sm text-on-surface">
@@ -3387,6 +4047,7 @@ function AssistenciaPage() {
               );
             })}
           </div>
+          </>
         ) : null}
 
         {tab === "agenda" ? (
@@ -4573,6 +5234,20 @@ function AssistenciaPage() {
                 className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
               />
             </label>
+            <label className="block text-label-md text-on-surface-variant">
+              Prioridade
+              <select
+                value={newPrio}
+                onChange={(e) => setNewPrio(e.target.value as OsPrio)}
+                className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
+              >
+                {OS_PRIOS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="block text-label-md text-on-surface-variant sm:col-span-2">
               Serviço / descrição
               <textarea
@@ -4649,6 +5324,7 @@ function AssistenciaPage() {
                       clientUf: clientUf || null,
                       clientCep: clientCep || null,
                       servico,
+                      prioridade: newPrio,
                       quoteId,
                       quoteNumero: quoteNumero || null,
                       items: tipo === "pedido" ? items : undefined,
@@ -4836,6 +5512,49 @@ function AssistenciaPage() {
               className={softPrimaryBtnClass}
             >
               Confirmar agendamento
+            </button>
+          </SoftDialogFooter>
+        </SoftDialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(baixaAlert)}
+        onOpenChange={(open) => {
+          if (!open) setBaixaAlert(null);
+        }}
+      >
+        <SoftDialogContent size="md">
+          <SoftDialogHeader
+            eyebrow="ESTOQUE"
+            title={(baixaAlert?.title ?? "BAIXA").toUpperCase()}
+          />
+          <SoftDialogBody>
+            <p className="whitespace-pre-wrap text-body-md text-on-surface">
+              {baixaAlert?.message}
+            </p>
+            {!baixaAlert?.ok ? (
+              <p className="mt-sm text-label-md text-on-surface-variant">
+                Vá em Estoque, faça uma entrada dos itens com saldo zerado e
+                depois confirme a baixa de novo.
+              </p>
+            ) : null}
+          </SoftDialogBody>
+          <SoftDialogFooter>
+            {!baixaAlert?.ok ? (
+              <Link
+                to="/estoque"
+                className={softCancelBtnClass}
+                onClick={() => setBaixaAlert(null)}
+              >
+                Abrir Estoque
+              </Link>
+            ) : null}
+            <button
+              type="button"
+              className={softPrimaryBtnClass}
+              onClick={() => setBaixaAlert(null)}
+            >
+              Entendi
             </button>
           </SoftDialogFooter>
         </SoftDialogContent>

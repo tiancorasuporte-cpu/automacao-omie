@@ -133,7 +133,15 @@ export type AssistOs = {
   ticketComId: number | null;
   teamId: number | null;
   tecnicoNome: string | null;
+  prioridade: string;
   agDate: string | null;
+  /** Primeira (mais antiga) data já agendada. */
+  agDateFirst: string | null;
+  moniEmpresa: number | null;
+  moniContaCodigo: string | null;
+  moniContaNome: string | null;
+  moniContaIdExt: string | null;
+  moniDetalhe: import("@/db/moni").MoniVinculoInfo | null;
   periodo: string | null;
   hora: string | null;
   prevista: boolean;
@@ -250,7 +258,14 @@ function mapOs(row: Record<string, unknown>, items: AssistOsItem[] = []): Assist
     ticketComId: row["ticket_com_id"] == null ? null : num(row["ticket_com_id"]),
     teamId: row["team_id"] == null ? null : num(row["team_id"]),
     tecnicoNome: nullableStr(row["tecnico_nome"]),
+    prioridade: nullableStr(row["prioridade"]) || "Normal",
     agDate: dateOnly(row["ag_date"]),
+    agDateFirst: dateOnly(row["ag_date_first"]),
+    moniEmpresa: row["moni_empresa"] == null ? null : num(row["moni_empresa"]),
+    moniContaCodigo: nullableStr(row["moni_conta_codigo"]),
+    moniContaNome: nullableStr(row["moni_conta_nome"]),
+    moniContaIdExt: nullableStr(row["moni_conta_id_ext"]),
+    moniDetalhe: null,
     periodo: nullableStr(row["periodo"]),
     hora: nullableStr(row["hora"]),
     prevista: Boolean(row["prevista"]),
@@ -492,8 +507,11 @@ export async function getOsById(id: number) {
 
   // Consistência: antes de Em execução não pode ficar com item em campo/aplicado
   // (ex.: OS retornada no kanban sem limpar status).
+  // NÃO limpar se já há envio/confirmação em andamento — senão o
+  // "OK material (sem app)" / confirmação item a item é desfeita no getOsById.
   if (
     os.stage < 5 &&
+    !os.envio &&
     os.items.some((i) =>
       ["campo", "aplicado", "chegou", "extra"].includes(i.status),
     )
@@ -538,6 +556,21 @@ export async function getOsById(id: number) {
     select * from assist_os_events where os_id = ${id} order by id asc
   `) as Record<string, unknown>[];
   os.events = events.map(mapEvent);
+  return attachOsMoniDetalhe(os);
+}
+
+async function attachOsMoniDetalhe(os: AssistOs): Promise<AssistOs> {
+  if (!os.moniContaCodigo) {
+    os.moniDetalhe = null;
+    return os;
+  }
+  const { enrichMoniVinculo } = await import("@/db/moni");
+  os.moniDetalhe = await enrichMoniVinculo({
+    moniEmpresa: os.moniEmpresa,
+    moniContaCodigo: os.moniContaCodigo,
+    moniContaNome: os.moniContaNome,
+    moniContaIdExt: os.moniContaIdExt,
+  });
   return os;
 }
 
@@ -567,7 +600,9 @@ export async function listOs(input?: {
   `) as Record<string, unknown>[];
   const ids = rows.map((r) => num(r["id"]));
   const itemsMap = await loadItems(ids);
-  return rows.map((r) => mapOs(r, itemsMap.get(num(r["id"])) ?? []));
+  const list = rows.map((r) => mapOs(r, itemsMap.get(num(r["id"])) ?? []));
+  await Promise.all(list.map((os) => attachOsMoniDetalhe(os)));
+  return list;
 }
 
 export async function createOs(input: {
@@ -586,6 +621,11 @@ export async function createOs(input: {
   quoteId?: number | null | undefined;
   quoteNumero?: string | null | undefined;
   ticketId?: number | null | undefined;
+  prioridade?: string | null | undefined;
+  moniEmpresa?: number | null | undefined;
+  moniContaCodigo?: string | null | undefined;
+  moniContaNome?: string | null | undefined;
+  moniContaIdExt?: string | null | undefined;
   items?: Array<{ qtd: number; nome: string; productId?: number | null }> | undefined;
   aprovadoPor?: string | null | undefined;
   aprovacaoAnexo?: { name: string; mime: string; data: string } | null | undefined;
@@ -623,10 +663,17 @@ export async function createOs(input: {
         data: input.aprovacaoAnexo.data,
       }
     : null;
+  const moniCodigo = nullableStr(input.moniContaCodigo);
+  const moniEmpresa =
+    moniCodigo && input.moniEmpresa != null && Number(input.moniEmpresa) > 0
+      ? Number(input.moniEmpresa)
+      : null;
   const [row] = (await db`
     insert into assist_os (
       num, tipo, subtipo, stage, omie_app_id, client_code, client_name, client_city,
       client_address, client_uf, client_cep, servico, quote_id, quote_numero, ticket_id,
+      prioridade,
+      moni_empresa, moni_conta_codigo, moni_conta_nome, moni_conta_id_ext,
       aprovado_por, aprovado_em, aprovacao_anexo_json,
       created_by, created_by_name, problem_type_id
     ) values (
@@ -645,6 +692,11 @@ export async function createOs(input: {
       ${input.quoteId ?? null},
       ${nullableStr(input.quoteNumero)},
       ${input.ticketId ?? null},
+      ${nullableStr(input.prioridade) || "Normal"},
+      ${moniEmpresa},
+      ${moniCodigo},
+      ${moniCodigo ? nullableStr(input.moniContaNome) : null},
+      ${moniCodigo ? nullableStr(input.moniContaIdExt) : null},
       ${aprovadoPor},
       ${aprovadoPor ? new Date() : null},
       ${anexo ? JSON.stringify(anexo) : null},
@@ -1018,7 +1070,19 @@ function expectedAdvanceStage(os: AssistOs): number {
   if (os.stage === 5) {
     throw new Error("Use check-out/conferência para ir para Executado.");
   }
-  if (os.stage === 6) return 7;
+  if (os.stage === 6) {
+    if (osNeedsMaterialDisposition(os)) {
+      throw new Error(
+        "Informe o uso e a sobra dos materiais antes de finalizar a O.S.",
+      );
+    }
+    if (osHasPendingBaixa(os)) {
+      throw new Error(
+        "Há baixa de estoque pendente. Confirme ou ignore a baixa (Passo 3) antes de finalizar.",
+      );
+    }
+    return 7;
+  }
   return os.stage + 1;
 }
 
@@ -1316,6 +1380,10 @@ export async function scheduleOs(input: {
     update assist_os
     set stage = 4,
         ag_date = ${input.agDate},
+        ag_date_first = least(
+          coalesce(ag_date_first, ${input.agDate}::date),
+          ${input.agDate}::date
+        ),
         periodo = ${nullableStr(input.periodo)},
         hora = ${nullableStr(input.hora)},
         team_id = ${input.teamId ?? null},
@@ -1328,6 +1396,130 @@ export async function scheduleOs(input: {
     quem: input.quem,
     userId: input.userId,
     acao: `Agendado para ${input.agDate}${input.periodo ? ` · ${input.periodo}` : ""}`,
+  });
+  return getOsById(os.id);
+}
+
+/** Define/troca equipe e técnico em qualquer fase a partir do agendamento (até Executado). */
+export async function assignOsTecnico(input: {
+  osId: number;
+  teamId?: number | null | undefined;
+  tecnicoNome?: string | null | undefined;
+  quem: string;
+  userId?: number | null | undefined;
+  isAdmin: boolean;
+  canRole: (role: OsWorkflowRole) => boolean;
+}) {
+  const os = await getOsById(input.osId);
+  if (!os) throw new Error("OS não encontrada.");
+  if (os.stage < 3 || os.stage > 6) {
+    throw new Error("Equipe/técnico só pode ser alterado das etapas de agendamento até Executado.");
+  }
+  assertCanMoveStage(3, input.canRole, input.isAdmin);
+  const teamId = input.teamId ?? null;
+  const tecnicoNome = nullableStr(input.tecnicoNome);
+  const db = await getDb();
+  await db`
+    update assist_os
+    set team_id = ${teamId},
+        tecnico_nome = ${tecnicoNome},
+        updated_at = now()
+    where id = ${os.id}
+  `;
+  const label =
+    [teamId ? `equipe #${teamId}` : null, tecnicoNome].filter(Boolean).join(" · ") ||
+    "sem responsável";
+  await addOsEvent({
+    osId: os.id,
+    quem: input.quem,
+    userId: input.userId,
+    acao: `Responsável atualizado: ${label}`,
+  });
+  return getOsById(os.id);
+}
+
+export async function linkOsMoni(input: {
+  osId: number;
+  moniEmpresa: number | null;
+  moniContaCodigo: string | null;
+  moniContaNome?: string | null;
+  moniContaIdExt?: string | null;
+  quem: string;
+  userId?: number | null | undefined;
+  isAdmin: boolean;
+  canRole: (role: OsWorkflowRole) => boolean;
+}) {
+  const os = await getOsById(input.osId);
+  if (!os) throw new Error("OS não encontrada.");
+  if (os.stage >= 7) throw new Error("OS finalizada.");
+  if (!input.isAdmin && !input.canRole("assistencia")) {
+    throw new Error("Sem permissão OS · Assistência para vincular Moni.");
+  }
+  const codigo = nullableStr(input.moniContaCodigo);
+  const empresa =
+    codigo && input.moniEmpresa != null && Number(input.moniEmpresa) > 0
+      ? Number(input.moniEmpresa)
+      : null;
+  const db = await getDb();
+  await db`
+    update assist_os
+    set moni_empresa = ${empresa},
+        moni_conta_codigo = ${codigo},
+        moni_conta_nome = ${codigo ? nullableStr(input.moniContaNome) : null},
+        moni_conta_id_ext = ${codigo ? nullableStr(input.moniContaIdExt) : null},
+        updated_at = now()
+    where id = ${os.id}
+  `;
+  await addOsEvent({
+    osId: os.id,
+    quem: input.quem,
+    userId: input.userId,
+    acao: codigo
+      ? `Conta Moni vinculada: Emp.${empresa ?? "—"} · ${nullableStr(input.moniContaIdExt) || codigo}${
+          input.moniContaNome ? ` · ${input.moniContaNome}` : ""
+        }`
+      : "Conta Moni removida",
+  });
+  return getOsById(os.id);
+}
+
+export async function updateOsPrioridade(input: {
+  osId: number;
+  prioridade: string;
+  quem: string;
+  userId?: number | null | undefined;
+  isAdmin: boolean;
+  canRole: (role: OsWorkflowRole) => boolean;
+}) {
+  const os = await getOsById(input.osId);
+  if (!os) throw new Error("OS não encontrada.");
+  if (os.stage >= 7) throw new Error("OS finalizada.");
+  if (!input.isAdmin && !input.canRole("assistencia")) {
+    throw new Error("Sem permissão OS · Assistência para alterar prioridade.");
+  }
+  const prioridade = nullableStr(input.prioridade) || "Normal";
+  const db = await getDb();
+  try {
+    await db`
+      update assist_os
+      set prioridade = ${prioridade},
+          updated_at = now()
+      where id = ${os.id}
+    `;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    if (/prioridade/i.test(msg) && /does not exist|não existe|undefined column/i.test(msg)) {
+      throw new Error(
+        "Coluna de prioridade ainda não existe no banco. Recarregue a página (o schema migra no boot) e tente de novo.",
+      );
+    }
+    throw error;
+  }
+  await addOsEvent({
+    osId: os.id,
+    quem: input.quem,
+    userId: input.userId,
+    acao: `Prioridade: ${prioridade}`,
   });
   return getOsById(os.id);
 }
@@ -1371,9 +1563,34 @@ export async function startExecOs(input: {
 
   // Bypass escritório / sem material: confirma cada item pendente e registra no histórico.
   if (hasItems) {
-    let last = os;
-    for (const item of os.items.filter(itemNeedsMaterialConfirm)) {
-      if (item.status === "comprar") continue;
+    // Marca envio antes das confirmações para o getOsById não reverter status "campo".
+    if (!os.envio) {
+      const envioPrep: AssistOsEnvio = {
+        equipe: os.tecnicoNome || os.teamName || "Equipe",
+        quando: new Date().toISOString(),
+        div: null,
+      };
+      await db`
+        update assist_os
+        set envio_json = ${JSON.stringify(envioPrep)},
+            updated_at = now()
+        where id = ${os.id}
+      `;
+    }
+
+    let last = (await getOsById(os.id)) ?? os;
+    const toConfirm = last.items.filter(
+      (i) => itemNeedsMaterialConfirm(i) && i.status !== "comprar",
+    );
+    if (toConfirm.length === 0) {
+      const onlyBuying = last.items.some((i) => i.status === "comprar");
+      if (onlyBuying) {
+        throw new Error(
+          "Há itens ainda em compra. Receba/separe o material antes de iniciar a execução sem o app.",
+        );
+      }
+    }
+    for (const item of toConfirm) {
       last =
         (await confirmOsMaterialItem({
           osId: os.id,
@@ -1389,7 +1606,9 @@ export async function startExecOs(input: {
       (i) => itemNeedsMaterialConfirm(i) && i.status !== "comprar",
     );
     if (still) {
-      return last;
+      throw new Error(
+        "Não foi possível confirmar todos os materiais. Verifique o status de cada item e tente de novo.",
+      );
     }
     if (last.stage === 5) return last;
   }
@@ -2058,6 +2277,7 @@ async function applyReturnStageCleanup(
     await db`
       update assist_os
       set ag_date = null,
+          ag_date_first = null,
           periodo = null,
           hora = null,
           updated_at = now()
@@ -2321,8 +2541,8 @@ function materialFieldItems(os: AssistOs) {
 }
 
 export function osNeedsMaterialDisposition(os: AssistOs) {
-  // Após check-out: em execução (5) ou já no kanban Executado (6).
-  if ((os.stage !== 5 && os.stage !== 6) || !os.coAt) return false;
+  // Após check-out: execução (5), executado (6) ou finalizado (7) ainda sem uso/sobra.
+  if (os.stage < 5 || os.stage > 7 || !os.coAt) return false;
   const items = materialFieldItems(os);
   if (!items.length) return false;
   return items.some((i) => i.usado == null || (i.qtd - (i.usado ?? 0) > 0 && !i.sobraDestino));
@@ -2608,18 +2828,49 @@ export async function resolveOsMaterialBaixa(input: {
   const { moveProductStock } = await import("@/db/stock");
   const db = await getDb();
 
-  for (const itemId of input.itemIds) {
-    const item = os.items.find((i) => i.id === itemId);
-    if (!item) continue;
-    if (item.baixaStatus !== "pendente" || !item.productId || !(item.baixaQtd || item.usado)) {
-      continue;
-    }
-    const qtd = item.baixaQtd ?? item.usado ?? 0;
-    if (qtd <= 0) continue;
+  const pending = input.itemIds
+    .map((itemId) => os.items.find((i) => i.id === itemId))
+    .filter((item): item is NonNullable<typeof item> => {
+      if (!item) return false;
+      if (item.baixaStatus !== "pendente" || !item.productId) return false;
+      const qtd = item.baixaQtd ?? item.usado ?? 0;
+      return qtd > 0;
+    });
 
-    if (input.action === "baixar") {
+  if (pending.length === 0) {
+    throw new Error("Nenhum item pendente de baixa nesta O.S.");
+  }
+
+  if (input.action === "baixar") {
+    // Valida todo o lote antes de debitar — evita baixa parcial.
+    const faltando: string[] = [];
+    for (const item of pending) {
+      const productId = item.productId!;
+      const qtd = item.baixaQtd ?? item.usado ?? 0;
+      const rows = await db<
+        { quantidade_fisica: string | number | null }[]
+      >`
+        select quantidade_fisica
+        from product_stock
+        where product_id = ${productId}
+      `;
+      const disponivel = Number(rows[0]?.quantidade_fisica ?? 0);
+      if (!Number.isFinite(disponivel) || qtd > disponivel) {
+        faltando.push(
+          `${item.nome} (disp. ${Number.isFinite(disponivel) ? disponivel : 0}, precisa ${qtd})`,
+        );
+      }
+    }
+    if (faltando.length > 0) {
+      throw new Error(
+        `Não foi possível dar baixa pois o estoque está insuficiente ou zerado. Alimente o estoque físico e tente de novo.\n\n${faltando.join("\n")}`,
+      );
+    }
+
+    for (const item of pending) {
+      const qtd = item.baixaQtd ?? item.usado ?? 0;
       await moveProductStock({
-        productId: item.productId,
+        productId: item.productId!,
         tipo: "saida",
         quantidade: qtd,
         motivo: `Baixa OS ${os.num}`,
@@ -2631,7 +2882,9 @@ export async function resolveOsMaterialBaixa(input: {
         set baixa_status = 'feita', updated_at = now()
         where id = ${item.id}
       `;
-    } else {
+    }
+  } else {
+    for (const item of pending) {
       await db`
         update assist_os_items
         set baixa_status = 'ignorada', updated_at = now()

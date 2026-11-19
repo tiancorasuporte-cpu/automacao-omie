@@ -124,11 +124,24 @@ export type ModalMovimento = 'montado' | 'envio' | 'agendar2' | 'agendar3' | 'ap
  * Decide o que acontece ao arrastar o card (ou usar "Mover para").
  * Nunca muda a etapa direto: sempre abre um modal que coleta os dados obrigatórios.
  */
-export function movimento(o: Oportunidade, destino: EtapaId): { ok: true; modal: ModalMovimento } | { ok: false; erro: string } {
+/** Cliente já vinculado à Omie (código válido). */
+export function temClienteOmie(o: Oportunidade) {
+  return Boolean(o.codigoClienteOmie && Number(o.codigoClienteOmie) > 0);
+}
+
+export function movimento(o: Oportunidade, destino: EtapaId): { ok: true; modal: ModalMovimento } | { ok: false; erro: string; precisaOmie?: boolean } {
   if (o.etapa === destino) return { ok: false, erro: '' };
   if (o.etapa === 'final') return { ok: false, erro: 'Oportunidade finalizada. Use “Reabrir oportunidade” no card.' };
   const de = ETAPAS.findIndex(e => e.id === o.etapa), para = ETAPAS.findIndex(e => e.id === destino);
   if (para < de) return { ok: true, modal: 'voltar' };          // voltar etapa: pede justificativa
+  // Avançar no funil exige cliente na Omie (pode criar a OP sem Omie, mas não segue sem cadastrar).
+  if (!temClienteOmie(o)) {
+    return {
+      ok: false,
+      erro: 'Para avançar, cadastre ou vincule o cliente na Omie.',
+      precisaOmie: true,
+    };
+  }
   if (destino === 'montado') return { ok: true, modal: 'montado' };
   if (destino === 'enviado') return { ok: true, modal: 'envio' };
   if ((destino === 'acao2' || destino === 'acao3') && !valorPrincipal(o)) return { ok: false, erro: 'Registre o envio da proposta (com o valor) antes de agendar ações.' };

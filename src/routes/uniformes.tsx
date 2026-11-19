@@ -20,6 +20,10 @@ import { APP_NAME } from "@/lib/brand";
 import { requireModule } from "@/lib/require-auth";
 import { matchesQuery } from "@/lib/text-search";
 import {
+  createCompraSolicitacaoFn,
+  createCompraSolicitacoesLoteFn,
+} from "@/lib/compras";
+import {
   adjustUniformItemFn,
   createUniformMovementFn,
   getUniformItemPhotoFn,
@@ -1414,6 +1418,17 @@ function parseMoney(value: string) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+type UniformComprasLine = {
+  itemId: number;
+  label: string;
+  qtd: string;
+};
+
+function suggestedBuyQty(item: Item) {
+  const deficit = Math.max(0, (item.estoqueMinimo || 0) - (item.quantidade || 0));
+  return deficit > 0 ? deficit : 1;
+}
+
 function EstoqueSection({ ctx }: { ctx: SectionCtx }) {
   const { data, flash, refresh, startMovement } = ctx;
   const [view, setView] = useState<"pecas" | "historico">("pecas");
@@ -1427,6 +1442,13 @@ function EstoqueSection({ ctx }: { ctx: SectionCtx }) {
   const [restock, setRestock] = useState<Item | null>(null);
   const [adjust, setAdjust] = useState<Item | null>(null);
   const [zoom, setZoom] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [comprasBusy, setComprasBusy] = useState(false);
+  const [comprasDialog, setComprasDialog] = useState<{
+    mode: "compra" | "cotacao";
+    lines: UniformComprasLine[];
+  } | null>(null);
+  const [comprasMotivo, setComprasMotivo] = useState("");
 
   const categories = useMemo(
     () => [...new Set([...UNIFORM_CATEGORIES, ...data.items.map((i) => i.categoria).filter((c): c is string => !!c)])],
@@ -1462,6 +1484,115 @@ function EstoqueSection({ ctx }: { ctx: SectionCtx }) {
     flash(result.deactivated ? "Peça tinha movimentações e foi desativada (histórico preservado)." : "Peça removida.");
   };
 
+  function toggleSelected(id: number) {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
+
+  function openComprasDialog(mode: "compra" | "cotacao", items: Item[]) {
+    const active = items.filter((i) => i.active);
+    if (!active.length) {
+      flash(null, "Selecione ao menos uma peça ativa.");
+      return;
+    }
+    setComprasMotivo(
+      mode === "cotacao"
+        ? `Cotação em lote de uniformes (${active.length} peça(s))`
+        : active.length === 1
+          ? `Compra de uniforme: ${itemLabel(active[0]!.nome, active[0]!.tamanho)}`
+          : `Compra em lote de uniformes (${active.length} peça(s))`,
+    );
+    setComprasDialog({
+      mode,
+      lines: active.map((item) => ({
+        itemId: item.id,
+        label: itemLabel(item.nome, item.tamanho),
+        qtd: String(suggestedBuyQty(item)),
+      })),
+    });
+  }
+
+  async function submitComprasDialog() {
+    if (!comprasDialog) return;
+    const motivo = comprasMotivo.trim();
+    if (!motivo) {
+      flash(null, "Informe o motivo.");
+      return;
+    }
+    const lines = comprasDialog.lines.map((line) => {
+      const item = data.items.find((i) => i.id === line.itemId);
+      const qtd = Number(line.qtd.replace(",", "."));
+      return { line, item, qtd };
+    });
+    if (lines.some((row) => !row.item || !Number.isFinite(row.qtd) || row.qtd <= 0)) {
+      flash(null, "Quantidade inválida em um dos itens.");
+      return;
+    }
+    setComprasBusy(true);
+    try {
+      if (comprasDialog.mode === "compra" && lines.length === 1) {
+        const row = lines[0]!;
+        const result = await createCompraSolicitacaoFn({
+          data: {
+            origem: "uniforme",
+            descricao: row.line.label,
+            qtd: row.qtd,
+            unidade: "UN",
+            motivo,
+            observacao: row.item?.categoria
+              ? `Categoria: ${row.item.categoria}`
+              : null,
+          },
+        });
+        if (!result.ok) {
+          flash(null, result.error);
+          return;
+        }
+        flash(`${row.line.label} enviado para compra em Compras.`);
+      } else {
+        const result = await createCompraSolicitacoesLoteFn({
+          data: {
+            origem: "uniforme",
+            motivo,
+            observacao:
+              comprasDialog.mode === "cotacao"
+                ? "Cotação de uniformes em lote"
+                : "Compra de uniformes em lote",
+            items: lines.map((row) => ({
+              descricao: row.line.label,
+              qtd: row.qtd,
+              unidade: "UN",
+              observacao: row.item?.categoria
+                ? `Categoria: ${row.item.categoria}`
+                : null,
+            })),
+          },
+        });
+        if (!result.ok) {
+          flash(null, result.error);
+          return;
+        }
+        const n = result.solicitacao.itens.length || lines.length;
+        flash(
+          comprasDialog.mode === "cotacao"
+            ? result.solicitacao.isLote
+              ? `Lote com ${n} uniformes enviado para cotação em um único card.`
+              : `${n} uniforme enviado para cotação.`
+            : result.solicitacao.isLote
+              ? `Lote com ${n} uniformes enviado para compra em um único card.`
+              : `${n} uniforme enviado para compra.`,
+        );
+      }
+      setSelectedIds([]);
+      setComprasDialog(null);
+    } catch (err) {
+      flash(null, err instanceof Error ? err.message : "Falha ao enviar para Compras.");
+    } finally {
+      setComprasBusy(false);
+    }
+  }
+
   return (
     <section className="space-y-md">
       <div className="flex flex-wrap items-center gap-sm">
@@ -1480,10 +1611,51 @@ function EstoqueSection({ ctx }: { ctx: SectionCtx }) {
         ))}
         <div className="flex-1" />
         {view === "pecas" ? (
-          <button type="button" className={BTN_ACCENT} onClick={() => setItemForm({ ...EMPTY_ITEM })}>
-            <Icon name="add_a_photo" className="text-[18px]" />
-            Nova peça
-          </button>
+          <>
+            {selectedIds.length > 0 ? (
+              <>
+                <button
+                  type="button"
+                  className={BTN_OUTLINE}
+                  disabled={comprasBusy}
+                  onClick={() =>
+                    openComprasDialog(
+                      "compra",
+                      data.items.filter((i) => selectedIds.includes(i.id)),
+                    )
+                  }
+                >
+                  <Icon name="shopping_cart" className="text-[16px]" />
+                  Compra ({selectedIds.length})
+                </button>
+                <button
+                  type="button"
+                  className={BTN_PRIMARY}
+                  disabled={comprasBusy}
+                  onClick={() =>
+                    openComprasDialog(
+                      "cotacao",
+                      data.items.filter((i) => selectedIds.includes(i.id)),
+                    )
+                  }
+                >
+                  <Icon name="playlist_add_check" className="text-[16px]" />
+                  Cotação em lote ({selectedIds.length})
+                </button>
+                <button
+                  type="button"
+                  className={BTN_OUTLINE}
+                  onClick={() => setSelectedIds([])}
+                >
+                  Limpar
+                </button>
+              </>
+            ) : null}
+            <button type="button" className={BTN_ACCENT} onClick={() => setItemForm({ ...EMPTY_ITEM })}>
+              <Icon name="add_a_photo" className="text-[18px]" />
+              Nova peça
+            </button>
+          </>
         ) : null}
       </div>
 
@@ -1529,7 +1701,27 @@ function EstoqueSection({ ctx }: { ctx: SectionCtx }) {
           ) : (
             <div className="grid gap-md sm:grid-cols-2 xl:grid-cols-3">
               {paged.items.map((item) => (
-                <article key={item.id} className={cn(CARD, "flex flex-col overflow-hidden", !item.active && "opacity-60")}>
+                <article
+                  key={item.id}
+                  className={cn(
+                    CARD,
+                    "flex flex-col overflow-hidden",
+                    !item.active && "opacity-60",
+                    selectedIds.includes(item.id) && "ring-2 ring-primary",
+                  )}
+                >
+                  <div className="relative">
+                    {item.active ? (
+                      <label className="absolute left-sm top-sm z-10 inline-flex cursor-pointer items-center rounded-md bg-white/90 px-xs py-2xs shadow">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(item.id)}
+                          onChange={() => toggleSelected(item.id)}
+                          className="h-4 w-4 accent-primary"
+                          aria-label="Selecionar para compra/cotação"
+                        />
+                      </label>
+                    ) : null}
                   <button
                     type="button"
                     onClick={() => void openPhoto(item)}
@@ -1553,6 +1745,7 @@ function EstoqueSection({ ctx }: { ctx: SectionCtx }) {
                       {item.quantidade} em estoque
                     </span>
                   </button>
+                  </div>
                   <div className="flex flex-1 flex-col gap-xs p-md">
                     <p className="text-title-md text-primary">{itemLabel(item.nome, item.tamanho)}</p>
                     <p className="text-label-md text-on-surface-variant">
@@ -1565,6 +1758,15 @@ function EstoqueSection({ ctx }: { ctx: SectionCtx }) {
                       Valor em estoque: <strong>{formatBRL(item.custo * item.quantidade)}</strong>
                     </p>
                     <div className="mt-auto flex flex-wrap gap-xs pt-sm">
+                      <button
+                        type="button"
+                        className={BTN_SMALL}
+                        disabled={!item.active || comprasBusy}
+                        onClick={() => openComprasDialog("compra", [item])}
+                      >
+                        <Icon name="shopping_cart" className="text-[16px]" />
+                        Compra
+                      </button>
                       <button type="button" className={BTN_SMALL} disabled={!item.active} onClick={() => setRestock(item)}>
                         <Icon name="add_box" className="text-[16px]" />
                         Entrada
@@ -1655,6 +1857,90 @@ function EstoqueSection({ ctx }: { ctx: SectionCtx }) {
         }}
       />
       <ImageViewer src={zoom} onClose={() => setZoom(null)} />
+
+      <Dialog
+        open={comprasDialog != null}
+        onOpenChange={(open) => {
+          if (!open) setComprasDialog(null);
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {comprasDialog?.mode === "cotacao"
+                ? "Enviar uniformes para cotação em lote"
+                : comprasDialog && comprasDialog.lines.length > 1
+                  ? "Enviar uniformes para compra"
+                  : "Enviar uniforme para compra"}
+            </DialogTitle>
+            <DialogDescription>
+              Os itens entram no Quadro de Compras com origem Uniforme. Ajuste as
+              quantidades se necessário.
+            </DialogDescription>
+          </DialogHeader>
+          {comprasDialog ? (
+            <div className="space-y-md">
+              <Field label="Motivo">
+                <textarea
+                  value={comprasMotivo}
+                  onChange={(e) => setComprasMotivo(e.target.value)}
+                  rows={2}
+                  className={INPUT}
+                />
+              </Field>
+              <ul className="divide-y divide-outline-variant overflow-hidden rounded-lg border border-outline-variant">
+                {comprasDialog.lines.map((line) => (
+                  <li
+                    key={line.itemId}
+                    className="flex items-center justify-between gap-sm px-sm py-xs"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-body-md text-on-surface">
+                      {line.label}
+                    </span>
+                    <input
+                      value={line.qtd}
+                      onChange={(e) =>
+                        setComprasDialog((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                lines: prev.lines.map((x) =>
+                                  x.itemId === line.itemId
+                                    ? { ...x, qtd: e.target.value }
+                                    : x,
+                                ),
+                              }
+                            : prev,
+                        )
+                      }
+                      className={cn(INPUT, "w-20")}
+                      aria-label={`Quantidade de ${line.label}`}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <button
+              type="button"
+              className={BTN_OUTLINE}
+              disabled={comprasBusy}
+              onClick={() => setComprasDialog(null)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              className={BTN_PRIMARY}
+              disabled={comprasBusy || !comprasMotivo.trim()}
+              onClick={() => void submitComprasDialog()}
+            >
+              {comprasBusy ? "Enviando…" : "Enviar para Compras"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

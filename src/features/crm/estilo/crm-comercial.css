@@ -209,6 +209,10 @@
 .crm-root .cliente-omie-lista-meta{display:block;font-size:11.5px;color:var(--mut);margin-top:1px}
 .crm-root .cliente-omie-pick{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fafaf8}
 .crm-root .cliente-omie-pick-nome{font-weight:600;font-size:13.5px}
+.crm-root .seg-omie{display:flex;flex-wrap:wrap;gap:6px}
+.crm-root .seg-omie button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 10px;font-size:12.5px;cursor:pointer;color:var(--ink)}
+.crm-root .seg-omie button.on{border-color:#c9a400;background:#fff8d6;font-weight:600}
+.crm-root .seg-omie button:disabled{opacity:.55;cursor:not-allowed}
 .crm-root .modal{position:fixed;inset:0;display:none;place-items:center;z-index:90;background:rgba(0,0,0,.45);padding:12px;pointer-events:auto}
 .crm-root .modal.on{display:grid}
 .crm-root.crm-portal .toast{pointer-events:none;z-index:95}

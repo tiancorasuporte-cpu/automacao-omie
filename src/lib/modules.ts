@@ -92,8 +92,15 @@ export const APP_PERMISSIONS = [
   },
   {
     id: "crm_comissoes",
-    label: "CRM · Comissões",
-    hint: "Ver comissões de todos, editar regras e emitir pagamento do vendedor.",
+    label: "CRM · Painel de comissões",
+    hint:
+      "Acesso ao painel de comissões: ver de todos, editar regras e emitir pagamento. Vendedores (flag) entram no plano e veem as próprias.",
+  },
+  {
+    id: "contratos_valores",
+    label: "Contratos · Ver valores",
+    hint:
+      "Permite ver valor mensal dos contratos, totais por cliente e valores unitário/total dos itens.",
   },
 ] as const;
 

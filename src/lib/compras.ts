@@ -3,7 +3,17 @@ import { z } from "zod";
 
 import { hasPermission } from "@/lib/modules";
 
-const origemSchema = z.enum(["manual", "orcamento", "os"]);
+const origemSchema = z.enum(["manual", "orcamento", "os", "uniforme"]);
+
+const solicitacaoItemSchema = z.object({
+  descricao: z.string().trim().min(1).max(400).optional(),
+  unidade: z.string().trim().max(40).optional().nullable(),
+  qtd: z.number().positive(),
+  productId: z.number().int().positive().optional().nullable(),
+  omieAppId: z.string().trim().min(1).optional().nullable(),
+  codigoProduto: z.number().int().positive().optional().nullable(),
+  observacao: z.string().trim().max(2000).optional().nullable(),
+});
 const statusSchema = z.enum([
   "aberta",
   "em_cotacao",
@@ -218,12 +228,16 @@ export const createCompraSolicitacaoFn = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     const { requireModule } = await import("@/lib/require-auth");
-    // Orçamentos e Compras podem abrir cotação
+    // Compras, Orçamentos e Uniformes podem abrir solicitação/cotação
     let user;
     try {
       ({ user } = await requireModule("compras"));
     } catch {
-      ({ user } = await requireModule("orcamentos"));
+      try {
+        ({ user } = await requireModule("orcamentos"));
+      } catch {
+        ({ user } = await requireModule("uniformes"));
+      }
     }
     const { ensureSchema } = await import("@/db/schema");
     await ensureSchema();
@@ -250,6 +264,72 @@ export const createCompraSolicitacaoFn = createServerFn({ method: "POST" })
       return {
         ok: false as const,
         error: error instanceof Error ? error.message : "Falha ao criar solicitação.",
+      };
+    }
+  });
+
+async function resolveComprasCreator() {
+  const { requireModule } = await import("@/lib/require-auth");
+  try {
+    return await requireModule("compras");
+  } catch {
+    try {
+      return await requireModule("orcamentos");
+    } catch {
+      return await requireModule("uniformes");
+    }
+  }
+}
+
+export const createCompraSolicitacoesLoteFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        origem: origemSchema.default("manual"),
+        items: z.array(solicitacaoItemSchema).min(1).max(80),
+        quoteId: z.number().int().positive().optional().nullable(),
+        quoteNumero: z.string().trim().max(40).optional().nullable(),
+        motivo: z.string().trim().max(2000).optional().nullable(),
+        links: z.array(z.string().trim().max(500)).max(10).optional().nullable(),
+        observacao: z.string().trim().max(2000).optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await resolveComprasCreator();
+    const { ensureSchema } = await import("@/db/schema");
+    await ensureSchema();
+    const { createCompraSolicitacoesLote } = await import("@/db/compras");
+    try {
+      const solicitacao = await createCompraSolicitacoesLote({
+        origem: data.origem,
+        items: data.items.map((item) => ({
+          ...(item.descricao != null ? { descricao: item.descricao } : {}),
+          unidade: item.unidade ?? null,
+          qtd: item.qtd,
+          productId: item.productId ?? null,
+          omieAppId: item.omieAppId ?? null,
+          codigoProduto: item.codigoProduto ?? null,
+          observacao: item.observacao ?? null,
+        })),
+        quoteId: data.quoteId ?? null,
+        quoteNumero: data.quoteNumero ?? null,
+        motivo: data.motivo ?? null,
+        links: data.links ?? null,
+        observacao: data.observacao ?? null,
+        solicitadoPor: user.id,
+        solicitadoPorNome: user.name,
+      });
+      return {
+        ok: true as const,
+        solicitacao,
+        /** @deprecated use solicitacao — mantido para callers que esperavam array */
+        solicitacoes: [solicitacao],
+      };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao criar solicitações em lote.",
       };
     }
   });
@@ -296,6 +376,7 @@ export const saveCotacaoPropostaFn = createServerFn({ method: "POST" })
       .object({
         id: z.number().int().positive().optional().nullable(),
         solicitacaoId: z.number().int().positive(),
+        itemId: z.number().int().positive().optional().nullable(),
         supplierId: z.number().int().positive().optional().nullable(),
         supplierName: z.string().trim().min(1).max(200),
         valorUnitario: z.number().nonnegative(),
@@ -317,8 +398,9 @@ export const saveCotacaoPropostaFn = createServerFn({ method: "POST" })
     );
     try {
       await saveCotacaoProposta({
-        id: data.id,
+        ...(data.id != null ? { id: data.id } : {}),
         solicitacaoId: data.solicitacaoId,
+        itemId: data.itemId ?? null,
         supplierId: data.supplierId ?? null,
         supplierName: data.supplierName,
         valorUnitario: data.valorUnitario,
@@ -336,6 +418,59 @@ export const saveCotacaoPropostaFn = createServerFn({ method: "POST" })
       return {
         ok: false as const,
         error: error instanceof Error ? error.message : "Falha ao salvar cotação.",
+      };
+    }
+  });
+
+export const saveCotacaoPropostasLoteFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        solicitacaoId: z.number().int().positive(),
+        supplierId: z.number().int().positive().optional().nullable(),
+        supplierName: z.string().trim().min(1).max(200),
+        previsao: z.string().trim().max(10).optional().nullable(),
+        items: z
+          .array(
+            z.object({
+              itemId: z.number().int().positive(),
+              valorUnitario: z.number().nonnegative(),
+              observacao: z.string().trim().max(2000).optional().nullable(),
+            }),
+          )
+          .min(1)
+          .max(80),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    const { user } = await requireModule("compras");
+    if (!canActAsComprador(user)) {
+      return { ok: false as const, error: "Somente compradores podem registrar cotações." };
+    }
+    const { ensureSchema } = await import("@/db/schema");
+    await ensureSchema();
+    const { saveCotacaoPropostasLote } = await import("@/db/compras");
+    try {
+      const result = await saveCotacaoPropostasLote({
+        solicitacaoId: data.solicitacaoId,
+        supplierId: data.supplierId ?? null,
+        supplierName: data.supplierName,
+        previsao: data.previsao ?? null,
+        items: data.items.map((item) => ({
+          itemId: item.itemId,
+          valorUnitario: item.valorUnitario,
+          observacao: item.observacao ?? null,
+        })),
+        createdBy: user.id,
+        createdByName: user.name,
+      });
+      return { ok: true as const, ...result };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao salvar cotações em lote.",
       };
     }
   });

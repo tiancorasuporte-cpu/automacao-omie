@@ -60,6 +60,7 @@ interface Props {
   onTrocarResponsavel: (novo: string) => void;
   onAbrirDoc: (d: Documento) => void;
   onRemoverDoc: (d: Documento) => void;
+  onExcluir?: (() => void) | undefined;
 }
 
 /** Campo editável: grava quando o usuário sai do campo (ou escolhe, nos selects) */
@@ -131,6 +132,7 @@ export function OpportunityDrawer({
   onTrocarResponsavel,
   onAbrirDoc,
   onRemoverDoc,
+  onExcluir,
 }: Props) {
   const [on, setOn] = useState(false);
   const corpo = useRef<HTMLDivElement>(null);
@@ -725,6 +727,11 @@ export function OpportunityDrawer({
               </option>
             ))}
           </select>
+          {onExcluir ? (
+            <button type="button" className="btn red" onClick={onExcluir}>
+              Excluir
+            </button>
+          ) : null}
         </div>
       </aside>
     </div>

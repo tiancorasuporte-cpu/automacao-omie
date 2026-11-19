@@ -32,13 +32,14 @@ export function SoftDialogContent({
   size = "md",
   ...props
 }: React.ComponentPropsWithoutRef<typeof DialogContent> & {
-  size?: "md" | "lg";
+  size?: "md" | "lg" | "xl";
 }) {
   return (
     <DialogContent
       className={cn(
         softDialogContentClass,
         size === "lg" && "dialog-lg",
+        size === "xl" && "dialog-xl",
         className,
       )}
       {...props}

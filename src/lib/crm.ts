@@ -43,16 +43,16 @@ export const getCrmBootstrapFn = createServerFn({ method: "GET" }).handler(async
   const { getDb } = await import("@/db/schema");
   await getDb();
   const crm = await import("@/db/crm");
-  const { listUsers, listTecnicos } = await import("@/db/users");
-  const [oportunidades, regras, users, tecnicosRows] = await Promise.all([
+  const { listUsers, listTecnicos, listVendedores } = await import("@/db/users");
+  const [oportunidades, regras, users, tecnicosRows, vendedoresRows] = await Promise.all([
     crm.listOportunidades(),
     crm.getRegrasComissao(),
     listUsers(),
     listTecnicos(true),
+    listVendedores(true),
   ]);
 
-  const vendedores = users
-    .filter((u) => u.active !== false)
+  const vendedores = (vendedoresRows.length ? vendedoresRows : [])
     .map((u) => u.name)
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "pt-BR"));
@@ -67,6 +67,7 @@ export const getCrmBootstrapFn = createServerFn({ method: "GET" }).handler(async
       id: user.id,
       name: user.name,
       comissoes: canComissoes(user),
+      isVendedor: Boolean(user.isVendedor),
     },
     oportunidades,
     regras,
@@ -106,6 +107,45 @@ export const createCrmOportunidadeFn = createServerFn({ method: "POST" })
       codigoClienteOmie: data.codigoClienteOmie ?? null,
       autor: user.name,
     });
+  });
+
+export const vincularCrmOmieClienteFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive(),
+        omieAppId: z.string().trim().min(1),
+        codigoClienteOmie: z.number().int().positive(),
+        cliente: z.string().trim().optional().nullable(),
+        contato: z.string().trim().optional().nullable(),
+        tel: z.string().trim().optional().nullable(),
+        cidade: z.string().trim().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await authCrm();
+    const { vincularClienteOmieOportunidade } = await import("@/db/crm");
+    return vincularClienteOmieOportunidade(
+      data.id,
+      {
+        omieAppId: data.omieAppId,
+        codigoClienteOmie: data.codigoClienteOmie,
+        cliente: data.cliente,
+        contato: data.contato,
+        tel: data.tel,
+        cidade: data.cidade,
+      },
+      user.name,
+    );
+  });
+
+export const deleteCrmOportunidadeFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ id: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    await authCrm();
+    const { deleteOportunidade } = await import("@/db/crm");
+    return deleteOportunidade(data.id);
   });
 
 /** Busca clientes Omie (Belfer) para vincular na oportunidade. */

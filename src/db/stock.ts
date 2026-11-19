@@ -323,7 +323,14 @@ export async function moveProductStock(input: {
       saldoApos = stock.quantidadeFisica + qty;
     } else if (input.tipo === "saida") {
       if (qty > stock.quantidadeFisica) {
-        throw new Error("Saldo físico insuficiente para a saída.");
+        const nomeRows = await tx<{ descricao: string | null }[]>`
+          select descricao from omie_products where id = ${input.productId}
+        `;
+        const nome =
+          nomeRows[0]?.descricao?.trim() || `produto #${input.productId}`;
+        throw new Error(
+          `Não foi possível dar baixa: estoque insuficiente para "${nome}". Disponível: ${stock.quantidadeFisica}, necessário: ${qty}. Alimente o estoque físico e tente de novo.`,
+        );
       }
       saldoApos = stock.quantidadeFisica - qty;
     } else {

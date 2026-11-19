@@ -170,7 +170,8 @@ function ModulesPicker({
                 ((p.id === "orcamentos_excluir" || p.id === "orcamentos_servicos_mensais") &&
                   !value.includes("orcamentos")) ||
                 (p.id === "terceiros_checar" && !value.includes("terceiros")) ||
-                (p.id === "os_excluir" && !value.includes("assistencia"));
+                (p.id === "os_excluir" && !value.includes("assistencia")) ||
+                (p.id === "contratos_valores" && !value.includes("contratos"));
               return (
                 <Chip
                   key={p.id}
@@ -297,6 +298,7 @@ function UserDetails({
                     id: user.id,
                     isTecnico: e.target.checked,
                     isComprador: Boolean(user.isComprador),
+                    isVendedor: Boolean(user.isVendedor),
                     defaultVehicleId: user.defaultVehicleId,
                   },
                 });
@@ -331,6 +333,7 @@ function UserDetails({
                     id: user.id,
                     isTecnico: Boolean(user.isTecnico),
                     isComprador: e.target.checked,
+                    isVendedor: Boolean(user.isVendedor),
                     defaultVehicleId: user.defaultVehicleId,
                   },
                 });
@@ -350,6 +353,41 @@ function UserDetails({
           />
           É comprador (cotações, CMC e Kanban de compras)
         </label>
+        <label className="flex items-center gap-sm text-body-md text-on-surface">
+          <input
+            type="checkbox"
+            checked={Boolean(user.isVendedor)}
+            disabled={busyId === user.id}
+            onChange={async (e) => {
+              setBusyId(user.id);
+              setError(null);
+              setMessage(null);
+              try {
+                const result = await updateUserStaffFn({
+                  data: {
+                    id: user.id,
+                    isTecnico: Boolean(user.isTecnico),
+                    isComprador: Boolean(user.isComprador),
+                    isVendedor: e.target.checked,
+                    defaultVehicleId: user.defaultVehicleId,
+                  },
+                });
+                if (!result.ok) setError(result.error);
+                else {
+                  setMessage(
+                    e.target.checked
+                      ? `${user.name} marcado como vendedor (plano de comissão).`
+                      : `${user.name} removido de vendedor.`,
+                  );
+                  await onInvalidate();
+                }
+              } finally {
+                setBusyId(null);
+              }
+            }}
+          />
+          É vendedor (entra no plano de comissão do CRM)
+        </label>
         <label className="block text-label-md text-on-surface-variant">
           Veículo padrão
           <select
@@ -368,6 +406,7 @@ function UserDetails({
                     id: user.id,
                     isTecnico: Boolean(user.isTecnico),
                     isComprador: Boolean(user.isComprador),
+                    isVendedor: Boolean(user.isVendedor),
                     defaultVehicleId: nextId,
                   },
                 });
@@ -578,6 +617,7 @@ function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createIsTecnico, setCreateIsTecnico] = useState(false);
   const [createIsComprador, setCreateIsComprador] = useState(false);
+  const [createIsVendedor, setCreateIsVendedor] = useState(false);
   const [createVehicleId, setCreateVehicleId] = useState<number | "">("");
   const users = loaded.ok ? loaded.users : [];
   const vehicles = loaded.ok ? loaded.vehicles : [];
@@ -681,6 +721,7 @@ function UsersPage() {
                         role,
                         isTecnico: createIsTecnico,
                         isComprador: createIsComprador,
+                        isVendedor: createIsVendedor,
                         defaultVehicleId: createVehicleId === "" ? null : Number(createVehicleId),
                         ...(role === "operator" ? { modules } : {}),
                       },
@@ -695,6 +736,7 @@ function UsersPage() {
                     setModules(APP_MODULES.map((m) => m.id));
                     setCreateIsTecnico(false);
                     setCreateIsComprador(false);
+                    setCreateIsVendedor(false);
                     setCreateVehicleId("");
                     setCreateOpen(false);
                     await router.invalidate();
@@ -778,6 +820,14 @@ function UsersPage() {
                     onChange={(e) => setCreateIsComprador(e.target.checked)}
                   />
                   É comprador
+                </label>
+                <label className="flex items-center gap-sm text-body-md text-on-surface md:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={createIsVendedor}
+                    onChange={(e) => setCreateIsVendedor(e.target.checked)}
+                  />
+                  É vendedor (plano de comissão do CRM)
                 </label>
                 <label className="block text-label-md text-on-surface-variant md:col-span-2">
                   Veículo padrão

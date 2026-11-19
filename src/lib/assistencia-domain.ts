@@ -29,6 +29,15 @@ export const OS_STAGES = [
   { idx: 7, name: "Finalizado", mover: null },
 ] as const;
 
+/** Prioridades iguais às de tickets (Baixa / Normal / Alta / Urgente). */
+export {
+  TICKET_PRIOS as OS_PRIOS,
+  TICKET_PRIO_ORD as OS_PRIO_ORD,
+  prioridadeDotClass as osPrioridadeDotClass,
+  prioridadeLabel as osPrioridadeLabel,
+  type TicketPrio as OsPrio,
+} from "@/lib/tickets-domain";
+
 /** Visual Soft10: amarelo = setor do usuário; cinza = fora do setor. */
 export function osKanbanColumnStyle(mine: boolean) {
   if (mine) {

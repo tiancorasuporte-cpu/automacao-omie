@@ -52,6 +52,24 @@ export const TICKET_PRIO_ORD: Record<TicketPrio, number> = {
   Baixa: 3,
 };
 
+/** Bolinha de prioridade (OS e tickets). */
+export function prioridadeDotClass(prio: string | null | undefined) {
+  switch (prio) {
+    case "Urgente":
+      return "bg-red-600";
+    case "Alta":
+      return "bg-orange-500";
+    case "Baixa":
+      return "bg-slate-400";
+    default:
+      return "bg-sky-500";
+  }
+}
+
+export function prioridadeLabel(prio: string | null | undefined) {
+  return prio && TICKET_PRIOS.includes(prio as TicketPrio) ? prio : "Normal";
+}
+
 export function ticketSetorNome(id: string) {
   return TICKET_SETORES.find((s) => s.id === id)?.nome ?? id;
 }

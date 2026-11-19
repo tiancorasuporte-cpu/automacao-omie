@@ -27,12 +27,14 @@ import { APP_NAME } from "@/lib/brand";
 import {
   concluirCompraFn,
   createCompraSolicitacaoFn,
+  createCompraSolicitacoesLoteFn,
   deleteCotacaoPropostaFn,
   getComprasBootstrapFn,
   markComprasSeenFn,
   notifyComprasUnreadChanged,
   refreshComprasFn,
   saveCotacaoPropostaFn,
+  saveCotacaoPropostasLoteFn,
   searchComprasProductsFn,
   searchComprasSuppliersFn,
   setCompraStatusFn,
@@ -100,8 +102,27 @@ function origemLabel(origem: string) {
   if (origem === "os") return "O.S";
   if (origem === "orcamento") return "Orçamento";
   if (origem === "manual") return "Solicitação";
+  if (origem === "uniforme") return "Uniforme";
   return origem;
 }
+
+type LoteCotacaoLine = {
+  itemId: number;
+  descricao: string;
+  qtd: number;
+  unidade: string | null;
+  valor: string;
+  obs: string;
+};
+
+type LoteSolicitarItem = {
+  key: string;
+  descricao: string;
+  qtd: string;
+  unidade: string | null;
+  productId: number | null;
+  codigoProduto: number | null;
+};
 
 const fieldClass =
   "rounded-lg border border-outline-variant bg-white px-md py-sm text-body-md font-normal normal-case tracking-normal text-on-surface outline-none focus:ring-2 focus:ring-amber-400/50";
@@ -328,6 +349,29 @@ function ComprasPage() {
   const [propObs, setPropObs] = useState("");
   const [editingPropId, setEditingPropId] = useState<number | null>(null);
 
+  const [loteOpen, setLoteOpen] = useState(false);
+  const [loteSolicitacaoId, setLoteSolicitacaoId] = useState<number | null>(null);
+  const [loteLines, setLoteLines] = useState<LoteCotacaoLine[]>([]);
+  const [loteSupplierId, setLoteSupplierId] = useState<number | "">("");
+  const [loteSupplierName, setLoteSupplierName] = useState("");
+  const [loteSupplierQuery, setLoteSupplierQuery] = useState("");
+  const [loteSupplierHits, setLoteSupplierHits] = useState<
+    Array<{ id: number; name: string; cnpjCpf: string | null; codigoOmie: number }>
+  >([]);
+  const [lotePrevisao, setLotePrevisao] = useState("");
+  const [loteSearchingSuppliers, setLoteSearchingSuppliers] = useState(false);
+
+  const [solicitarMode, setSolicitarMode] = useState<"unico" | "lote">("unico");
+  const [loteSolicitarItems, setLoteSolicitarItems] = useState<LoteSolicitarItem[]>([]);
+
+  const [meusPedidosOpen, setMeusPedidosOpen] = useState(false);
+  const [meusPedidosQuery, setMeusPedidosQuery] = useState("");
+  const [meusPedidosFrom, setMeusPedidosFrom] = useState("");
+  const [meusPedidosTo, setMeusPedidosTo] = useState("");
+  const [meusPedidosStatus, setMeusPedidosStatus] = useState<
+    "todos" | Solicitacao["status"]
+  >("todos");
+
   const canComprar = boot.user.canComprar;
 
   const cotRange = useMemo(
@@ -357,8 +401,9 @@ function ComprasPage() {
     return cotacoesBoardRows.filter((row) => {
       if (cotOrigem && row.origem !== cotOrigem) return false;
       if (q) {
+        const itensTxt = row.itens?.map((i) => i.descricao).join(" ") ?? "";
         const hay =
-          `${row.descricao} ${row.solicitadoPorNome} ${row.quoteNumero ?? ""} ${row.motivo ?? ""} ${origemLabel(row.origem)}`.toLowerCase();
+          `${row.descricao} ${itensTxt} ${row.solicitadoPorNome} ${row.quoteNumero ?? ""} ${row.motivo ?? ""} ${origemLabel(row.origem)}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (!inDateRange(ymdFromIso(row.createdAt), cotRange.from, cotRange.to)) return false;
@@ -376,6 +421,41 @@ function ComprasPage() {
       return tb - ta;
     });
   }, [abertas, historico, boot.user.id]);
+
+  const meusPedidosFiltrados = useMemo(() => {
+    const q = meusPedidosQuery.trim().toLowerCase();
+    return minhasSolicitacoes.filter((row) => {
+      if (meusPedidosStatus !== "todos" && row.status !== meusPedidosStatus) return false;
+      if (q) {
+        const itensTxt = (row.itens ?? []).map((i) => i.descricao).join(" ");
+        const hay = [
+          row.descricao,
+          itensTxt,
+          row.motivo ?? "",
+          row.quoteNumero ?? "",
+          origemLabel(row.origem),
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (!inDateRange(ymdFromIso(row.createdAt), meusPedidosFrom, meusPedidosTo)) {
+        return false;
+      }
+      return true;
+    });
+  }, [
+    minhasSolicitacoes,
+    meusPedidosQuery,
+    meusPedidosFrom,
+    meusPedidosTo,
+    meusPedidosStatus,
+  ]);
+
+  const minhasSolicitacoesPreview = useMemo(
+    () => minhasSolicitacoes.slice(0, 5),
+    [minhasSolicitacoes],
+  );
 
   const propostasBySolicitacao = useMemo(() => {
     const map = new Map<number, CotacaoProposta[]>();
@@ -522,8 +602,20 @@ function ComprasPage() {
   function openConcluir(row: Solicitacao) {
     setSelected(row);
     const props = propostasBySolicitacao.get(row.id) ?? [];
-    if (props.length) {
+    if (row.isLote) {
+      const withItem = props.filter((p) => p.itemId != null);
+      const latest = withItem[withItem.length - 1];
+      setPropostaId("");
+      setFornecedorId(latest?.supplierId ?? "");
+      setFornecedorNome(latest?.supplierName ?? "");
+      setValorCompra("");
+      setCmcNovo("");
+      setPrevisao(latest?.previsao ?? "");
+      setNotas("");
+      setUpdateCmc(row.itens.some((i) => i.productId != null));
+    } else if (props.length) {
       applyPropostaToForm(props[0]!);
+      setUpdateCmc(Boolean(row.productId));
     } else {
       setPropostaId("");
       const first = row.fornecedores[0];
@@ -533,8 +625,8 @@ function ComprasPage() {
       setCmcNovo(row.cmcEfetivo != null ? String(row.cmcEfetivo) : "");
       setPrevisao("");
       setNotas("");
+      setUpdateCmc(Boolean(row.productId));
     }
-    setUpdateCmc(Boolean(row.productId));
     setConcluirOpen(true);
   }
 
@@ -649,6 +741,226 @@ function ComprasPage() {
     return () => clearTimeout(timer);
   }, [boardOpen, propSupplierQuery, propSupplierId, propSupplierName]);
 
+  useEffect(() => {
+    if (!loteOpen) return;
+    const q = loteSupplierQuery.trim();
+    if (q.length < 2 || (loteSupplierId !== "" && q === loteSupplierName.trim())) {
+      setLoteSupplierHits([]);
+      setLoteSearchingSuppliers(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setLoteSearchingSuppliers(true);
+      try {
+        const rows = await searchComprasSuppliersFn({
+          data: { query: q, limit: 40 },
+        });
+        setLoteSupplierHits(rows);
+      } catch {
+        setLoteSupplierHits([]);
+      } finally {
+        setLoteSearchingSuppliers(false);
+      }
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [loteOpen, loteSupplierQuery, loteSupplierId, loteSupplierName]);
+
+  function openLoteCardCotacao(row: Solicitacao) {
+    if (!row.isLote || !row.itens.length) {
+      setFeedback("Este card não é um lote de cotação.");
+      return;
+    }
+    const props = propostasBySolicitacao.get(row.id) ?? [];
+    const latestByItem = new Map<number, CotacaoProposta>();
+    for (const p of props) {
+      if (p.itemId == null) continue;
+      const prev = latestByItem.get(p.itemId);
+      if (!prev || p.id > prev.id) latestByItem.set(p.itemId, p);
+    }
+    const firstProp = [...latestByItem.values()][0];
+    setLoteSolicitacaoId(row.id);
+    setLoteLines(
+      row.itens.map((item) => {
+        const prop = latestByItem.get(item.id);
+        return {
+          itemId: item.id,
+          descricao: item.descricao,
+          qtd: item.qtd,
+          unidade: item.unidade,
+          valor: prop != null ? String(prop.valorUnitario) : "",
+          obs: prop?.observacao ?? "",
+        };
+      }),
+    );
+    setLoteSupplierId(firstProp?.supplierId ?? "");
+    setLoteSupplierName(firstProp?.supplierName ?? "");
+    setLoteSupplierQuery(firstProp?.supplierName ?? "");
+    setLoteSupplierHits([]);
+    setLotePrevisao(firstProp?.previsao ?? "");
+    setLoteOpen(true);
+    if (row.status === "aberta" && canComprar) {
+      void run(async () => {
+        const result = await setCompraStatusFn({
+          data: { id: row.id, status: "em_cotacao" },
+        });
+        if (!result.ok) {
+          setFeedback(result.error);
+          return;
+        }
+        setAbertas((prev) =>
+          prev.map((r) => (r.id === row.id ? { ...r, status: "em_cotacao" as const } : r)),
+        );
+      });
+    }
+  }
+
+  async function handleSaveLoteCotacao() {
+    if (loteSolicitacaoId == null) {
+      setFeedback("Lote inválido.");
+      return;
+    }
+    if (!loteSupplierName.trim() && !loteSupplierQuery.trim()) {
+      setFeedback("Informe o fornecedor da cotação em lote.");
+      return;
+    }
+    const items = loteLines
+      .map((line) => {
+        const valor = Number(line.valor.replace(",", "."));
+        return {
+          itemId: line.itemId,
+          valorUnitario: valor,
+          observacao: line.obs.trim() || null,
+          raw: line.valor,
+        };
+      })
+      .filter((item) => item.raw.trim() !== "");
+    if (!items.length) {
+      setFeedback("Informe o valor unitário de ao menos um produto.");
+      return;
+    }
+    if (items.some((item) => !Number.isFinite(item.valorUnitario) || item.valorUnitario < 0)) {
+      setFeedback("Há valor unitário inválido no lote.");
+      return;
+    }
+    if (items.length < loteLines.length) {
+      setFeedback("Preencha o valor unitário de todos os produtos do lote.");
+      return;
+    }
+    await run(async () => {
+      const result = await saveCotacaoPropostasLoteFn({
+        data: {
+          solicitacaoId: loteSolicitacaoId,
+          supplierId: loteSupplierId === "" ? null : loteSupplierId,
+          supplierName: loteSupplierName.trim() || loteSupplierQuery.trim(),
+          previsao: lotePrevisao || null,
+          items: items.map(({ itemId, valorUnitario, observacao }) => ({
+            itemId,
+            valorUnitario,
+            observacao,
+          })),
+        },
+      });
+      if (!result.ok) {
+        setFeedback(result.error);
+        return;
+      }
+      setPropostas((prev) => {
+        const others = prev.filter((p) => p.solicitacaoId !== loteSolicitacaoId);
+        return [...others, ...result.propostas];
+      });
+      if (result.solicitacao) {
+        setAbertas((prev) => {
+          const without = prev.filter((r) => r.id !== result.solicitacao!.id);
+          if (
+            result.solicitacao!.status === "aberta" ||
+            result.solicitacao!.status === "em_cotacao"
+          ) {
+            return [result.solicitacao!, ...without];
+          }
+          return without;
+        });
+      }
+      setLoteOpen(false);
+      setLoteSolicitacaoId(null);
+      setFeedback(`Cotação em lote salva (${items.length} produto(s)).`);
+      await reload();
+    });
+  }
+
+  function addCurrentToLoteSolicitar() {
+    const desc = manualDesc.trim();
+    if (!desc) {
+      setFeedback("Informe o produto antes de adicionar ao lote.");
+      return;
+    }
+    const qtd = Number(manualQtd.replace(",", "."));
+    if (!Number.isFinite(qtd) || qtd <= 0) {
+      setFeedback("Quantidade inválida.");
+      return;
+    }
+    setLoteSolicitarItems((prev) => [
+      ...prev,
+      {
+        key: `${Date.now()}-${prev.length}`,
+        descricao: desc,
+        qtd: String(qtd),
+        unidade: manualUnidade,
+        productId: manualProductId,
+        codigoProduto: manualProductCode,
+      },
+    ]);
+    setManualDesc("");
+    setManualQtd("1");
+    setManualProductId(null);
+    setManualProductCode(null);
+    setManualUnidade(null);
+    setProductHits([]);
+  }
+
+  async function handleSolicitarLote() {
+    const motivo = manualMotivo.trim();
+    if (!motivo) {
+      setFeedback("Informe o motivo da solicitação.");
+      return;
+    }
+    if (!loteSolicitarItems.length) {
+      setFeedback("Adicione ao menos um item ao lote.");
+      return;
+    }
+    await run(async () => {
+      const result = await createCompraSolicitacoesLoteFn({
+        data: {
+          origem: "manual",
+          motivo,
+          links: parseLinksInput(manualLinks),
+          observacao: manualObs.trim() || null,
+          items: loteSolicitarItems.map((item) => ({
+            descricao: item.descricao,
+            qtd: Number(item.qtd.replace(",", ".")),
+            unidade: item.unidade,
+            productId: item.productId,
+            codigoProduto: item.codigoProduto,
+          })),
+        },
+      });
+      if (!result.ok) {
+        setFeedback(result.error);
+        return;
+      }
+      setLoteSolicitarItems([]);
+      setManualMotivo("");
+      setManualLinks("");
+      setManualObs("");
+      const n = result.solicitacao.itens.length || 1;
+      setFeedback(
+        result.solicitacao.isLote
+          ? `Lote com ${n} itens enviado em um único card.`
+          : "Solicitação enviada.",
+      );
+      await reload();
+    });
+  }
+
   async function handleSaveProposta() {
     if (!boardRow) return;
     const valor = Number(propValor.replace(",", "."));
@@ -761,7 +1073,7 @@ function ComprasPage() {
 
   async function handleConcluir() {
     if (!selected) return;
-    if (selectedPropostas.length && propostaId === "") {
+    if (!selected.isLote && selectedPropostas.length && propostaId === "") {
       setFeedback("Selecione qual cotação foi escolhida para registrar a compra.");
       return;
     }
@@ -988,8 +1300,7 @@ function ComprasPage() {
                     Quadro de compras
                   </h2>
                   <p className="text-label-md text-on-surface-variant">
-                    Arraste os cards entre as fases. Comprado fica em Aguardando entrega até
-                    chegar.
+                    Arraste os cards entre as fases. Lotes aparecem como um único card.
                   </p>
                 </div>
                 <button
@@ -1041,6 +1352,7 @@ function ComprasPage() {
                           <option value="os">O.S</option>
                           <option value="manual">Solicitação</option>
                           <option value="orcamento">Orçamento</option>
+                          <option value="uniforme">Uniforme</option>
                         </select>
                       </label>
                     }
@@ -1249,14 +1561,25 @@ function ComprasPage() {
                                 >
                                   {origemLabel(row.origem)}
                                 </span>
+                                {row.isLote ? (
+                                  <span className="rounded-full bg-amber-100 px-xs py-2xs text-[10px] font-bold uppercase tracking-wide text-amber-950">
+                                    Lote
+                                  </span>
+                                ) : null}
                               </div>
                               <p className="mt-xs line-clamp-2 text-body-md font-semibold text-on-surface">
                                 {row.descricao}
                               </p>
+                              {row.isLote ? (
+                                <p className="mt-2xs line-clamp-3 text-label-sm text-on-surface-variant">
+                                  {row.itens.map((i) => i.descricao).join(" · ")}
+                                </p>
+                              ) : null}
                               <p className="text-label-sm text-on-surface-variant">
-                                {row.qtd}
-                                {row.unidade ? ` ${row.unidade}` : " un"} ·{" "}
-                                {row.solicitadoPorNome}
+                                {row.isLote
+                                  ? `${row.itens.length} produtos · ${row.qtd} un`
+                                  : `${row.qtd}${row.unidade ? ` ${row.unidade}` : " un"}`}{" "}
+                                · {row.solicitadoPorNome}
                                 {row.quoteNumero ? ` · ${row.quoteNumero}` : ""}
                               </p>
                               {row.motivo ? (
@@ -1298,9 +1621,13 @@ function ComprasPage() {
                                     type="button"
                                     disabled={busy}
                                     className="rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold disabled:opacity-50"
-                                    onClick={() => openCotacaoBoard(row)}
+                                    onClick={() =>
+                                      row.isLote
+                                        ? openLoteCardCotacao(row)
+                                        : openCotacaoBoard(row)
+                                    }
                                   >
-                                    Cotar
+                                    {row.isLote ? "Cotar lote" : "Cotar"}
                                   </button>
                                   <button
                                     type="button"
@@ -1342,7 +1669,11 @@ function ComprasPage() {
                                   <button
                                     type="button"
                                     className="rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold"
-                                    onClick={() => openCotacaoBoard(row)}
+                                    onClick={() =>
+                                      row.isLote
+                                        ? openLoteCardCotacao(row)
+                                        : openCotacaoBoard(row)
+                                    }
                                   >
                                     Ver
                                   </button>
@@ -1352,7 +1683,11 @@ function ComprasPage() {
                                   type="button"
                                   data-no-drag
                                   className="mt-sm rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold"
-                                  onClick={() => openCotacaoBoard(row)}
+                                  onClick={() =>
+                                    row.isLote
+                                      ? openLoteCardCotacao(row)
+                                      : openCotacaoBoard(row)
+                                  }
                                 >
                                   Ver cotações
                                 </button>
@@ -1390,6 +1725,33 @@ function ComprasPage() {
                     <span className="font-semibold text-on-surface">{boot.user.name}</span>
                     . Acompanhe a fase em Minhas solicitações.
                   </p>
+                </div>
+                <div className="flex flex-wrap gap-xs">
+                  <button
+                    type="button"
+                    onClick={() => setSolicitarMode("unico")}
+                    className={cn(
+                      "inline-flex items-center gap-xs rounded-lg px-sm py-xs text-label-md font-semibold",
+                      solicitarMode === "unico"
+                        ? "bg-neutral-900 text-white"
+                        : "border border-outline-variant bg-white text-on-surface",
+                    )}
+                  >
+                    Item único
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSolicitarMode("lote")}
+                    className={cn(
+                      "inline-flex items-center gap-xs rounded-lg px-sm py-xs text-label-md font-semibold",
+                      solicitarMode === "lote"
+                        ? "bg-neutral-900 text-white"
+                        : "border border-outline-variant bg-white text-on-surface",
+                    )}
+                  >
+                    <Icon name="playlist_add" className="text-[16px]" />
+                    Compra em lote
+                  </button>
                 </div>
               </div>
 
@@ -1468,6 +1830,63 @@ function ComprasPage() {
                     </label>
                   </div>
 
+                  {solicitarMode === "lote" ? (
+                    <div className="mt-md space-y-sm">
+                      <div className="flex flex-wrap items-center gap-sm">
+                        <button
+                          type="button"
+                          disabled={!manualDesc.trim()}
+                          className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold disabled:opacity-50"
+                          onClick={addCurrentToLoteSolicitar}
+                        >
+                          <Icon name="add" className="text-[16px]" />
+                          Adicionar ao lote
+                        </button>
+                        <span className="text-label-md text-on-surface-variant">
+                          {loteSolicitarItems.length} item(ns) no lote
+                        </span>
+                      </div>
+                      {loteSolicitarItems.length ? (
+                        <ul className="divide-y divide-outline-variant overflow-hidden rounded-lg border border-outline-variant bg-white">
+                          {loteSolicitarItems.map((item) => (
+                            <li
+                              key={item.key}
+                              className="flex items-center justify-between gap-sm px-sm py-xs"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-body-md font-medium text-on-surface">
+                                  {item.descricao}
+                                </p>
+                                <p className="text-label-sm text-on-surface-variant">
+                                  {item.qtd}
+                                  {item.unidade ? ` ${item.unidade}` : " un"}
+                                  {item.codigoProduto != null
+                                    ? ` · Omie #${item.codigoProduto}`
+                                    : ""}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className="rounded-lg px-sm py-xs text-label-md text-red-700"
+                                onClick={() =>
+                                  setLoteSolicitarItems((prev) =>
+                                    prev.filter((x) => x.key !== item.key),
+                                  )
+                                }
+                              >
+                                Remover
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="rounded-lg border border-dashed border-outline-variant px-md py-sm text-label-md text-on-surface-variant">
+                          Busque cada produto, informe a quantidade e clique em Adicionar ao lote.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+
                   <label className={cn(labelClass, "mt-md")}>
                     Motivo da solicitação
                     <textarea
@@ -1505,12 +1924,24 @@ function ComprasPage() {
                   <div className="mt-md flex flex-wrap items-center gap-sm">
                     <button
                       type="button"
-                      disabled={busy || !manualDesc.trim() || !manualMotivo.trim()}
+                      disabled={
+                        busy ||
+                        !manualMotivo.trim() ||
+                        (solicitarMode === "unico"
+                          ? !manualDesc.trim()
+                          : loteSolicitarItems.length === 0)
+                      }
                       className="inline-flex items-center gap-xs rounded-lg bg-neutral-900 px-md py-sm text-label-md font-semibold text-white disabled:opacity-50"
-                      onClick={() => void handleSolicitarManual()}
+                      onClick={() =>
+                        void (solicitarMode === "lote"
+                          ? handleSolicitarLote()
+                          : handleSolicitarManual())
+                      }
                     >
                       <Icon name="send" className="text-[16px]" />
-                      Enviar ao comprador
+                      {solicitarMode === "lote"
+                        ? `Enviar lote (${loteSolicitarItems.length})`
+                        : "Enviar ao comprador"}
                     </button>
                     <span className="text-label-sm text-on-surface-variant">
                       Motivo é obrigatório
@@ -1524,6 +1955,9 @@ function ComprasPage() {
                   </h3>
                   <ul className="mt-sm list-disc space-y-xs pl-md">
                     <li>Busque o produto no catálogo Omie ou digite o nome.</li>
+                    <li>
+                      No modo lote, adicione vários itens e envie tudo com o mesmo motivo.
+                    </li>
                     <li>Informe o motivo para o comprador priorizar.</li>
                     <li>Links de referência (loja, foto, PDF) são opcionais.</li>
                     <li>A solicitação entra no Quadro e aparece abaixo com a fase atual.</li>
@@ -1541,49 +1975,75 @@ function ComprasPage() {
                       Fase atual de cada item que você pediu.
                     </p>
                   </div>
-                  <span className="text-label-sm font-semibold text-on-surface-variant">
-                    {minhasSolicitacoes.length} item(ns)
-                  </span>
+                  <div className="flex flex-wrap items-center gap-sm">
+                    <span className="text-label-sm font-semibold text-on-surface-variant">
+                      {minhasSolicitacoes.length} item(ns)
+                    </span>
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold text-on-surface"
+                      onClick={() => setMeusPedidosOpen(true)}
+                    >
+                      <Icon name="receipt_long" className="text-[16px]" />
+                      Ver meus pedidos
+                    </button>
+                  </div>
                 </div>
-                {minhasSolicitacoes.length ? (
-                  <ul className="divide-y divide-outline-variant">
-                    {minhasSolicitacoes.map((row) => (
-                      <li
-                        key={row.id}
-                        className="flex flex-wrap items-start justify-between gap-sm py-sm first:pt-0 last:pb-0"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="text-body-md font-semibold text-on-surface">
-                            {row.descricao}
-                          </p>
-                          <p className="text-label-sm text-on-surface-variant">
-                            {row.qtd}
-                            {row.unidade ? ` ${row.unidade}` : " un"}
-                            {row.motivo ? ` · ${row.motivo}` : ""}
-                            {" · "}
-                            {formatDateBr(ymdFromIso(row.createdAt))}
-                          </p>
-                          {row.status === "comprada" && row.previsao ? (
-                            <p className="mt-2xs text-label-sm text-amber-900">
-                              Previsto chegar: {formatDateBr(row.previsao)}
-                            </p>
-                          ) : null}
-                        </div>
-                        <span
-                          className={cn(
-                            "shrink-0 rounded-full px-sm py-2xs text-label-sm font-semibold",
-                            row.status === "aberta" && "bg-amber-100 text-amber-950",
-                            row.status === "em_cotacao" && "bg-sky-100 text-sky-950",
-                            row.status === "comprada" && "bg-orange-100 text-orange-950",
-                            row.status === "finalizado" && "bg-emerald-100 text-emerald-950",
-                            row.status === "cancelada" && "bg-red-100 text-red-900",
-                          )}
+                {minhasSolicitacoesPreview.length ? (
+                  <>
+                    <ul className="divide-y divide-outline-variant">
+                      {minhasSolicitacoesPreview.map((row) => (
+                        <li
+                          key={row.id}
+                          className="flex flex-wrap items-start justify-between gap-sm py-sm first:pt-0 last:pb-0"
                         >
-                          {statusLabel(row.status)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-body-md font-semibold text-on-surface">
+                              {row.descricao}
+                            </p>
+                            <p className="text-label-sm text-on-surface-variant">
+                              {row.isLote
+                                ? `${row.itens.length} produtos · ${row.qtd} un`
+                                : `${row.qtd}${row.unidade ? ` ${row.unidade}` : " un"}`}
+                              {row.motivo ? ` · ${row.motivo}` : ""}
+                              {" · "}
+                              {formatDateBr(ymdFromIso(row.createdAt))}
+                            </p>
+                            {row.status === "comprada" && row.previsao ? (
+                              <p className="mt-2xs text-label-sm text-amber-900">
+                                Previsto chegar: {formatDateBr(row.previsao)}
+                              </p>
+                            ) : null}
+                          </div>
+                          <span
+                            className={cn(
+                              "shrink-0 rounded-full px-sm py-2xs text-label-sm font-semibold",
+                              row.status === "aberta" && "bg-amber-100 text-amber-950",
+                              row.status === "em_cotacao" && "bg-sky-100 text-sky-950",
+                              row.status === "comprada" && "bg-orange-100 text-orange-950",
+                              row.status === "finalizado" && "bg-emerald-100 text-emerald-950",
+                              row.status === "cancelada" && "bg-red-100 text-red-900",
+                            )}
+                          >
+                            {statusLabel(row.status)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {minhasSolicitacoes.length > minhasSolicitacoesPreview.length ? (
+                      <p className="mt-sm text-label-md text-on-surface-variant">
+                        Mostrando os {minhasSolicitacoesPreview.length} mais recentes. Abra{" "}
+                        <button
+                          type="button"
+                          className="font-semibold text-primary underline-offset-2 hover:underline"
+                          onClick={() => setMeusPedidosOpen(true)}
+                        >
+                          Ver meus pedidos
+                        </button>{" "}
+                        para filtrar todos.
+                      </p>
+                    ) : null}
+                  </>
                 ) : (
                   <p className="text-body-md text-on-surface-variant">
                     Você ainda não tem solicitações nesta conta.
@@ -1733,9 +2193,11 @@ function ComprasPage() {
           <DialogHeader>
             <DialogTitle>Registrar compra</DialogTitle>
             <DialogDescription>
-              {selected
-                ? `${selected.descricao} · escolha a cotação e confirme fornecedor/valor.`
-                : "Concluir cotação"}
+              {selected?.isLote
+                ? `${selected.descricao} · registra a compra de todos os itens com as cotações salvas.`
+                : selected
+                  ? `${selected.descricao} · escolha a cotação e confirme fornecedor/valor.`
+                  : "Concluir cotação"}
             </DialogDescription>
           </DialogHeader>
           <div className="mt-md grid gap-md">
@@ -1747,7 +2209,25 @@ function ComprasPage() {
                 {selected.motivo}
               </p>
             ) : null}
-            {selectedPropostas.length ? (
+            {selected?.isLote ? (
+              <ul className="max-h-48 divide-y divide-outline-variant overflow-auto rounded-lg border border-outline-variant text-label-md">
+                {selected.itens.map((item) => {
+                  const prop = selectedPropostas
+                    .filter((p) => p.itemId === item.id)
+                    .sort((a, b) => b.id - a.id)[0];
+                  return (
+                    <li key={item.id} className="flex justify-between gap-sm px-sm py-xs">
+                      <span className="min-w-0 truncate">{item.descricao}</span>
+                      <span className="shrink-0 text-on-surface-variant">
+                        {prop
+                          ? `${formatMoney(prop.valorUnitario)} · ${prop.supplierName}`
+                          : "Sem cotação"}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : selectedPropostas.length ? (
               <label className={labelClass}>
                 Qual cotação foi escolhida?
                 <select
@@ -1773,61 +2253,67 @@ function ComprasPage() {
                 </select>
               </label>
             ) : null}
-            <label className={labelClass}>
-              Fornecedor cadastrado
-              <select
-                value={fornecedorId}
-                onChange={(e) => {
-                  const next = e.target.value ? Number(e.target.value) : "";
-                  setFornecedorId(next);
-                  const found = boot.suppliers.find((s) => s.id === next);
-                  if (found) setFornecedorNome(found.name);
-                }}
-                className={fieldClass}
-              >
-                <option value="">Outro / digitar</option>
-                {(selected?.fornecedores.length
-                  ? selected.fornecedores.map((f) => ({
-                      id: f.supplierId,
-                      name: f.supplierName,
-                    }))
-                  : boot.suppliers
-                ).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={labelClass}>
-              Nome do fornecedor
-              <input
-                value={fornecedorNome}
-                onChange={(e) => setFornecedorNome(e.target.value)}
-                className={fieldClass}
-              />
-            </label>
-            <div className="grid gap-md sm:grid-cols-2">
-              <label className={labelClass}>
-                Valor unitário compra
-                <input
-                  value={valorCompra}
-                  onChange={(e) => {
-                    setValorCompra(e.target.value);
-                    if (!cmcNovo || cmcNovo === valorCompra) setCmcNovo(e.target.value);
-                  }}
-                  className={fieldClass}
-                />
-              </label>
-              <label className={labelClass}>
-                Novo CMC interno
-                <input
-                  value={cmcNovo}
-                  onChange={(e) => setCmcNovo(e.target.value)}
-                  className={fieldClass}
-                />
-              </label>
-            </div>
+            {!selected?.isLote ? (
+              <>
+                <label className={labelClass}>
+                  Fornecedor cadastrado
+                  <select
+                    value={fornecedorId}
+                    onChange={(e) => {
+                      const next = e.target.value ? Number(e.target.value) : "";
+                      setFornecedorId(next);
+                      const found = boot.suppliers.find((s) => s.id === next);
+                      if (found) setFornecedorNome(found.name);
+                    }}
+                    className={fieldClass}
+                  >
+                    <option value="">Outro / digitar</option>
+                    {(selected?.fornecedores.length
+                      ? selected.fornecedores.map((f) => ({
+                          id: f.supplierId,
+                          name: f.supplierName,
+                        }))
+                      : boot.suppliers
+                    ).map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={labelClass}>
+                  Nome do fornecedor
+                  <input
+                    value={fornecedorNome}
+                    onChange={(e) => setFornecedorNome(e.target.value)}
+                    className={fieldClass}
+                  />
+                </label>
+              </>
+            ) : null}
+            {!selected?.isLote ? (
+              <div className="grid gap-md sm:grid-cols-2">
+                <label className={labelClass}>
+                  Valor unitário compra
+                  <input
+                    value={valorCompra}
+                    onChange={(e) => {
+                      setValorCompra(e.target.value);
+                      if (!cmcNovo || cmcNovo === valorCompra) setCmcNovo(e.target.value);
+                    }}
+                    className={fieldClass}
+                  />
+                </label>
+                <label className={labelClass}>
+                  Novo CMC interno
+                  <input
+                    value={cmcNovo}
+                    onChange={(e) => setCmcNovo(e.target.value)}
+                    className={fieldClass}
+                  />
+                </label>
+              </div>
+            ) : null}
             <label className={labelClass}>
               Previsão de entrega
               <input
@@ -1846,14 +2332,15 @@ function ComprasPage() {
                 className={fieldClass}
               />
             </label>
-            {selected?.productId ? (
+            {selected?.productId ||
+            (selected?.isLote && selected.itens.some((i) => i.productId != null)) ? (
               <label className="inline-flex items-center gap-sm text-body-md text-on-surface">
                 <input
                   type="checkbox"
                   checked={updateCmc}
                   onChange={(e) => setUpdateCmc(e.target.checked)}
                 />
-                Atualizar CMC interno do produto
+                Atualizar CMC interno {selected?.isLote ? "dos produtos" : "do produto"}
               </label>
             ) : null}
           </div>
@@ -1867,7 +2354,10 @@ function ComprasPage() {
             </button>
             <button
               type="button"
-              disabled={busy || (selectedPropostas.length > 0 && propostaId === "")}
+              disabled={
+                busy ||
+                (!selected?.isLote && selectedPropostas.length > 0 && propostaId === "")
+              }
               className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container disabled:opacity-50"
               onClick={() => void handleConcluir()}
             >
@@ -2111,6 +2601,318 @@ function ComprasPage() {
                 Registrar compra
               </button>
             ) : null}
+          </SoftDialogFooter>
+        </SoftDialogContent>
+      </Dialog>
+
+      <Dialog open={meusPedidosOpen} onOpenChange={setMeusPedidosOpen}>
+        <SoftDialogContent size="lg">
+          <SoftDialogHeader
+            eyebrow="COMPRAS"
+            title="MEUS PEDIDOS"
+          />
+          <SoftDialogBody>
+            <div className="space-y-md">
+              <p className="text-label-md text-on-surface-variant">
+                Filtre por nome do produto, período e status.
+              </p>
+              <div className="grid gap-md sm:grid-cols-2 lg:grid-cols-4">
+                <label className={cn(labelClass, "lg:col-span-2")}>
+                  Nome / produto
+                  <input
+                    type="search"
+                    value={meusPedidosQuery}
+                    onChange={(e) => setMeusPedidosQuery(e.target.value)}
+                    placeholder="Produto, motivo, orçamento…"
+                    className={fieldClass}
+                  />
+                </label>
+                <label className={labelClass}>
+                  De
+                  <input
+                    type="date"
+                    value={meusPedidosFrom}
+                    onChange={(e) => setMeusPedidosFrom(e.target.value)}
+                    className={fieldClass}
+                  />
+                </label>
+                <label className={labelClass}>
+                  Até
+                  <input
+                    type="date"
+                    value={meusPedidosTo}
+                    onChange={(e) => setMeusPedidosTo(e.target.value)}
+                    className={fieldClass}
+                  />
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-sm">
+                <label className={cn(labelClass, "min-w-[10rem] flex-1")}>
+                  Status
+                  <select
+                    value={meusPedidosStatus}
+                    onChange={(e) =>
+                      setMeusPedidosStatus(
+                        e.target.value as typeof meusPedidosStatus,
+                      )
+                    }
+                    className={fieldClass}
+                  >
+                    <option value="todos">Todos</option>
+                    <option value="aberta">A cotar</option>
+                    <option value="em_cotacao">Em cotação</option>
+                    <option value="comprada">Aguardando entrega</option>
+                    <option value="finalizado">Finalizado</option>
+                    <option value="cancelada">Cancelada</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="mt-md inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold"
+                  onClick={() => {
+                    setMeusPedidosQuery("");
+                    setMeusPedidosFrom("");
+                    setMeusPedidosTo("");
+                    setMeusPedidosStatus("todos");
+                  }}
+                >
+                  Limpar filtros
+                </button>
+                <span className="mt-md text-label-sm font-semibold text-on-surface-variant">
+                  {meusPedidosFiltrados.length} de {minhasSolicitacoes.length}
+                </span>
+              </div>
+
+              {meusPedidosFiltrados.length ? (
+                <ul className="max-h-[min(55vh,28rem)] divide-y divide-outline-variant overflow-auto rounded-lg border border-outline-variant bg-white">
+                  {meusPedidosFiltrados.map((row) => (
+                    <li
+                      key={row.id}
+                      className="flex flex-wrap items-start justify-between gap-sm px-sm py-sm"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-body-md font-semibold text-on-surface">
+                          {row.descricao}
+                        </p>
+                        {row.isLote ? (
+                          <p className="mt-2xs line-clamp-2 text-label-sm text-on-surface-variant">
+                            {row.itens.map((i) => i.descricao).join(" · ")}
+                          </p>
+                        ) : null}
+                        <p className="text-label-sm text-on-surface-variant">
+                          {[
+                            row.isLote
+                              ? `${(row.itens ?? []).length} produtos · ${row.qtd} un`
+                              : `${row.qtd}${row.unidade ? ` ${row.unidade}` : " un"}`,
+                            origemLabel(row.origem),
+                            row.motivo,
+                            formatDateBr(ymdFromIso(row.createdAt)),
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                        {row.status === "comprada" && row.previsao ? (
+                          <p className="mt-2xs text-label-sm text-amber-900">
+                            Previsto chegar: {formatDateBr(row.previsao)}
+                          </p>
+                        ) : null}
+                        {row.fornecedorNome &&
+                        (row.status === "comprada" || row.status === "finalizado") ? (
+                          <p className="mt-2xs text-label-sm text-on-surface-variant">
+                            {row.fornecedorNome}
+                            {row.valorCompra != null
+                              ? ` · ${formatMoney(row.valorCompra)}`
+                              : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-full px-sm py-2xs text-label-sm font-semibold",
+                          row.status === "aberta" && "bg-amber-100 text-amber-950",
+                          row.status === "em_cotacao" && "bg-sky-100 text-sky-950",
+                          row.status === "comprada" && "bg-orange-100 text-orange-950",
+                          row.status === "finalizado" && "bg-emerald-100 text-emerald-950",
+                          row.status === "cancelada" && "bg-red-100 text-red-900",
+                        )}
+                      >
+                        {statusLabel(row.status)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="rounded-lg border border-dashed border-outline-variant px-md py-lg text-center text-body-md text-on-surface-variant">
+                  Nenhum pedido neste filtro.
+                </p>
+              )}
+            </div>
+          </SoftDialogBody>
+          <SoftDialogFooter>
+            <button
+              type="button"
+              className={softCancelBtnClass}
+              onClick={() => setMeusPedidosOpen(false)}
+            >
+              Fechar
+            </button>
+          </SoftDialogFooter>
+        </SoftDialogContent>
+      </Dialog>
+
+      <Dialog
+        open={loteOpen}
+        onOpenChange={(open) => {
+          setLoteOpen(open);
+          if (!open) {
+            setLoteLines([]);
+            setLoteSolicitacaoId(null);
+          }
+        }}
+      >
+        <SoftDialogContent size="lg">
+          <SoftDialogHeader
+            eyebrow="COMPRAS"
+            title={`COTAÇÃO EM LOTE · ${loteLines.length} ITEM(NS)`}
+          />
+          <SoftDialogBody>
+            <div className="space-y-md">
+              <p className="text-label-md text-on-surface-variant">
+                Informe o fornecedor uma vez e preencha o valor unitário de cada produto.
+              </p>
+              <div className="grid gap-md sm:grid-cols-[minmax(0,1.4fr)_minmax(10rem,0.6fr)]">
+                <label className="relative flex flex-col gap-xs text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                  Fornecedor
+                  <input
+                    value={loteSupplierQuery}
+                    onChange={(e) => {
+                      setLoteSupplierQuery(e.target.value);
+                      setLoteSupplierId("");
+                      setLoteSupplierName("");
+                    }}
+                    placeholder="Buscar fornecedor…"
+                    className={softInputClass}
+                    autoComplete="off"
+                  />
+                  {loteSearchingSuppliers ? (
+                    <span className="text-label-sm font-normal normal-case tracking-normal text-on-surface-variant">
+                      Buscando…
+                    </span>
+                  ) : null}
+                  {loteSupplierHits.length && loteSupplierId === "" ? (
+                    <ul className="absolute left-0 right-0 top-[calc(100%-0.15rem)] z-20 max-h-48 overflow-auto rounded-lg border border-outline-variant bg-white shadow-lg">
+                      {loteSupplierHits.map((s) => (
+                        <li key={s.id}>
+                          <button
+                            type="button"
+                            className="flex w-full flex-col gap-2xs px-sm py-xs text-left font-normal normal-case tracking-normal hover:bg-surface-container"
+                            onClick={() => {
+                              setLoteSupplierId(s.id);
+                              setLoteSupplierName(s.name);
+                              setLoteSupplierQuery(s.name);
+                              setLoteSupplierHits([]);
+                            }}
+                          >
+                            <span className="text-body-md font-medium text-on-surface">
+                              {s.name}
+                            </span>
+                            <span className="text-label-sm text-on-surface-variant">
+                              Omie #{s.codigoOmie}
+                              {s.cnpjCpf ? ` · ${s.cnpjCpf}` : ""}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </label>
+                <label className="flex flex-col gap-xs text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                  Previsão
+                  <input
+                    type="date"
+                    value={lotePrevisao}
+                    onChange={(e) => setLotePrevisao(e.target.value)}
+                    className={softInputClass}
+                  />
+                </label>
+              </div>
+
+              <div className="overflow-auto rounded-lg border border-outline-variant">
+                <table className="min-w-full text-left text-label-md">
+                  <thead className="bg-surface-container text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                    <tr>
+                      <th className="px-sm py-xs">Produto</th>
+                      <th className="px-sm py-xs">Qtd</th>
+                      <th className="px-sm py-xs">Valor unit.</th>
+                      <th className="px-sm py-xs">Obs.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loteLines.map((line) => (
+                      <tr key={line.itemId} className="border-t border-outline-variant">
+                        <td className="max-w-[14rem] px-sm py-xs">
+                          <p className="line-clamp-2 font-medium text-on-surface">
+                            {line.descricao}
+                          </p>
+                        </td>
+                        <td className="whitespace-nowrap px-sm py-xs text-on-surface-variant">
+                          {line.qtd}
+                          {line.unidade ? ` ${line.unidade}` : ""}
+                        </td>
+                        <td className="px-sm py-xs">
+                          <input
+                            value={line.valor}
+                            onChange={(e) =>
+                              setLoteLines((prev) =>
+                                prev.map((x) =>
+                                  x.itemId === line.itemId
+                                    ? { ...x, valor: e.target.value }
+                                    : x,
+                                ),
+                              )
+                            }
+                            placeholder="0,00"
+                            className={cn(softInputClass, "min-w-[6rem]")}
+                          />
+                        </td>
+                        <td className="px-sm py-xs">
+                          <input
+                            value={line.obs}
+                            onChange={(e) =>
+                              setLoteLines((prev) =>
+                                prev.map((x) =>
+                                  x.itemId === line.itemId
+                                    ? { ...x, obs: e.target.value }
+                                    : x,
+                                ),
+                              )
+                            }
+                            className={softInputClass}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </SoftDialogBody>
+          <SoftDialogFooter>
+            <button
+              type="button"
+              className={softCancelBtnClass}
+              onClick={() => setLoteOpen(false)}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              className={softPrimaryBtnClass}
+              onClick={() => void handleSaveLoteCotacao()}
+            >
+              Salvar cotação em lote
+            </button>
           </SoftDialogFooter>
         </SoftDialogContent>
       </Dialog>

@@ -1,9 +1,39 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import type {
+  ClienteContratoGrupo,
+  ContratoDetalhesJson,
+  OmieContrato,
+} from "@/db/contracts";
+
+function redactClienteValores(
+  item: ClienteContratoGrupo,
+  canSee: boolean,
+): ClienteContratoGrupo {
+  if (canSee) return item;
+  return { ...item, valorMensalAtivos: 0 };
+}
+
+function redactContratoValores(contrato: OmieContrato, canSee: boolean): OmieContrato {
+  if (canSee) return contrato;
+  const detalhes: ContratoDetalhesJson | null = contrato.detalhes
+    ? {
+        ...contrato.detalhes,
+        itens: (contrato.detalhes.itens ?? []).map((item) => ({
+          ...item,
+          valorUnit: null,
+          valorTotal: null,
+        })),
+      }
+    : null;
+  return { ...contrato, valorMensal: null, detalhes };
+}
+
 export const getContratosBootstrapFn = createServerFn({ method: "GET" }).handler(async () => {
-  const { requireModule } = await import("@/lib/require-auth");
-  await requireModule("contratos");
+  const { canSeeContratoValores, requireModule } = await import("@/lib/require-auth");
+  const { user } = await requireModule("contratos");
+  const canSeeValores = canSeeContratoValores(user);
   const { getDb } = await import("@/db/schema");
   await getDb();
   const { listOmieApps } = await import("@/server/omie/client");
@@ -27,12 +57,13 @@ export const getContratosBootstrapFn = createServerFn({ method: "GET" }).handler
   return {
     apps,
     contratoCount,
-    clientes: clientesPage.items,
+    clientes: clientesPage.items.map((c) => redactClienteValores(c, canSeeValores)),
     clientesTotal: clientesPage.total,
     moniConfigured: Boolean(getMoniConfig()),
     moniContaCount: moniCount,
     defaultMoniEmpresa,
     moniEmpresas: empresas,
+    canSeeValores,
   };
 });
 
@@ -48,15 +79,21 @@ export const listContratosClientesFn = createServerFn({ method: "GET" })
       .parse(input ?? {}),
   )
   .handler(async ({ data }) => {
-    const { requireModule } = await import("@/lib/require-auth");
-    await requireModule("contratos");
+    const { canSeeContratoValores, requireModule } = await import("@/lib/require-auth");
+    const { user } = await requireModule("contratos");
+    const canSeeValores = canSeeContratoValores(user);
     const { listClientesComContratoAtivo } = await import("@/db/contracts");
-    return listClientesComContratoAtivo({
+    const page = await listClientesComContratoAtivo({
       omieAppId: data.omieAppId || null,
       query: data.query || null,
       limit: data.limit ?? 20,
       offset: data.offset ?? 0,
     });
+    return {
+      ...page,
+      items: page.items.map((c) => redactClienteValores(c, canSeeValores)),
+      canSeeValores,
+    };
   });
 
 export const listContratosClienteFn = createServerFn({ method: "GET" })
@@ -69,25 +106,29 @@ export const listContratosClienteFn = createServerFn({ method: "GET" })
       .parse(input ?? {}),
   )
   .handler(async ({ data }) => {
-    const { requireModule } = await import("@/lib/require-auth");
-    await requireModule("contratos");
+    const { canSeeContratoValores, requireModule } = await import("@/lib/require-auth");
+    const { user } = await requireModule("contratos");
+    const canSeeValores = canSeeContratoValores(user);
     const { listContratosDoCliente } = await import("@/db/contracts");
-    return listContratosDoCliente({
+    const rows = await listContratosDoCliente({
       groupKey: data.groupKey,
       omieAppId: data.omieAppId || null,
     });
+    return rows.map((row) => redactContratoValores(row, canSeeValores));
   });
 
 export const getContratoDetalheFn = createServerFn({ method: "GET" })
   .validator((input) => z.object({ id: z.coerce.number().int().positive() }).parse(input ?? {}))
   .handler(async ({ data }) => {
-    const { requireModule } = await import("@/lib/require-auth");
-    await requireModule("contratos");
+    const { canSeeContratoValores, requireModule } = await import("@/lib/require-auth");
+    const { user } = await requireModule("contratos");
+    const canSeeValores = canSeeContratoValores(user);
     const { getContratoById, listMoniContasDoContrato } = await import("@/db/contracts");
     const { getMoniContaByCodigo } = await import("@/db/moni");
     const { getDefaultMoniEmpresa, getMoniConfig } = await import("@/server/moni/client");
-    const contrato = await getContratoById(data.id);
-    if (!contrato) return null;
+    const contratoRaw = await getContratoById(data.id);
+    if (!contratoRaw) return null;
+    const contrato = redactContratoValores(contratoRaw, canSeeValores);
     const moniContas = await listMoniContasDoContrato(contrato.id);
     const moniConfigured = Boolean(getMoniConfig());
     const defaultMoniEmpresa = getDefaultMoniEmpresa(1);
@@ -111,7 +152,14 @@ export const getContratoDetalheFn = createServerFn({ method: "GET" })
       }),
     );
 
-    return { contrato, moniContas, moniDetalhes, moniConfigured, defaultMoniEmpresa };
+    return {
+      contrato,
+      moniContas,
+      moniDetalhes,
+      moniConfigured,
+      defaultMoniEmpresa,
+      canSeeValores,
+    };
   });
 
 export const searchMoniContasFn = createServerFn({ method: "GET" })

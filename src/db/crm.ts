@@ -851,6 +851,50 @@ export async function deleteDocumento(id: number, docId: string, autor: string) 
   return getOportunidade(id);
 }
 
+export async function vincularClienteOmieOportunidade(
+  id: number,
+  input: {
+    omieAppId: string;
+    codigoClienteOmie: number;
+    cliente?: string | null;
+    contato?: string | null;
+    tel?: string | null;
+    cidade?: string | null;
+  },
+  autor: string,
+) {
+  const o = await getOportunidade(id);
+  if (!o) throw new Error("Oportunidade não encontrada.");
+  const codigo = Number(input.codigoClienteOmie);
+  if (!Number.isFinite(codigo) || codigo <= 0) {
+    throw new Error("Código do cliente Omie inválido.");
+  }
+  const appId = input.omieAppId.trim();
+  if (!appId) throw new Error("App Omie não informado.");
+  const db = await getDb();
+  await db`
+    update crm_oportunidade set
+      omie_app_id = ${appId},
+      codigo_cliente_omie = ${codigo},
+      cliente = ${input.cliente?.trim() || o.cliente},
+      contato = ${input.contato?.trim() || o.contato},
+      tel = ${input.tel?.trim() || o.tel},
+      cidade = ${input.cidade?.trim() || o.cidade},
+      updated_at = now()
+    where id = ${id}
+  `;
+  await addEvent(id, autor, "sis", `Cliente vinculado à Omie (#${codigo}).`);
+  return getOportunidade(id);
+}
+
+export async function deleteOportunidade(id: number) {
+  const o = await getOportunidade(id);
+  if (!o) throw new Error("Oportunidade não encontrada.");
+  const db = await getDb();
+  await db`delete from crm_oportunidade where id = ${id}`;
+  return { ok: true as const, id, cod: o.cod };
+}
+
 export async function getDocumentoData(docId: string) {
   const db = await getDb();
   const rows = (await db`

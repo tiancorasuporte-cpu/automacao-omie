@@ -17,6 +17,8 @@ type ClienteBusca = {
   contato: string | null;
 };
 
+type ModoCliente = "omie" | "avulso";
+
 interface Props {
   vendedores: string[];
   /** vendedor pré-selecionado (ex.: quem está logado) */
@@ -29,6 +31,7 @@ const sugerirTv = (servico: string): TipoVenda =>
   SERV_RECORRENTE.includes(servico) ? "recorrente" : "execucao";
 
 export function ModalNovaOportunidade({ vendedores, vendedorPadrao, onConfirm, onCancel }: Props) {
+  const [modoCliente, setModoCliente] = useState<ModoCliente>("omie");
   const [cliente, setCliente] = useState("");
   const [contato, setContato] = useState("");
   const [tel, setTel] = useState("");
@@ -48,7 +51,7 @@ export function ModalNovaOportunidade({ vendedores, vendedorPadrao, onConfirm, o
   const { erro, ocupado, enviar } = useSubmeter();
 
   useEffect(() => {
-    if (vinculado || cadastroOmie) {
+    if (modoCliente !== "omie" || vinculado || cadastroOmie) {
       setSugestoes([]);
       setBuscando(false);
       return;
@@ -85,12 +88,19 @@ export function ModalNovaOportunidade({ vendedores, vendedorPadrao, onConfirm, o
       })();
     }, 300);
     return () => clearTimeout(timer);
-  }, [cliente, vinculado, cadastroOmie]);
+  }, [cliente, vinculado, cadastroOmie, modoCliente]);
 
   const limparVinculoOmie = () => {
     setCodigoClienteOmie(null);
     setOmieAppId(null);
     setVinculado(false);
+  };
+
+  const trocarModo = (modo: ModoCliente) => {
+    setModoCliente(modo);
+    limparVinculoOmie();
+    setSugestoes([]);
+    setCadastroOmie(false);
   };
 
   const aplicarClienteOmie = (c: ClienteOmieCriado) => {
@@ -103,6 +113,7 @@ export function ModalNovaOportunidade({ vendedores, vendedorPadrao, onConfirm, o
     setVinculado(true);
     setSugestoes([]);
     setCadastroOmie(false);
+    setModoCliente("omie");
   };
 
   const selecionarClienteOmie = (c: ClienteBusca) => {
@@ -131,6 +142,9 @@ export function ModalNovaOportunidade({ vendedores, vendedorPadrao, onConfirm, o
     enviar(async (): Promise<string | void> => {
       const c = cliente.trim();
       if (!c) return "Informe o cliente.";
+      if (modoCliente === "omie" && !(codigoClienteOmie && codigoClienteOmie > 0)) {
+        return "Selecione um cliente Omie ou cadastre na Omie. Se ainda não tiver, use “Sem Omie por enquanto”.";
+      }
       await onConfirm({
         cliente: c,
         contato,
@@ -139,8 +153,8 @@ export function ModalNovaOportunidade({ vendedores, vendedorPadrao, onConfirm, o
         servico,
         tv,
         vendedor,
-        omieAppId,
-        codigoClienteOmie,
+        omieAppId: modoCliente === "omie" ? omieAppId : null,
+        codigoClienteOmie: modoCliente === "omie" ? codigoClienteOmie : null,
       });
     });
 
@@ -176,9 +190,38 @@ export function ModalNovaOportunidade({ vendedores, vendedorPadrao, onConfirm, o
         Normalmente a oportunidade nasce sozinha quando o técnico finaliza uma OS de orçamento. Use
         aqui para indicação, cliente que ligou etc.
       </div>
+
+      <div className="f">
+        <label>Cliente na Omie?</label>
+        <div className="seg-omie" role="group" aria-label="Modo do cliente">
+          <button
+            type="button"
+            className={modoCliente === "omie" ? "on" : ""}
+            disabled={ocupado}
+            onClick={() => trocarModo("omie")}
+          >
+            Já tenho / vou cadastrar na Omie
+          </button>
+          <button
+            type="button"
+            className={modoCliente === "avulso" ? "on" : ""}
+            disabled={ocupado}
+            onClick={() => trocarModo("avulso")}
+          >
+            Sem Omie por enquanto
+          </button>
+        </div>
+        {modoCliente === "avulso" ? (
+          <div className="note" style={{ marginTop: 8 }}>
+            Pode criar agora só com o nome. Para <strong>avançar</strong> no funil, o cadastro na Omie
+            será obrigatório.
+          </div>
+        ) : null}
+      </div>
+
       <div className="f">
         <label>Cliente *</label>
-        {vinculado && codigoClienteOmie ? (
+        {modoCliente === "omie" && vinculado && codigoClienteOmie ? (
           <div className="cliente-omie-pick">
             <div className="cliente-omie-pick-info">
               <div className="cliente-omie-pick-nome">{cliente}</div>
@@ -201,7 +244,7 @@ export function ModalNovaOportunidade({ vendedores, vendedorPadrao, onConfirm, o
               </button>
             </div>
           </div>
-        ) : (
+        ) : modoCliente === "omie" ? (
           <>
             <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
               <div className="cliente-omie-busca" style={{ flex: 1 }}>
@@ -245,6 +288,12 @@ export function ModalNovaOportunidade({ vendedores, vendedorPadrao, onConfirm, o
               </button>
             </div>
           </>
+        ) : (
+          <input
+            value={cliente}
+            placeholder="Nome do cliente / empresa"
+            onChange={(e) => setCliente(e.target.value)}
+          />
         )}
       </div>
       <div className="grid">

@@ -16,6 +16,7 @@ import { logoutFn } from "@/lib/auth";
 import { APP_NAME, APP_VERSION } from "@/lib/brand";
 import { getComprasUnreadFn } from "@/lib/compras";
 import { consumeLoginEnter } from "@/lib/login-enter";
+import { hasPermission, type AppPermissionId } from "@/lib/modules";
 import { isAdmin, isSuperadmin, canAccessModule, roleLabel } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 import { Route as RootRoute } from "@/routes/__root";
@@ -65,6 +66,8 @@ type NavLeaf = {
   icon: string;
   adminOnly?: boolean;
   module?: AppModuleId;
+  /** Permissão fina extra (além do módulo). */
+  permission?: AppPermissionId;
   /** Query string simples, ex.: "view=agenda" */
   search?: string;
   badge?: string | number;
@@ -135,6 +138,7 @@ const NAV: NavEntry[] = [
         label: "Comissões",
         icon: "payments",
         module: "crm",
+        permission: "crm_comissoes",
         search: "view=comissoes",
       },
     ],
@@ -232,8 +236,19 @@ const NAV: NavEntry[] = [
 ];
 
 function canSeeLeaf(user: AppUser | null, item: NavLeaf) {
+  if (!user) return false;
   if (item.adminOnly) return isAdmin(user);
-  if (item.module) return canAccessModule(user, item.module);
+  if (item.module && !canAccessModule(user, item.module)) return false;
+  if (item.permission === "crm_comissoes") {
+    return (
+      isAdmin(user) ||
+      hasPermission(user.modules, "crm_comissoes") ||
+      Boolean(user.isVendedor)
+    );
+  }
+  if (item.permission) {
+    return isAdmin(user) || hasPermission(user.modules, item.permission);
+  }
   return true;
 }
 

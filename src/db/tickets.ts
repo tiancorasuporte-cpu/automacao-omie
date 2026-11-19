@@ -70,6 +70,13 @@ export type Ticket = {
   } | null;
   setores: TicketSetorId[];
   agDate: string | null;
+  agDateFirst: string | null;
+  moniEmpresa: number | null;
+  moniContaCodigo: string | null;
+  moniContaNome: string | null;
+  moniContaIdExt: string | null;
+  /** Dados enriquecidos do cache moni_contas (best-effort). */
+  moniDetalhe: import("@/db/moni").MoniVinculoInfo | null;
   createdAt: string;
   updatedAt: string;
   events: TicketEvent[];
@@ -129,6 +136,12 @@ function mapTicket(row: Record<string, unknown>, setores: TicketSetorId[] = []):
     lev: parseLev(row["lev_json"]),
     setores,
     agDate: dateOnly(row["ag_date"]),
+    agDateFirst: dateOnly(row["ag_date_first"]),
+    moniEmpresa: row["moni_empresa"] == null ? null : num(row["moni_empresa"]),
+    moniContaCodigo: nullableStr(row["moni_conta_codigo"]),
+    moniContaNome: nullableStr(row["moni_conta_nome"]),
+    moniContaIdExt: nullableStr(row["moni_conta_id_ext"]),
+    moniDetalhe: null,
     createdAt:
       row["created_at"] instanceof Date
         ? row["created_at"].toISOString()
@@ -262,15 +275,25 @@ export async function createTicket(input: {
   openedBy: number | null;
   openedByName: string;
   lev?: TicketLev | null | undefined;
+  moniEmpresa?: number | null | undefined;
+  moniContaCodigo?: string | null | undefined;
+  moniContaNome?: string | null | undefined;
+  moniContaIdExt?: string | null | undefined;
 }) {
   const db = await getDb();
   const numTk = await nextTicketNum();
   const setores = [...new Set(input.setores.map((s) => s.trim()).filter(Boolean))];
   if (!setores.length) throw new Error("Selecione ao menos um setor.");
+  const moniCodigo = nullableStr(input.moniContaCodigo);
+  const moniEmpresa =
+    moniCodigo && input.moniEmpresa != null && Number(input.moniEmpresa) > 0
+      ? Number(input.moniEmpresa)
+      : null;
   const [row] = (await db`
     insert into tickets (
       num, cat, codigo_ref, client_name, omie_app_id, client_code, contato,
-      descricao, prioridade, status, opened_by, opened_by_name, lev_json
+      descricao, prioridade, status, opened_by, opened_by_name, lev_json,
+      moni_empresa, moni_conta_codigo, moni_conta_nome, moni_conta_id_ext
     ) values (
       ${numTk},
       ${input.cat},
@@ -284,7 +307,11 @@ export async function createTicket(input: {
       'aberto',
       ${input.openedBy},
       ${input.openedByName},
-      ${input.lev != null ? JSON.stringify(input.lev) : null}
+      ${input.lev != null ? JSON.stringify(input.lev) : null},
+      ${moniEmpresa},
+      ${moniCodigo},
+      ${moniCodigo ? nullableStr(input.moniContaNome) : null},
+      ${moniCodigo ? nullableStr(input.moniContaIdExt) : null}
     )
     returning *
   `) as Record<string, unknown>[];
@@ -299,7 +326,34 @@ export async function createTicket(input: {
     titulo: "Ticket aberto",
     texto: input.descricao.trim(),
   });
+  if (moniCodigo) {
+    await addTicketEvent({
+      ticketId: ticket.id,
+      quem: input.openedByName,
+      userId: input.openedBy,
+      tipo: "moni",
+      titulo: "Conta Moni vinculada",
+      texto: `Emp.${moniEmpresa ?? "—"} · ${nullableStr(input.moniContaIdExt) || moniCodigo}${
+        input.moniContaNome ? ` · ${input.moniContaNome}` : ""
+      }`,
+    });
+  }
   return getTicketById(ticket.id);
+}
+
+async function attachMoniDetalhe(ticket: Ticket): Promise<Ticket> {
+  if (!ticket.moniContaCodigo) {
+    ticket.moniDetalhe = null;
+    return ticket;
+  }
+  const { enrichMoniVinculo } = await import("@/db/moni");
+  ticket.moniDetalhe = await enrichMoniVinculo({
+    moniEmpresa: ticket.moniEmpresa,
+    moniContaCodigo: ticket.moniContaCodigo,
+    moniContaNome: ticket.moniContaNome,
+    moniContaIdExt: ticket.moniContaIdExt,
+  });
+  return ticket;
 }
 
 export async function getTicketById(id: number) {
@@ -315,7 +369,7 @@ export async function getTicketById(id: number) {
     select * from ticket_events where ticket_id = ${id} order by id asc
   `) as Record<string, unknown>[];
   ticket.events = events.map(mapEvent);
-  return ticket;
+  return attachMoniDetalhe(ticket);
 }
 
 export async function listTickets(input: {
@@ -373,6 +427,7 @@ export async function listTickets(input: {
     return b.createdAt.localeCompare(a.createdAt);
   });
 
+  await Promise.all(tickets.map((t) => attachMoniDetalhe(t)));
   return tickets;
 }
 
@@ -522,6 +577,35 @@ export async function reopenTicket(input: {
   return getTicketById(input.id);
 }
 
+export async function updateTicketPrioridade(input: {
+  id: number;
+  prioridade: TicketPrio;
+  userId: number;
+  userName: string;
+}) {
+  const current = await getTicketById(input.id);
+  if (!current) throw new Error("Ticket não encontrado.");
+  if (current.status === "resolvido" || current.status === "os") {
+    throw new Error("Ticket encerrado — reabra para alterar a prioridade.");
+  }
+  const prioridade = input.prioridade || "Normal";
+  const db = await getDb();
+  await db`
+    update tickets
+    set prioridade = ${prioridade},
+        updated_at = now()
+    where id = ${input.id}
+  `;
+  await addTicketEvent({
+    ticketId: input.id,
+    quem: input.userName,
+    userId: input.userId,
+    tipo: "prioridade",
+    titulo: `Prioridade: ${prioridade}`,
+  });
+  return getTicketById(input.id);
+}
+
 export async function scheduleTicket(input: {
   id: number;
   agDate: string | null;
@@ -532,9 +616,59 @@ export async function scheduleTicket(input: {
   if (!current) throw new Error("Ticket não encontrado.");
   const agDate = input.agDate?.trim() ? input.agDate.trim().slice(0, 10) : null;
   const db = await getDb();
+  if (agDate) {
+    await db`
+      update tickets
+      set ag_date = ${agDate},
+          ag_date_first = least(
+            coalesce(ag_date_first, ${agDate}::date),
+            ${agDate}::date
+          ),
+          updated_at = now()
+      where id = ${input.id}
+    `;
+  } else {
+    await db`
+      update tickets
+      set ag_date = null,
+          ag_date_first = null,
+          updated_at = now()
+      where id = ${input.id}
+    `;
+  }
+  await addTicketEvent({
+    ticketId: input.id,
+    quem: input.userName,
+    userId: input.userId,
+    tipo: "agendamento",
+    titulo: agDate ? `Agendado para ${agDate}` : "Data agendada removida",
+  });
+  return getTicketById(input.id);
+}
+
+export async function linkTicketMoni(input: {
+  id: number;
+  moniEmpresa: number | null;
+  moniContaCodigo: string | null;
+  moniContaNome?: string | null;
+  moniContaIdExt?: string | null;
+  userId: number;
+  userName: string;
+}) {
+  const current = await getTicketById(input.id);
+  if (!current) throw new Error("Ticket não encontrado.");
+  const codigo = nullableStr(input.moniContaCodigo);
+  const empresa =
+    codigo && input.moniEmpresa != null && Number(input.moniEmpresa) > 0
+      ? Number(input.moniEmpresa)
+      : null;
+  const db = await getDb();
   await db`
     update tickets
-    set ag_date = ${agDate},
+    set moni_empresa = ${empresa},
+        moni_conta_codigo = ${codigo},
+        moni_conta_nome = ${codigo ? nullableStr(input.moniContaNome) : null},
+        moni_conta_id_ext = ${codigo ? nullableStr(input.moniContaIdExt) : null},
         updated_at = now()
     where id = ${input.id}
   `;
@@ -542,8 +676,13 @@ export async function scheduleTicket(input: {
     ticketId: input.id,
     quem: input.userName,
     userId: input.userId,
-    tipo: "agendamento",
-    titulo: agDate ? `Agendado para ${agDate}` : "Data agendada removida",
+    tipo: "moni",
+    titulo: codigo ? "Conta Moni vinculada" : "Conta Moni removida",
+    texto: codigo
+      ? `Emp.${empresa ?? "—"} · ${nullableStr(input.moniContaIdExt) || codigo}${
+          input.moniContaNome ? ` · ${input.moniContaNome}` : ""
+        }`
+      : "",
   });
   return getTicketById(input.id);
 }

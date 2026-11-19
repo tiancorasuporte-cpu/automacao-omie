@@ -12,8 +12,10 @@ export type CrmView = "quadro" | "relatorios" | "comissoes";
 
 export interface UsuarioCrm {
   nome: string;
-  /** permissão "Comissões" (Administrador / Financeiro) */
+  /** permissão "CRM · Painel de comissões" (ver todos / regras / pagamento) */
   comissoes: boolean;
+  /** flag de vendedor — entra no plano e vê as próprias comissões */
+  isVendedor: boolean;
 }
 
 /** Dados da proposta (bloco de anexo + valores) usados em Montado, Envio e Anexo */
@@ -141,6 +143,19 @@ export interface CrmAcoes {
   equipe: (id: number, d: EquipeDados) => Promise<void>;
   uploadDoc: (id: number, d: UploadDocDados) => Promise<void>;
   deleteDoc: (id: number, docId: string) => Promise<void>;
+  /** Remove a oportunidade e dependências (documentos, histórico…). */
+  deleteOportunidade: (id: number) => Promise<void>;
+  vincularOmie: (
+    id: number,
+    d: {
+      omieAppId: string;
+      codigoClienteOmie: number;
+      cliente?: string | null;
+      contato?: string | null;
+      tel?: string | null;
+      cidade?: string | null;
+    },
+  ) => Promise<void>;
   saveRegras: (r: RegrasComissao) => Promise<void>;
   /** `null` = desfazer o encerramento */
   encerrarContrato: (id: number, d: { fim: string; motivo: string } | null) => Promise<void>;

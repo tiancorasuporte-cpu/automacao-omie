@@ -37,11 +37,14 @@ import {
   saveOsLev,
   saveOsMaterialDisposition,
   saveOsResolucao,
+  assignOsTecnico,
+  linkOsMoni,
   scheduleOs,
   searchQuotesLocal,
   startExecOs,
   submitConference,
   updateOsItemStatus,
+  updateOsPrioridade,
 } from "@/db/assistencia";
 import { createTicket } from "@/db/tickets";
 import { ensureSchemaOnce } from "@/db/schema";
@@ -258,6 +261,7 @@ export const createOsFn = createServerFn({ method: "POST" })
         quoteId: z.number().int().positive().optional().nullable(),
         quoteNumero: z.string().optional().nullable(),
         ticketId: z.number().int().positive().optional().nullable(),
+        prioridade: z.enum(["Baixa", "Normal", "Alta", "Urgente"]).optional().nullable(),
         items: z
           .array(
             z.object({
@@ -292,6 +296,7 @@ export const createOsFn = createServerFn({ method: "POST" })
       quoteId: data.quoteId,
       quoteNumero: data.quoteNumero,
       ticketId: data.ticketId,
+      prioridade: data.prioridade,
       items: data.items,
       createdBy: user.id,
       createdByName: user.name,
@@ -478,6 +483,154 @@ export const scheduleOsFn = createServerFn({ method: "POST" })
     }
     return os;
   });
+
+export const assignOsTecnicoFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        teamId: z.number().int().positive().optional().nullable(),
+        tecnicoNome: z.string().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    const os = await assignOsTecnico({
+      osId: data.osId,
+      teamId: data.teamId,
+      tecnicoNome: data.tecnicoNome,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+    if (os && (data.tecnicoNome?.trim() || data.teamId)) {
+      try {
+        const { notifyTecnicoOsAssigned } = await import("@/server/mobile-push");
+        await notifyTecnicoOsAssigned({
+          tecnicoNome: data.tecnicoNome,
+          teamId: data.teamId ?? os.teamId,
+          osId: os.id,
+          osNum: os.num,
+          clientName: os.clientName,
+          agDate: os.agDate,
+          periodo: os.periodo,
+        });
+      } catch (error) {
+        console.error("[assignOsTecnico] push falhou", error);
+      }
+    }
+    return os;
+  });
+
+export const updateOsPrioridadeFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        prioridade: z.enum(["Baixa", "Normal", "Alta", "Urgente"]),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return updateOsPrioridade({
+      osId: data.osId,
+      prioridade: data.prioridade,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const linkOsMoniFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        moniEmpresa: z.number().int().positive().optional().nullable(),
+        moniContaCodigo: z.string().optional().nullable(),
+        moniContaNome: z.string().optional().nullable(),
+        moniContaIdExt: z.string().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    return linkOsMoni({
+      osId: data.osId,
+      moniEmpresa: data.moniEmpresa ?? null,
+      moniContaCodigo: data.moniContaCodigo ?? null,
+      moniContaNome: data.moniContaNome ?? null,
+      moniContaIdExt: data.moniContaIdExt ?? null,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+  });
+
+export const searchOsMoniContasFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        query: z.string().trim().min(1),
+        empresa: z.coerce.number().int().positive().optional().nullable(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    const { getDefaultMoniEmpresa, getMoniConfig } = await import("@/server/moni/client");
+    const { searchMoniContasLocal, countMoniContas } = await import("@/db/moni");
+    const empresa = data.empresa && data.empresa > 0 ? data.empresa : getDefaultMoniEmpresa(1);
+    const local = await searchMoniContasLocal({
+      query: data.query,
+      empresa,
+      limit: data.limit ?? 40,
+    });
+    if (local.length > 0) return { items: local, source: "local" as const, empresa };
+    if (!getMoniConfig()) {
+      return { items: [] as typeof local, source: "local" as const, empresa };
+    }
+    const count = await countMoniContas();
+    try {
+      const { searchMoniContasLive } = await import("@/server/moni/contas");
+      const items = await searchMoniContasLive(data.query, {
+        empresa,
+        limit: data.limit ?? 40,
+      });
+      return { items, source: count > 0 ? ("local" as const) : ("live" as const), empresa };
+    } catch {
+      return { items: [] as typeof local, source: "local" as const, empresa };
+    }
+  });
+
+export const listOsMoniEmpresasFn = createServerFn({ method: "GET" }).handler(async () => {
+  await auth();
+  await boot();
+  const { getDefaultMoniEmpresa } = await import("@/server/moni/client");
+  const { listMoniEmpresasLocal } = await import("@/db/moni");
+  const defaultMoniEmpresa = getDefaultMoniEmpresa(1);
+  const moniEmpresas = await listMoniEmpresasLocal().catch(() => [] as number[]);
+  const empresas =
+    moniEmpresas.length > 0
+      ? moniEmpresas
+      : defaultMoniEmpresa > 0
+        ? [defaultMoniEmpresa]
+        : [1];
+  return { defaultMoniEmpresa, moniEmpresas: empresas };
+});
 
 export const startExecOsFn = createServerFn({ method: "POST" })
   .validator((input) =>

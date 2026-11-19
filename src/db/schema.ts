@@ -18,6 +18,7 @@ export type AppUser = {
   modules: AppModuleId[];
   isTecnico: boolean;
   isComprador: boolean;
+  isVendedor: boolean;
   defaultVehicleId: number | null;
 };
 
@@ -31,6 +32,7 @@ export type AppUserRow = {
   modules?: string | null;
   is_tecnico?: boolean | null;
   is_comprador?: boolean | null;
+  is_vendedor?: boolean | null;
   default_vehicle_id?: number | null;
 };
 
@@ -64,7 +66,7 @@ let ready: Promise<void> | undefined;
 let readyForVersion: number | undefined;
 
 /** Bump quando adicionar migração real em migrateSchema. Evita ~200 roundtrips a cada boot. */
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 14;
 
 export function resetSchemaReady() {
   ready = undefined;
@@ -149,7 +151,16 @@ async function migrateSchema() {
   const sql = getSql();
 
   // Fast path: schema já no ar — não revarre information_schema nem roda ALTER idempotente.
-  if ((await tableExists("app_settings")) && (await readSchemaVersion(sql)) === String(SCHEMA_VERSION)) {
+  // Se faltar tabela/coluna introduzida nesta versão, não pule (evita HMR/version bump sem DDL).
+  if (
+    (await tableExists("app_settings")) &&
+    (await readSchemaVersion(sql)) === String(SCHEMA_VERSION) &&
+    (await tableExists("compras_solicitacao_itens")) &&
+    (await columnExists("assist_os", "prioridade")) &&
+    (await columnExists("assist_os", "ag_date_first")) &&
+    (await columnExists("assist_os", "moni_conta_codigo")) &&
+    (await columnExists("tickets", "moni_conta_codigo"))
+  ) {
     return;
   }
 
@@ -180,6 +191,11 @@ async function migrateSchema() {
   if (!(await columnExists("users", "is_comprador"))) {
     await sql.unsafe(
       "alter table users add column is_comprador boolean not null default false",
+    );
+  }
+  if (!(await columnExists("users", "is_vendedor"))) {
+    await sql.unsafe(
+      "alter table users add column is_vendedor boolean not null default false",
     );
   }
   if (!(await columnExists("users", "default_vehicle_id"))) {
@@ -1857,6 +1873,29 @@ async function migrateSchema() {
       "create index assist_os_problem_type_idx on assist_os (problem_type_id) where problem_type_id is not null",
     );
   }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "prioridade"))) {
+    await sql.unsafe(
+      "alter table assist_os add column prioridade varchar(16) not null default 'Normal'",
+    );
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "ag_date_first"))) {
+    await sql.unsafe("alter table assist_os add column ag_date_first date");
+    await sql.unsafe(
+      "update assist_os set ag_date_first = ag_date where ag_date is not null and ag_date_first is null",
+    );
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "moni_empresa"))) {
+    await sql.unsafe("alter table assist_os add column moni_empresa smallint");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "moni_conta_codigo"))) {
+    await sql.unsafe("alter table assist_os add column moni_conta_codigo varchar(120)");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "moni_conta_nome"))) {
+    await sql.unsafe("alter table assist_os add column moni_conta_nome varchar(255)");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "moni_conta_id_ext"))) {
+    await sql.unsafe("alter table assist_os add column moni_conta_id_ext varchar(120)");
+  }
 
   if (!(await tableExists("assist_os_checklists"))) {
     await sql`
@@ -2101,6 +2140,24 @@ async function migrateSchema() {
   if (!(await indexExists("tickets_ag_date_idx"))) {
     await sql.unsafe("create index tickets_ag_date_idx on tickets (ag_date)");
   }
+  if ((await tableExists("tickets")) && !(await columnExists("tickets", "ag_date_first"))) {
+    await sql.unsafe("alter table tickets add column ag_date_first date");
+    await sql.unsafe(
+      "update tickets set ag_date_first = ag_date where ag_date is not null and ag_date_first is null",
+    );
+  }
+  if ((await tableExists("tickets")) && !(await columnExists("tickets", "moni_empresa"))) {
+    await sql.unsafe("alter table tickets add column moni_empresa smallint");
+  }
+  if ((await tableExists("tickets")) && !(await columnExists("tickets", "moni_conta_codigo"))) {
+    await sql.unsafe("alter table tickets add column moni_conta_codigo varchar(120)");
+  }
+  if ((await tableExists("tickets")) && !(await columnExists("tickets", "moni_conta_nome"))) {
+    await sql.unsafe("alter table tickets add column moni_conta_nome varchar(255)");
+  }
+  if ((await tableExists("tickets")) && !(await columnExists("tickets", "moni_conta_id_ext"))) {
+    await sql.unsafe("alter table tickets add column moni_conta_id_ext varchar(120)");
+  }
 
   if (!(await tableExists("ticket_sectors"))) {
     await sql`
@@ -2214,11 +2271,38 @@ async function migrateSchema() {
     `);
   }
 
+  if (!(await tableExists("compras_solicitacao_itens"))) {
+    await sql`
+      create table compras_solicitacao_itens (
+        id serial primary key,
+        solicitacao_id integer not null references compras_solicitacoes(id) on delete cascade,
+        product_id integer references omie_products(id) on delete set null,
+        codigo_produto bigint,
+        descricao varchar(400) not null,
+        unidade varchar(40),
+        qtd numeric(15, 4) not null default 1,
+        cmc_omie numeric(15, 4),
+        cmc_interno numeric(15, 4),
+        cmc_efetivo numeric(15, 4),
+        observacao text,
+        valor_compra numeric(15, 4),
+        cmc_novo numeric(15, 4),
+        created_at timestamptz not null default now()
+      )
+    `;
+  }
+  if (!(await indexExists("compras_solicitacao_itens_sol_idx"))) {
+    await sql.unsafe(
+      "create index compras_solicitacao_itens_sol_idx on compras_solicitacao_itens (solicitacao_id, id asc)",
+    );
+  }
+
   if (!(await tableExists("compras_cotacao_propostas"))) {
     await sql`
       create table compras_cotacao_propostas (
         id serial primary key,
         solicitacao_id integer not null references compras_solicitacoes(id) on delete cascade,
+        item_id integer references compras_solicitacao_itens(id) on delete cascade,
         supplier_id integer,
         supplier_name varchar(200) not null,
         valor_unitario numeric(15, 4) not null,
@@ -2230,9 +2314,23 @@ async function migrateSchema() {
       )
     `;
   }
+  if (
+    (await tableExists("compras_cotacao_propostas")) &&
+    !(await columnExists("compras_cotacao_propostas", "item_id"))
+  ) {
+    await sql.unsafe(`
+      alter table compras_cotacao_propostas
+      add column item_id integer references compras_solicitacao_itens(id) on delete cascade
+    `);
+  }
   if (!(await indexExists("compras_cotacao_propostas_sol_idx"))) {
     await sql.unsafe(
       "create index compras_cotacao_propostas_sol_idx on compras_cotacao_propostas (solicitacao_id, created_at desc)",
+    );
+  }
+  if (!(await indexExists("compras_cotacao_propostas_item_idx"))) {
+    await sql.unsafe(
+      "create index compras_cotacao_propostas_item_idx on compras_cotacao_propostas (item_id, created_at desc)",
     );
   }
 

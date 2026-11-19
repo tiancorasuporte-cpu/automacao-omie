@@ -82,6 +82,7 @@ function ContratosPage() {
         initialMoniContaCount={bootstrap.moniContaCount}
         initialDefaultMoniEmpresa={bootstrap.defaultMoniEmpresa}
         initialMoniEmpresas={bootstrap.moniEmpresas}
+        canSeeValores={bootstrap.canSeeValores}
       />
     </AppShell>
   );
@@ -96,6 +97,7 @@ function ContratosContent({
   initialMoniContaCount,
   initialDefaultMoniEmpresa,
   initialMoniEmpresas,
+  canSeeValores,
 }: {
   initialApps: Array<{ id: string; name: string }>;
   initialClientes: ClienteGrupo[];
@@ -105,6 +107,7 @@ function ContratosContent({
   initialMoniContaCount: number;
   initialDefaultMoniEmpresa: number;
   initialMoniEmpresas: number[];
+  canSeeValores: boolean;
 }) {
   const router = useRouter();
   const { query } = useShellSearch();
@@ -534,14 +537,17 @@ function ContratosContent({
           </p>
         ) : (
           <div className="mt-md overflow-x-auto rounded-xl border border-outline-variant">
-            <table className="w-full min-w-[720px] border-collapse text-left text-body-md">
+            <table className="w-full min-w-[820px] border-collapse text-left text-body-md">
               <thead className="bg-surface-container-low text-label-sm uppercase tracking-wide text-on-surface-variant">
                 <tr>
                   <th className="px-md py-sm font-semibold">Cliente</th>
                   <th className="px-md py-sm font-semibold">CNPJ/CPF</th>
                   <th className="px-md py-sm font-semibold">Empresas</th>
                   <th className="px-md py-sm font-semibold text-right">Ativos</th>
-                  <th className="px-md py-sm font-semibold text-right">Valor mensal ativo</th>
+                  <th className="px-md py-sm font-semibold">Moni</th>
+                  {canSeeValores ? (
+                    <th className="px-md py-sm font-semibold text-right">Valor mensal ativo</th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody>
@@ -571,9 +577,24 @@ function ContratosContent({
                         <span className="text-on-surface-variant"> / {c.qtdTotal}</span>
                       ) : null}
                     </td>
-                    <td className="px-md py-sm text-right tabular-nums font-medium">
-                      {formatMoney(c.valorMensalAtivos)}
+                    <td className="px-md py-sm">
+                      {c.moniQtdAtivos > 0 ? (
+                        <span
+                          className="inline-flex rounded-md border border-emerald-200 bg-emerald-50 px-xs py-2xs text-label-sm font-medium text-emerald-900"
+                          title={`${c.moniContratosAtivos} contrato(s) ativo(s) com Moni · ${c.moniQtdAtivos} conta(s)`}
+                        >
+                          {c.moniContratosAtivos}/{c.qtdAtivos} · {c.moniQtdAtivos} conta
+                          {c.moniQtdAtivos === 1 ? "" : "s"}
+                        </span>
+                      ) : (
+                        <span className="text-on-surface-variant">Sem Moni</span>
+                      )}
                     </td>
+                    {canSeeValores ? (
+                      <td className="px-md py-sm text-right tabular-nums font-medium">
+                        {formatMoney(c.valorMensalAtivos)}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -674,7 +695,9 @@ function ContratosContent({
                     {ctr.situacaoLabel}
                   </span>
                 </InfoCard>
-                <InfoCard label="Valor mensal">{formatMoney(ctr.valorMensal)}</InfoCard>
+                {canSeeValores ? (
+                  <InfoCard label="Valor mensal">{formatMoney(ctr.valorMensal)}</InfoCard>
+                ) : null}
                 <InfoCard label="Faturamento">
                   {ctr.tipoFatLabel || "—"}
                   {ctr.diaFat ? ` · dia ${ctr.diaFat}` : ""}
@@ -731,8 +754,12 @@ function ContratosContent({
                           <th className="px-md py-sm font-semibold">#</th>
                           <th className="px-md py-sm font-semibold">Descrição</th>
                           <th className="px-md py-sm font-semibold text-right">Qtd</th>
-                          <th className="px-md py-sm font-semibold text-right">Unit.</th>
-                          <th className="px-md py-sm font-semibold text-right">Total</th>
+                          {canSeeValores ? (
+                            <>
+                              <th className="px-md py-sm font-semibold text-right">Unit.</th>
+                              <th className="px-md py-sm font-semibold text-right">Total</th>
+                            </>
+                          ) : null}
                         </tr>
                       </thead>
                       <tbody>
@@ -741,10 +768,16 @@ function ContratosContent({
                             <td className="px-md py-sm text-on-surface-variant">{item.seq ?? idx + 1}</td>
                             <td className="px-md py-sm">{item.descricao || "—"}</td>
                             <td className="px-md py-sm text-right tabular-nums">{item.quantidade ?? "—"}</td>
-                            <td className="px-md py-sm text-right tabular-nums">{formatMoney(item.valorUnit)}</td>
-                            <td className="px-md py-sm text-right tabular-nums font-medium">
-                              {formatMoney(item.valorTotal)}
-                            </td>
+                            {canSeeValores ? (
+                              <>
+                                <td className="px-md py-sm text-right tabular-nums">
+                                  {formatMoney(item.valorUnit)}
+                                </td>
+                                <td className="px-md py-sm text-right tabular-nums font-medium">
+                                  {formatMoney(item.valorTotal)}
+                                </td>
+                              </>
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>
@@ -938,7 +971,9 @@ function ContratosContent({
                     <th className="px-md py-sm font-semibold">Nº</th>
                     <th className="px-md py-sm font-semibold">Situação</th>
                     <th className="px-md py-sm font-semibold">Vigência</th>
-                    <th className="px-md py-sm font-semibold text-right">Valor/mês</th>
+                    {canSeeValores ? (
+                      <th className="px-md py-sm font-semibold text-right">Valor/mês</th>
+                    ) : null}
                     <th className="px-md py-sm font-semibold">Moni</th>
                     <th className="px-md py-sm font-semibold">Serviço</th>
                   </tr>
@@ -969,14 +1004,18 @@ function ContratosContent({
                       <td className="px-md py-sm text-on-surface-variant whitespace-nowrap">
                         {formatDateBr(row.vigenciaIni)} → {formatDateBr(row.vigenciaFim)}
                       </td>
-                      <td className="px-md py-sm text-right tabular-nums">{formatMoney(row.valorMensal)}</td>
+                      {canSeeValores ? (
+                        <td className="px-md py-sm text-right tabular-nums">
+                          {formatMoney(row.valorMensal)}
+                        </td>
+                      ) : null}
                       <td className="px-md py-sm">
                         {row.moniQtd > 0 ? (
-                          <span className="rounded-md border border-outline-variant bg-white px-xs py-2xs text-label-sm">
-                            {row.moniQtd} conta(s)
+                          <span className="inline-flex rounded-md border border-emerald-200 bg-emerald-50 px-xs py-2xs text-label-sm font-medium text-emerald-900">
+                            {row.moniQtd} conta{row.moniQtd === 1 ? "" : "s"}
                           </span>
                         ) : (
-                          <span className="text-on-surface-variant">—</span>
+                          <span className="text-on-surface-variant">Sem Moni</span>
                         )}
                       </td>
                       <td

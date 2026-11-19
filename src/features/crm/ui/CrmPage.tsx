@@ -16,6 +16,7 @@ import { ModalNota } from "./modals/Nota";
 import { ModalNovaOportunidade } from "./modals/NovaOportunidade";
 import { ModalRegrasComissao } from "./modals/RegrasComissao";
 import { ModalResultadoAcao } from "./modals/ResultadoAcao";
+import { ModalVincularClienteOmie } from "./modals/VincularClienteOmie";
 import { ModalVoltarReabrir } from "./modals/VoltarReabrir";
 import { OpportunityDrawer, type AbaGaveta, type AcaoGaveta } from "./OpportunityDrawer";
 import { RelatoriosView } from "./RelatoriosView";
@@ -48,6 +49,7 @@ type ModalAberto =
   | { k: "reabrir"; id: number }
   | { k: "responsavel"; id: number; novo: string }
   | { k: "encerrar"; id: number }
+  | { k: "omie"; id: number; destino: EtapaId }
   | { k: "regras" };
 
 const NOME_ETAPA: Record<string, string> = {
@@ -135,6 +137,12 @@ export function CrmPage(props: CrmPageProps) {
     if (!o) return;
     const r = movimento(o, destino);
     if (!r.ok) {
+      if (r.precisaOmie) {
+        toast(r.erro);
+        abrir(id);
+        setModal({ k: "omie", id, destino });
+        return;
+      }
       if (r.erro) {
         toast(r.erro);
         if (
@@ -241,6 +249,63 @@ export function CrmPage(props: CrmPageProps) {
           regras={regras}
           onCancel={fecharModal}
           onConfirm={(r) => executar(() => props.saveRegras(r), "Regras de comissão salvas")}
+        />
+      );
+    }
+    if (modal.k === "omie") {
+      const oOmie = op(modal.id);
+      if (!oOmie) return null;
+      const destinoOmie = modal.destino;
+      return (
+        <ModalVincularClienteOmie
+          clientePadrao={oOmie.cliente}
+          contatoPadrao={oOmie.contato}
+          telefonePadrao={oOmie.tel}
+          cidadePadrao={oOmie.cidade}
+          onCancel={fecharModal}
+          onConfirm={async (c) => {
+            await props.vincularOmie(oOmie.id, c);
+            toast("Cliente vinculado à Omie");
+            // Estado do pai ainda pode estar velho neste tick — segue com OP já vinculada.
+            const comOmie: Oportunidade = {
+              ...oOmie,
+              omieAppId: c.omieAppId,
+              codigoClienteOmie: c.codigoClienteOmie,
+              cliente: c.cliente || oOmie.cliente,
+              contato: c.contato || oOmie.contato,
+              tel: c.tel || oOmie.tel,
+              cidade: c.cidade || oOmie.cidade,
+            };
+            const r = movimento(comOmie, destinoOmie);
+            if (!r.ok) {
+              setModal(null);
+              if (r.erro) toast(r.erro);
+              return;
+            }
+            switch (r.modal) {
+              case "voltar":
+                setModal({ k: "voltar", id: oOmie.id, destino: destinoOmie });
+                break;
+              case "montado":
+                setModal({ k: "montado", id: oOmie.id });
+                break;
+              case "envio":
+                setModal({ k: "envio", id: oOmie.id });
+                break;
+              case "agendar2":
+                setModal({ k: "agendar", id: oOmie.id, n: 2, modo: "mover" });
+                break;
+              case "agendar3":
+                setModal({ k: "agendar", id: oOmie.id, n: 3, modo: "mover" });
+                break;
+              case "aprovado":
+                setModal({ k: "aprovado", id: oOmie.id, soPrevisao: false });
+                break;
+              case "final":
+                setModal({ k: "final", id: oOmie.id });
+                break;
+            }
+          }}
         />
       );
     }
@@ -446,12 +511,14 @@ export function CrmPage(props: CrmPageProps) {
             >
               Relatórios
             </button>
-            <button
-              className={view === "comissoes" ? "on" : ""}
-              onClick={() => onViewChange("comissoes")}
-            >
-              {eu.comissoes ? "🔒 Comissões" : "💰 Minhas comissões"}
-            </button>
+            {eu.comissoes || eu.isVendedor ? (
+              <button
+                className={view === "comissoes" ? "on" : ""}
+                onClick={() => onViewChange("comissoes")}
+              >
+                {eu.comissoes ? "🔒 Comissões" : "💰 Minhas comissões"}
+              </button>
+            ) : null}
           </div>
           <button className="btn pri" onClick={() => setModal({ k: "nova" })}>
             + Nova oportunidade
@@ -601,6 +668,19 @@ export function CrmPage(props: CrmPageProps) {
           onRemoverDoc={(d) => {
             if (window.confirm("Remover " + d.nome + "?"))
               void silencioso(() => props.deleteDoc(aberta.id, d.id), "Anexo removido");
+          }}
+          onExcluir={() => {
+            if (
+              !window.confirm(
+                `Excluir a oportunidade ${aberta.cod} (${aberta.cliente})? Esta ação não pode ser desfeita.`,
+              )
+            ) {
+              return;
+            }
+            void silencioso(async () => {
+              await props.deleteOportunidade(aberta.id);
+              fechar();
+            }, "Oportunidade excluída");
           }}
         />
       ) : null}

@@ -36,9 +36,11 @@ import {
   crmSaveRegrasFn,
   crmUploadDocFn,
   crmVoltarFn,
+  deleteCrmOportunidadeFn,
   getCrmBootstrapFn,
   listCrmOportunidadesFn,
   patchCrmOportunidadeFn,
+  vincularCrmOmieClienteFn,
 } from "@/lib/crm";
 import { requireModule } from "@/lib/require-auth";
 
@@ -103,9 +105,19 @@ function CrmRoutePage() {
   );
 
   const eu = useMemo(
-    () => ({ nome: data.user.name, comissoes: data.user.comissoes }),
-    [data.user.name, data.user.comissoes],
+    () => ({
+      nome: data.user.name,
+      comissoes: data.user.comissoes,
+      isVendedor: Boolean(data.user.isVendedor),
+    }),
+    [data.user.name, data.user.comissoes, data.user.isVendedor],
   );
+
+  useEffect(() => {
+    if (view === "comissoes" && !eu.comissoes && !eu.isVendedor) {
+      void navigate({ search: { view: "quadro" } });
+    }
+  }, [view, eu.comissoes, eu.isVendedor, navigate]);
 
   const create = async (d: NovaOportunidadeDados) => {
     const created = await createCrmOportunidadeFn({ data: d });
@@ -236,6 +248,28 @@ function CrmRoutePage() {
     await crmDeleteDocFn({ data: { id, docId } });
   };
 
+  const deleteOportunidade = async (id: number) => {
+    await deleteCrmOportunidadeFn({ data: { id } });
+    setOportunidades((prev) => prev.filter((o) => o.id !== id));
+  };
+
+  const vincularOmie = async (
+    id: number,
+    d: {
+      omieAppId: string;
+      codigoClienteOmie: number;
+      cliente?: string | null;
+      contato?: string | null;
+      tel?: string | null;
+      cidade?: string | null;
+    },
+  ) => {
+    const updated = await vincularCrmOmieClienteFn({ data: { id, ...d } });
+    if (updated) {
+      setOportunidades((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+    }
+  };
+
   const saveRegras = async (r: RegrasComissao) => {
     await crmSaveRegrasFn({ data: { regras: r } });
     setRegras(r);
@@ -284,6 +318,8 @@ function CrmRoutePage() {
         equipe={equipe}
         uploadDoc={uploadDoc}
         deleteDoc={deleteDoc}
+        deleteOportunidade={deleteOportunidade}
+        vincularOmie={vincularOmie}
         saveRegras={saveRegras}
         encerrarContrato={encerrarContrato}
         abrirDocumento={abrirDocumento}

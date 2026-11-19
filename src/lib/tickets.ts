@@ -7,11 +7,13 @@ import {
   createTicket,
   forwardTicket,
   getTicketById,
+  linkTicketMoni,
   linkTicketToOs,
   listTickets,
   reopenTicket,
   resolveTicket,
   scheduleTicket,
+  updateTicketPrioridade,
 } from "@/db/tickets";
 import { createOs, getOsById } from "@/db/assistencia";
 import { ensureSchema } from "@/db/schema";
@@ -156,6 +158,10 @@ export const createTicketFn = createServerFn({ method: "POST" })
         descricao: z.string().min(1),
         prioridade: z.enum(["Baixa", "Normal", "Alta", "Urgente"]).optional(),
         setores: z.array(z.string()).min(1),
+        moniEmpresa: z.number().int().positive().optional().nullable(),
+        moniContaCodigo: z.string().optional().nullable(),
+        moniContaNome: z.string().optional().nullable(),
+        moniContaIdExt: z.string().optional().nullable(),
       })
       .parse(input ?? {}),
   )
@@ -176,6 +182,10 @@ export const createTicketFn = createServerFn({ method: "POST" })
       setores,
       openedBy: user.id,
       openedByName: user.name,
+      moniEmpresa: data.moniEmpresa,
+      moniContaCodigo: data.moniContaCodigo,
+      moniContaNome: data.moniContaNome,
+      moniContaIdExt: data.moniContaIdExt,
     });
   });
 
@@ -345,6 +355,116 @@ export const scheduleTicketFn = createServerFn({ method: "POST" })
     });
   });
 
+export const updateTicketPrioridadeFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive(),
+        prioridade: z.enum(["Baixa", "Normal", "Alta", "Urgente"]),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const ticket = await getTicketById(data.id);
+    if (!ticket) throw new Error("Ticket não encontrado.");
+    if (!canActOnTicketSectors(user, ticket.setores) && !isAdmin(user)) {
+      throw new Error("Sem permissão para este setor.");
+    }
+    return updateTicketPrioridade({
+      id: data.id,
+      prioridade: data.prioridade,
+      userId: user.id,
+      userName: user.name,
+    });
+  });
+
+export const linkTicketMoniFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive(),
+        moniEmpresa: z.number().int().positive().optional().nullable(),
+        moniContaCodigo: z.string().optional().nullable(),
+        moniContaNome: z.string().optional().nullable(),
+        moniContaIdExt: z.string().optional().nullable(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const ticket = await getTicketById(data.id);
+    if (!ticket) throw new Error("Ticket não encontrado.");
+    if (!canActOnTicketSectors(user, ticket.setores) && !isAdmin(user)) {
+      throw new Error("Sem permissão para este setor.");
+    }
+    return linkTicketMoni({
+      id: data.id,
+      moniEmpresa: data.moniEmpresa ?? null,
+      moniContaCodigo: data.moniContaCodigo ?? null,
+      moniContaNome: data.moniContaNome ?? null,
+      moniContaIdExt: data.moniContaIdExt ?? null,
+      userId: user.id,
+      userName: user.name,
+    });
+  });
+
+export const searchTicketMoniContasFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        query: z.string().trim().min(1),
+        empresa: z.coerce.number().int().positive().optional().nullable(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await auth();
+    await boot();
+    const { getDefaultMoniEmpresa, getMoniConfig } = await import("@/server/moni/client");
+    const { searchMoniContasLocal, countMoniContas } = await import("@/db/moni");
+    const empresa = data.empresa && data.empresa > 0 ? data.empresa : getDefaultMoniEmpresa(1);
+    const local = await searchMoniContasLocal({
+      query: data.query,
+      empresa,
+      limit: data.limit ?? 40,
+    });
+    if (local.length > 0) return { items: local, source: "local" as const, empresa };
+    if (!getMoniConfig()) {
+      return { items: [] as typeof local, source: "local" as const, empresa };
+    }
+    const count = await countMoniContas();
+    try {
+      const { searchMoniContasLive } = await import("@/server/moni/contas");
+      const items = await searchMoniContasLive(data.query, {
+        empresa,
+        limit: data.limit ?? 40,
+      });
+      return { items, source: count > 0 ? ("local" as const) : ("live" as const), empresa };
+    } catch {
+      return { items: [] as typeof local, source: "local" as const, empresa };
+    }
+  });
+
+export const listTicketMoniEmpresasFn = createServerFn({ method: "GET" }).handler(async () => {
+  await auth();
+  await boot();
+  const { getDefaultMoniEmpresa } = await import("@/server/moni/client");
+  const { listMoniEmpresasLocal } = await import("@/db/moni");
+  const defaultMoniEmpresa = getDefaultMoniEmpresa(1);
+  const moniEmpresas = await listMoniEmpresasLocal().catch(() => [] as number[]);
+  const empresas =
+    moniEmpresas.length > 0
+      ? moniEmpresas
+      : defaultMoniEmpresa > 0
+        ? [defaultMoniEmpresa]
+        : [1];
+  return { defaultMoniEmpresa, moniEmpresas: empresas };
+});
+
 export const openOsFromTicketFn = createServerFn({ method: "POST" })
   .validator((input) =>
     z
@@ -385,6 +505,11 @@ export const openOsFromTicketFn = createServerFn({ method: "POST" })
       quoteId: data.quoteId ?? null,
       quoteNumero: data.quoteNumero ?? null,
       ticketId: ticket.id,
+      prioridade: ticket.prioridade,
+      moniEmpresa: ticket.moniEmpresa,
+      moniContaCodigo: ticket.moniContaCodigo,
+      moniContaNome: ticket.moniContaNome,
+      moniContaIdExt: ticket.moniContaIdExt,
       items: data.items,
       createdBy: user.id,
       createdByName: user.name,

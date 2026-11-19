@@ -187,3 +187,59 @@ export async function listMoniEmpresasLocal(): Promise<number[]> {
   `) as Array<{ empresa: number }>;
   return rows.map((r) => normalizeMoniEmpresa(r.empresa)).filter((n) => n > 0);
 }
+
+/** Snapshot leve do vínculo Moni + dados do cache local (best-effort). */
+export type MoniVinculoInfo = {
+  empresa: number | null;
+  codigo: string | null;
+  nome: string | null;
+  idExt: string | null;
+  cgc: string | null;
+  razaoSocial: string | null;
+  tipoLabel: string | null;
+  suspenso: boolean | null;
+  endereco: string | null;
+  bairro: string | null;
+};
+
+export async function enrichMoniVinculo(input: {
+  moniEmpresa: number | null | undefined;
+  moniContaCodigo: string | null | undefined;
+  moniContaNome?: string | null | undefined;
+  moniContaIdExt?: string | null | undefined;
+}): Promise<MoniVinculoInfo | null> {
+  const codigoRaw = String(input.moniContaCodigo ?? "").trim();
+  if (!codigoRaw) return null;
+  const base: MoniVinculoInfo = {
+    empresa: input.moniEmpresa != null && Number(input.moniEmpresa) > 0 ? Number(input.moniEmpresa) : null,
+    codigo: codigoRaw,
+    nome: input.moniContaNome?.trim() || null,
+    idExt: input.moniContaIdExt?.trim() || null,
+    cgc: null,
+    razaoSocial: null,
+    tipoLabel: null,
+    suspenso: null,
+    endereco: null,
+    bairro: null,
+  };
+  const codigoNum = Number(codigoRaw);
+  if (!Number.isFinite(codigoNum) || codigoNum <= 0) return base;
+  try {
+    const conta = await getMoniContaByCodigo(codigoNum, base.empresa);
+    if (!conta) return base;
+    return {
+      empresa: conta.empresa || base.empresa,
+      codigo: String(conta.codigo),
+      nome: conta.nome || base.nome,
+      idExt: conta.segundoCodigo || base.idExt,
+      cgc: conta.cgc,
+      razaoSocial: conta.razaoSocial,
+      tipoLabel: conta.tipoLabel,
+      suspenso: conta.suspenso,
+      endereco: conta.endereco,
+      bairro: conta.bairro,
+    };
+  } catch {
+    return base;
+  }
+}

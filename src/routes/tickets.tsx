@@ -1,5 +1,5 @@
 ﻿import { Link, createFileRoute } from "@tanstack/react-router";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   ActivitiesCalendar,
@@ -27,6 +27,11 @@ import {
   tableHeadClass,
 } from "@/components/PageChrome";
 import {
+  SoftDialogBody,
+  SoftDialogContent,
+  SoftDialogHeader,
+} from "@/components/SoftOsDialog";
+import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -42,12 +47,16 @@ import {
   forwardTicketFn,
   getTicketFn,
   getTicketsBootstrapFn,
+  linkTicketMoniFn,
+  listTicketMoniEmpresasFn,
   listTicketsFn,
   openOsFromTicketFn,
   reopenTicketFn,
   resolveTicketFn,
   scheduleTicketFn,
   searchTicketClientsFn,
+  searchTicketMoniContasFn,
+  updateTicketPrioridadeFn,
 } from "@/lib/tickets";
 import {
   DATE_PRESET_OPTIONS,
@@ -57,12 +66,17 @@ import {
 } from "@/lib/date-filters";
 import {
   defaultSetoresForCat,
+  prioridadeDotClass,
   TICKET_ATIVOS,
   TICKET_CATS,
+  TICKET_PRIO_ORD,
+  TICKET_PRIOS,
   ticketCatLabel,
   ticketSetorNome,
   ticketStatusLabel,
+  type TicketPrio,
 } from "@/lib/tickets-domain";
+import { moniDetailLines, moniShortLabel } from "@/lib/moni-display";
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 
@@ -76,7 +90,7 @@ export const Route = createFileRoute("/tickets")({
 });
 
 type TicketRow = NonNullable<Awaited<ReturnType<typeof getTicketFn>>>;
-type TicketView = "lista" | "calendario";
+type TicketView = "tabela" | "cards" | "calendario";
 
 function ticketFilterDate(t: TicketRow): string {
   if (t.agDate) return t.agDate;
@@ -98,6 +112,29 @@ function idade(value: string) {
   const h = Math.floor(ms / 3_600_000);
   if (h < 24) return `${h}h`;
   return `${Math.floor(h / 24)}d`;
+}
+
+function formatTicketDateBr(value: string | null | undefined) {
+  if (!value) return "—";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  return value;
+}
+
+function compareTicketByDate(a: TicketRow, b: TicketRow) {
+  const da = a.agDate || a.agDateFirst || "";
+  const db = b.agDate || b.agDateFirst || "";
+  if (da && db && da !== db) return db.localeCompare(da);
+  if (da && !db) return -1;
+  if (!da && db) return 1;
+  return b.createdAt.localeCompare(a.createdAt);
+}
+
+function compareTicketByUrgencia(a: TicketRow, b: TicketRow) {
+  const pa = TICKET_PRIO_ORD[a.prioridade] ?? 9;
+  const pb = TICKET_PRIO_ORD[b.prioridade] ?? 9;
+  if (pa !== pb) return pa - pb;
+  return compareTicketByDate(a, b);
 }
 
 function ticketStatusBadge(status: string) {
@@ -144,10 +181,10 @@ function TicketsPage() {
       .then(setTickets)
       .catch(() => undefined);
   }, []);
-  const [viewMode, setViewMode] = useState<TicketView>("lista");
+  const [viewMode, setViewMode] = useState<TicketView>("tabela");
   const [calMonth, setCalMonth] = useState(() => startOfMonth(new Date()));
-  const [calSheetOpen, setCalSheetOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<number | null>(tickets[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [comment, setComment] = useState("");
@@ -177,10 +214,29 @@ function TicketsPage() {
   const [searchingClients, setSearchingClients] = useState(false);
   const [omieAppId, setOmieAppId] = useState(boot.omieAppId);
   const [contato, setContato] = useState("");
-  const [codigoRef, setCodigoRef] = useState("");
   const [descricao, setDescricao] = useState("");
   const [prio, setPrio] = useState<(typeof boot.catalogs.prios)[number]>("Normal");
   const [setores, setSetores] = useState<string[]>(defaultSetoresForCat(cat));
+  const [listSort, setListSort] = useState<"data" | "urgencia">("urgencia");
+  const [moniEmpresa, setMoniEmpresa] = useState(1);
+  const [moniEmpresas, setMoniEmpresas] = useState<number[]>([1]);
+  const [moniQuery, setMoniQuery] = useState("");
+  const [moniSugestoes, setMoniSugestoes] = useState<
+    Awaited<ReturnType<typeof searchTicketMoniContasFn>>["items"]
+  >([]);
+  const [buscandoMoni, setBuscandoMoni] = useState(false);
+  const [selectedMoni, setSelectedMoni] = useState<{
+    empresa: number;
+    codigo: string;
+    nome: string | null;
+    idExt: string | null;
+  } | null>(null);
+  const [detailMoniQuery, setDetailMoniQuery] = useState("");
+  const [detailMoniSugestoes, setDetailMoniSugestoes] = useState<
+    Awaited<ReturnType<typeof searchTicketMoniContasFn>>["items"]
+  >([]);
+  const [detailMoniEmpresa, setDetailMoniEmpresa] = useState(1);
+  const [buscandoDetailMoni, setBuscandoDetailMoni] = useState(false);
 
   useEffect(() => {
     if (!newOpen || selectedClient || clientQuery.trim().length < 2) {
@@ -203,6 +259,44 @@ function TicketsPage() {
     return () => clearTimeout(timer);
   }, [newOpen, clientQuery, selectedClient, omieAppId]);
 
+  useEffect(() => {
+    void listTicketMoniEmpresasFn()
+      .then((res) => {
+        setMoniEmpresa(res.defaultMoniEmpresa || 1);
+        setDetailMoniEmpresa(res.defaultMoniEmpresa || 1);
+        setMoniEmpresas(res.moniEmpresas.length ? res.moniEmpresas : [res.defaultMoniEmpresa || 1]);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!newOpen) {
+      setMoniSugestoes([]);
+      return;
+    }
+    const q = moniQuery.trim();
+    if (q.length < 1) {
+      setMoniSugestoes([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        setBuscandoMoni(true);
+        try {
+          const res = await searchTicketMoniContasFn({
+            data: { query: q, empresa: moniEmpresa, limit: 30 },
+          });
+          setMoniSugestoes(res.items);
+        } catch {
+          setMoniSugestoes([]);
+        } finally {
+          setBuscandoMoni(false);
+        }
+      })();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [moniQuery, moniEmpresa, newOpen]);
+
   const [fwdOpen, setFwdOpen] = useState(false);
   const [fwdSetores, setFwdSetores] = useState<string[]>([]);
   const [fwdRemoveMine, setFwdRemoveMine] = useState(true);
@@ -218,6 +312,34 @@ function TicketsPage() {
   );
 
   useEffect(() => {
+    if (!selected) {
+      setDetailMoniSugestoes([]);
+      return;
+    }
+    const q = detailMoniQuery.trim();
+    if (q.length < 1) {
+      setDetailMoniSugestoes([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      void (async () => {
+        setBuscandoDetailMoni(true);
+        try {
+          const res = await searchTicketMoniContasFn({
+            data: { query: q, empresa: detailMoniEmpresa, limit: 30 },
+          });
+          setDetailMoniSugestoes(res.items);
+        } catch {
+          setDetailMoniSugestoes([]);
+        } finally {
+          setBuscandoDetailMoni(false);
+        }
+      })();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [detailMoniQuery, detailMoniEmpresa, selected?.id]);
+
+  useEffect(() => {
     setAgDateDraft(selected?.agDate ?? "");
   }, [selected?.id, selected?.agDate]);
 
@@ -227,8 +349,9 @@ function TicketsPage() {
     setDraftAnexos([]);
   }, [selected?.id]);
 
-  async function selectTicket(id: number) {
+  async function selectTicket(id: number, opts?: { openDetail?: boolean }) {
     setSelectedId(id);
+    if (opts?.openDetail !== false) setDetailOpen(true);
     try {
       const full = await getTicketFn({ data: { id } });
       if (full) {
@@ -261,7 +384,7 @@ function TicketsPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const nameQ = nameFilter.trim().toLowerCase();
-    return tickets.filter((t) => {
+    const rows = tickets.filter((t) => {
       if (q) {
         const hay = `${t.num} ${t.clientName} ${t.descricao} ${t.codigoRef ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -274,7 +397,10 @@ function TicketsPage() {
       if (!inDateRange(ticketFilterDate(t), dateRange.from, dateRange.to)) return false;
       return true;
     });
-  }, [tickets, query, nameFilter, tipoFilter, dateRange]);
+    return rows
+      .slice()
+      .sort(listSort === "urgencia" ? compareTicketByUrgencia : compareTicketByDate);
+  }, [tickets, query, nameFilter, tipoFilter, dateRange, listSort]);
 
   const ticketCalendarItems = useMemo(
     () =>
@@ -337,7 +463,8 @@ function TicketsPage() {
       });
       setTickets(list);
       if (selectedId && !list.some((t) => t.id === selectedId)) {
-        setSelectedId(list[0]?.id ?? null);
+        // mantém seleção atual se ainda existir; senão limpa
+        setSelectedId((cur) => (cur && list.some((t) => t.id === cur) ? cur : null));
       }
     } catch (e) {
       setFeedback(e instanceof Error ? e.message : "Erro ao carregar");
@@ -394,16 +521,67 @@ function TicketsPage() {
       <div className="flex flex-col gap-md">
         <div>
           <div className="flex flex-wrap items-center justify-between gap-md">
-            <h2 className="text-title-md text-on-surface">{selected.num}</h2>
+            <h2 className="inline-flex items-center gap-sm text-title-md text-on-surface">
+              <span
+                className={cn(
+                  "inline-block size-2.5 rounded-full",
+                  prioridadeDotClass(selected.prioridade),
+                )}
+                title={`Prioridade: ${selected.prioridade}`}
+              />
+              {selected.num}
+            </h2>
             {ticketStatusBadge(selected.status)}
           </div>
           <p className="mt-xs text-body-md font-medium text-on-surface">{selected.clientName}</p>
           <p className="text-label-md text-on-surface-variant">
-            {ticketCatLabel(selected.cat)} · {selected.prioridade} ·{" "}
+            {ticketCatLabel(selected.cat)} ·{" "}
             {selected.setores.map(ticketSetorNome).join(", ")}
           </p>
+          {selected.status !== "resolvido" && selected.status !== "os" ? (
+            <label className="mt-sm inline-flex items-center gap-xs text-label-md text-on-surface-variant">
+              Prioridade
+              <select
+                value={selected.prioridade}
+                disabled={busy}
+                className={cn(fieldClass, "mt-0 w-auto")}
+                onChange={(e) =>
+                  run(() =>
+                    updateTicketPrioridadeFn({
+                      data: {
+                        id: selected.id,
+                        prioridade: e.target.value as TicketPrio,
+                      },
+                    }),
+                  )
+                }
+              >
+                {TICKET_PRIOS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <p className="mt-sm text-label-md text-on-surface-variant">
+              Prioridade: {selected.prioridade}
+            </p>
+          )}
+          {selected.agDate || selected.agDateFirst ? (
+            <p className="mt-2xs text-label-md text-on-surface-variant">
+              Agenda: {formatTicketDateBr(selected.agDate)}
+              {selected.agDateFirst &&
+              selected.agDate &&
+              selected.agDateFirst !== selected.agDate
+                ? ` · 1ª: ${formatTicketDateBr(selected.agDateFirst)}`
+                : ""}
+            </p>
+          ) : null}
           {selected.contato ? (
-            <p className="text-label-md text-on-surface-variant">Contato: {selected.contato}</p>
+            <p className="mt-2xs text-label-md text-on-surface-variant">
+              Contato: {selected.contato}
+            </p>
           ) : null}
           <p className="mt-sm whitespace-pre-wrap text-body-md text-on-surface">
             {selected.descricao}
@@ -411,9 +589,11 @@ function TicketsPage() {
           {selected.osId ? (
             <Link
               to="/assistencia"
-              className="mt-sm inline-flex items-center gap-xs text-label-md font-semibold text-primary"
+              search={{ view: "kanban" }}
+              className="mt-sm inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-white px-md py-sm text-label-md font-semibold text-on-surface hover:bg-surface-container"
             >
-              Ver OS no Kanban
+              <Icon name="handyman" className="text-[16px]" />
+              Abrir O.S. no quadro
               <Icon name="open_in_new" className="text-[16px]" />
             </Link>
           ) : null}
@@ -550,6 +730,115 @@ function TicketsPage() {
           ) : null}
         </div>
 
+        <div className="rounded-xl border border-outline-variant bg-white p-md">
+          <div className="flex flex-wrap items-start justify-between gap-sm">
+            <div>
+              <h3 className="text-label-sm font-semibold uppercase tracking-wide text-on-surface-variant">
+                Conta Moni
+              </h3>
+              <p className="mt-2xs text-label-sm text-on-surface-variant">
+                Vincule a conta do Moni a este ticket.
+              </p>
+            </div>
+            {selected.moniContaCodigo ? (
+              <button
+                type="button"
+                disabled={busy}
+                className={btnMuted}
+                onClick={() =>
+                  run(() =>
+                    linkTicketMoniFn({
+                      data: {
+                        id: selected.id,
+                        moniEmpresa: null,
+                        moniContaCodigo: null,
+                      },
+                    }),
+                  ).then(() => {
+                    setDetailMoniQuery("");
+                    setDetailMoniSugestoes([]);
+                  })
+                }
+              >
+                Remover
+              </button>
+            ) : null}
+          </div>
+          {selected.moniContaCodigo ? (
+            <div className="mt-sm text-body-md text-on-surface">
+              <p>{moniShortLabel(selected)}</p>
+              {moniDetailLines(selected.moniDetalhe).map((line) => (
+                <p key={line} className="text-label-md text-on-surface-variant">
+                  {line}
+                </p>
+              ))}
+            </div>
+          ) : (
+            <div className="relative mt-sm grid gap-sm sm:grid-cols-[minmax(0,9rem)_1fr]">
+              <label className="text-label-md text-on-surface-variant">
+                Empresa
+                <select
+                  value={detailMoniEmpresa}
+                  disabled={busy}
+                  className={cn(fieldClass, "mt-xs")}
+                  onChange={(e) => setDetailMoniEmpresa(Number(e.target.value) || 1)}
+                >
+                  {moniEmpresas.map((e) => (
+                    <option key={e} value={e}>
+                      {e}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-label-md text-on-surface-variant">
+                Buscar conta
+                <input
+                  value={detailMoniQuery}
+                  disabled={busy}
+                  placeholder="Código, nome ou CNPJ"
+                  className={cn(fieldClass, "mt-xs")}
+                  onChange={(e) => setDetailMoniQuery(e.target.value)}
+                />
+              </label>
+              {buscandoDetailMoni ? (
+                <p className="sm:col-span-2 text-label-sm text-on-surface-variant">Buscando…</p>
+              ) : null}
+              {detailMoniSugestoes.length > 0 ? (
+                <ul className="absolute left-0 right-0 top-full z-20 mt-xs max-h-48 overflow-auto rounded-lg border border-outline-variant bg-white shadow-lg sm:col-span-2">
+                  {detailMoniSugestoes.map((conta) => (
+                    <li key={`${conta.empresa}-${conta.codigo}`}>
+                      <button
+                        type="button"
+                        className="block w-full px-md py-sm text-left text-body-md hover:bg-surface-container"
+                        onClick={() =>
+                          run(() =>
+                            linkTicketMoniFn({
+                              data: {
+                                id: selected.id,
+                                moniEmpresa: conta.empresa || detailMoniEmpresa,
+                                moniContaCodigo: String(conta.codigo),
+                                moniContaNome: conta.nome,
+                                moniContaIdExt: conta.segundoCodigo,
+                              },
+                            }),
+                          ).then(() => {
+                            setDetailMoniQuery("");
+                            setDetailMoniSugestoes([]);
+                          })
+                        }
+                      >
+                        Emp.{conta.empresa || detailMoniEmpresa} ·{" "}
+                        {conta.segundoCodigo || conta.codigo}
+                        {conta.nome ? ` · ${conta.nome}` : ""}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-col gap-xs">
           <div className="flex gap-xs">
             <input
@@ -679,9 +968,11 @@ function TicketsPage() {
               setClientResults([]);
               setOmieAppId(boot.omieAppId);
               setContato("");
-              setCodigoRef("");
               setDescricao("");
               setPrio("Normal");
+              setSelectedMoni(null);
+              setMoniQuery("");
+              setMoniSugestoes([]);
               setNewOpen(true);
             }}
             className={btnPrimary}
@@ -703,7 +994,8 @@ function TicketsPage() {
             <div className="flex flex-wrap gap-xs">
               {(
                 [
-                  ["lista", "Lista"],
+                  ["tabela", "Tabela"],
+                  ["cards", "Cards"],
                   ["calendario", "Calendário"],
                 ] as const
               ).map(([id, label]) => (
@@ -716,6 +1008,32 @@ function TicketsPage() {
                   {label}
                 </button>
               ))}
+              <div className="inline-flex rounded-lg border border-outline-variant bg-white p-2xs">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md px-md py-xs text-label-md font-medium",
+                    listSort === "data"
+                      ? "bg-neutral-900 text-white"
+                      : "text-on-surface-variant hover:bg-surface-container",
+                  )}
+                  onClick={() => setListSort("data")}
+                >
+                  Data
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md px-md py-xs text-label-md font-medium",
+                    listSort === "urgencia"
+                      ? "bg-neutral-900 text-white"
+                      : "text-on-surface-variant hover:bg-surface-container",
+                  )}
+                  onClick={() => setListSort("urgencia")}
+                >
+                  Urgência
+                </button>
+              </div>
             </div>
             <button
               type="button"
@@ -840,189 +1158,212 @@ function TicketsPage() {
           {feedback ? <div className={cn(feedbackErrClass, "mb-sm")}>{feedback}</div> : null}
 
           {viewMode === "calendario" ? (
-            <div
-              className={cn(
-                "grid gap-md",
-                calSheetOpen && "xl:grid-cols-[minmax(0,1fr)_minmax(22rem,26rem)]",
-              )}
-            >
-              <ActivitiesCalendar
-                items={ticketCalendarItems}
-                pendingItems={ticketPendingItems}
-                legend={TICKET_ACTIVITY_LEGEND}
-                month={calMonth}
-                onMonthChange={setCalMonth}
-                onSelect={(id) => {
-                  setSelectedId(id);
-                  setCalSheetOpen(true);
-                  void selectTicket(id);
-                }}
-                onCreate={() => {
-                  setCat(boot.catalogs.cats[0]?.id ?? "out");
-                  setSetores(defaultSetoresForCat(boot.catalogs.cats[0]?.id ?? "out"));
-                  setClientQuery("");
-                  setSelectedClient(null);
-                  setClientResults([]);
-                  setOmieAppId(boot.omieAppId);
-                  setContato("");
-                  setCodigoRef("");
-                  setDescricao("");
-                  setPrio("Normal");
-                  setNewOpen(true);
-                }}
-                createLabel="+ Novo ticket"
-              />
-              {calSheetOpen ? (
-                <aside className="flex max-h-[min(80vh,52rem)] flex-col overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest shadow-elevation-1 xl:sticky xl:top-md">
-                  <div className="flex shrink-0 items-start justify-between gap-sm border-b border-outline-variant px-md py-sm">
-                    <div className="min-w-0">
-                      <p className="text-title-md font-semibold text-on-surface">
-                        {selected?.num ?? "Ticket"}
-                      </p>
-                      <p className="truncate text-label-md text-on-surface-variant">
-                        {selected
-                          ? `${selected.clientName} · ${ticketStatusLabel(selected.status)}`
-                          : "Carregando…"}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      className={btnOutline}
-                      onClick={() => {
-                        setCalSheetOpen(false);
-                      }}
-                    >
-                      <Icon name="close" className="text-[18px]" />
-                      Fechar
-                    </button>
-                  </div>
-                  <div className="min-h-0 flex-1 overflow-y-auto px-md py-md">
-                    {selected ? (
-                      renderTicketDetail()
-                    ) : (
-                      <p className="text-body-md text-on-surface-variant">
-                        Carregando ticket…
-                      </p>
-                    )}
-                  </div>
-                </aside>
-              ) : null}
-            </div>
+            <ActivitiesCalendar
+              items={ticketCalendarItems}
+              pendingItems={ticketPendingItems}
+              legend={TICKET_ACTIVITY_LEGEND}
+              month={calMonth}
+              onMonthChange={setCalMonth}
+              onSelect={(id) => {
+                void selectTicket(id);
+              }}
+              onCreate={() => {
+                setCat(boot.catalogs.cats[0]?.id ?? "out");
+                setSetores(defaultSetoresForCat(boot.catalogs.cats[0]?.id ?? "out"));
+                setClientQuery("");
+                setSelectedClient(null);
+                setClientResults([]);
+                setOmieAppId(boot.omieAppId);
+                setContato("");
+                setDescricao("");
+                setPrio("Normal");
+                setSelectedMoni(null);
+                setMoniQuery("");
+                setMoniSugestoes([]);
+                setNewOpen(true);
+              }}
+              createLabel="+ Novo ticket"
+            />
           ) : filtered.length === 0 ? (
             <p className="text-body-md text-on-surface-variant">Nenhum ticket encontrado.</p>
-          ) : (
-            <>
-              <div className="space-y-sm @[56rem]:hidden">
-                {filtered.map((t) => {
-                  const expanded = selectedId === t.id;
-                  return (
-                    <article key={t.id} className={mobileCardClass}>
-                      <div className="flex items-start justify-between gap-sm">
-                        <div className="min-w-0">
-                          <p className="text-title-md text-primary">{t.num}</p>
-                          <p className="truncate text-body-md text-on-surface">{t.clientName}</p>
-                          <div className="mt-xs flex flex-wrap items-center gap-xs">
+          ) : viewMode === "cards" ? (
+            <div className="space-y-sm">
+              {filtered.map((t) => {
+                const moni = moniShortLabel(t);
+                return (
+                  <article key={t.id} className={mobileCardClass}>
+                    <div className="flex items-start justify-between gap-sm">
+                      <div className="min-w-0">
+                        <p className="inline-flex items-center gap-xs text-title-md text-primary">
+                          <span
+                            className={cn(
+                              "inline-block size-2.5 rounded-full",
+                              prioridadeDotClass(t.prioridade),
+                            )}
+                            title={`Prioridade: ${t.prioridade}`}
+                          />
+                          {t.num}
+                        </p>
+                        <p className="truncate text-body-md text-on-surface">{t.clientName}</p>
+                        <div className="mt-xs flex flex-col gap-2xs">
+                          <div className="flex flex-wrap items-center gap-xs">
                             {ticketStatusBadge(t.status)}
                             <span className="text-label-md text-on-surface-variant">
                               {t.prioridade} · {idade(t.createdAt)}
                             </span>
                           </div>
-                        </div>
-                        <button
-                          type="button"
-                          className={btnOutline}
-                          onClick={() => {
-                            if (expanded) setSelectedId(null);
-                            else void selectTicket(t.id);
-                          }}
-                        >
-                          <Icon
-                            name={expanded ? "expand_less" : "visibility"}
-                            className="text-[16px]"
-                          />
-                          {expanded ? "Ocultar" : "Ver"}
-                        </button>
-                      </div>
-                      {expanded && selected ? (
-                        <div className="mt-md border-t border-outline-variant pt-md">
-                          {renderTicketDetail()}
-                        </div>
-                      ) : null}
-                    </article>
-                  );
-                })}
-              </div>
-
-              <div className="hidden overflow-x-auto @[56rem]:block">
-                <table className="min-w-full text-left text-body-md">
-                  <thead className={tableHeadClass}>
-                    <tr>
-                      <th className={tableHeadCellClass}>Nº</th>
-                      <th className={tableHeadCellClass}>Cliente</th>
-                      <th className={tableHeadCellClass}>Status</th>
-                      <th className={tableHeadCellClass}>Prioridade</th>
-                      <th className={tableHeadCellClass}>Categoria</th>
-                      <th className={tableHeadCellClass}>Setores</th>
-                      <th className={tableHeadCellClass}>Idade</th>
-                      <th className={tableHeadCellClass}>Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filtered.map((t) => {
-                      const expanded = selectedId === t.id;
-                      return (
-                        <Fragment key={t.id}>
-                          <tr
-                            className={cn(
-                              "border-t border-outline-variant",
-                              expanded && "bg-secondary-container/20",
-                            )}
-                          >
-                            <td className="px-sm py-xs font-medium">{t.num}</td>
-                            <td className="px-sm py-xs">{t.clientName}</td>
-                            <td className="px-sm py-xs">{ticketStatusBadge(t.status)}</td>
-                            <td className="px-sm py-xs">{t.prioridade}</td>
-                            <td className="px-sm py-xs">{ticketCatLabel(t.cat)}</td>
-                            <td className="px-sm py-xs text-on-surface-variant">
-                              {t.setores.map(ticketSetorNome).join(", ")}
-                            </td>
-                            <td className="px-sm py-xs text-on-surface-variant">
-                              {idade(t.createdAt)}
-                            </td>
-                            <td className="px-sm py-xs">
-                              <button
-                                type="button"
-                                className={btnOutline}
-                                onClick={() => {
-                                  if (expanded) setSelectedId(null);
-                                  else void selectTicket(t.id);
-                                }}
-                              >
-                                <Icon
-                                  name={expanded ? "expand_less" : "visibility"}
-                                  className="text-[16px]"
-                                />
-                                {expanded ? "Ocultar" : "Ver"}
-                              </button>
-                            </td>
-                          </tr>
-                          {expanded && selected ? (
-                            <tr className="border-t border-outline-variant/60 bg-surface/50">
-                              <td colSpan={8} className="px-sm py-md">
-                                {renderTicketDetail()}
-                              </td>
-                            </tr>
+                          {t.agDate || t.agDateFirst ? (
+                            <div className="text-label-sm leading-tight text-on-surface-variant">
+                              <div>{formatTicketDateBr(t.agDate)}</div>
+                              {t.agDateFirst &&
+                              t.agDate &&
+                              t.agDateFirst !== t.agDate ? (
+                                <div className="text-[11px] opacity-80">
+                                  {formatTicketDateBr(t.agDateFirst)}
+                                </div>
+                              ) : null}
+                            </div>
                           ) : null}
-                        </Fragment>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </>
+                          {moni ? (
+                            <div className="text-label-sm text-on-surface-variant">
+                              <div>Moni · {moni}</div>
+                              {moniDetailLines(t.moniDetalhe)
+                                .slice(0, 2)
+                                .map((line) => (
+                                  <div key={line} className="text-[11px] opacity-80">
+                                    {line}
+                                  </div>
+                                ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className={btnOutline}
+                        onClick={() => void selectTicket(t.id)}
+                      >
+                        <Icon name="visibility" className="text-[16px]" />
+                        Ver
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-body-md">
+                <thead className={tableHeadClass}>
+                  <tr>
+                    <th className={tableHeadCellClass}>Nº</th>
+                    <th className={tableHeadCellClass}>Cliente</th>
+                    <th className={tableHeadCellClass}>Status</th>
+                    <th className={tableHeadCellClass}>Prioridade</th>
+                    <th className={tableHeadCellClass}>Agenda</th>
+                    <th className={tableHeadCellClass}>Moni</th>
+                    <th className={tableHeadCellClass}>Categoria</th>
+                    <th className={tableHeadCellClass}>Setores</th>
+                    <th className={tableHeadCellClass}>Idade</th>
+                    <th className={tableHeadCellClass}>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((t) => {
+                    const moni = moniShortLabel(t);
+                    return (
+                      <tr key={t.id} className="border-t border-outline-variant">
+                        <td className="px-sm py-xs font-medium">
+                          <span className="inline-flex items-center gap-xs">
+                            <span
+                              className={cn(
+                                "inline-block size-2.5 rounded-full",
+                                prioridadeDotClass(t.prioridade),
+                              )}
+                              title={`Prioridade: ${t.prioridade}`}
+                            />
+                            {t.num}
+                          </span>
+                        </td>
+                        <td className="px-sm py-xs">{t.clientName}</td>
+                        <td className="px-sm py-xs">{ticketStatusBadge(t.status)}</td>
+                        <td className="px-sm py-xs">{t.prioridade}</td>
+                        <td className="px-sm py-xs text-on-surface-variant">
+                          <div className="leading-tight">
+                            <div>{formatTicketDateBr(t.agDate)}</div>
+                            {t.agDateFirst &&
+                            t.agDate &&
+                            t.agDateFirst !== t.agDate ? (
+                              <div className="text-[11px] opacity-80">
+                                {formatTicketDateBr(t.agDateFirst)}
+                              </div>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td className="px-sm py-xs text-on-surface-variant">
+                          {moni ? (
+                            <div className="leading-tight">
+                              <div className="max-w-[14rem] truncate" title={moni}>
+                                {moni}
+                              </div>
+                              {moniDetailLines(t.moniDetalhe)
+                                .slice(0, 1)
+                                .map((line) => (
+                                  <div key={line} className="text-[11px] opacity-80">
+                                    {line}
+                                  </div>
+                                ))}
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-sm py-xs">{ticketCatLabel(t.cat)}</td>
+                        <td className="px-sm py-xs text-on-surface-variant">
+                          {t.setores.map(ticketSetorNome).join(", ")}
+                        </td>
+                        <td className="px-sm py-xs text-on-surface-variant">
+                          {idade(t.createdAt)}
+                        </td>
+                        <td className="px-sm py-xs">
+                          <button
+                            type="button"
+                            className={btnOutline}
+                            onClick={() => void selectTicket(t.id)}
+                          >
+                            <Icon name="visibility" className="text-[16px]" />
+                            Ver
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </PageSection>
       </div>
+
+      <Dialog
+        open={detailOpen && Boolean(selectedId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDetailOpen(false);
+          }
+        }}
+      >
+        <SoftDialogContent size="xl" className="max-h-[92vh] overflow-hidden">
+          <SoftDialogHeader eyebrow="TICKETS" title={selected?.num ?? "Ticket"} />
+          <SoftDialogBody className="max-h-[min(78vh,52rem)] overflow-y-auto">
+            {selected ? (
+              renderTicketDetail()
+            ) : (
+              <p className="text-body-md text-on-surface-variant">Carregando ticket…</p>
+            )}
+          </SoftDialogBody>
+        </SoftDialogContent>
+      </Dialog>
 
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
         <DialogContent className="dialog-lg">
@@ -1144,14 +1485,6 @@ function TicketsPage() {
               />
             </label>
             <label className="block text-label-md text-on-surface-variant">
-              Ref. / código
-              <input
-                value={codigoRef}
-                onChange={(e) => setCodigoRef(e.target.value)}
-                className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
-              />
-            </label>
-            <label className="block text-label-md text-on-surface-variant">
               Prioridade
               <select
                 value={prio}
@@ -1165,6 +1498,89 @@ function TicketsPage() {
                 ))}
               </select>
             </label>
+            <div className="sm:col-span-2 rounded-xl border border-outline-variant p-md">
+              <div className="flex flex-wrap items-start justify-between gap-sm">
+                <div>
+                  <p className="text-label-md font-semibold text-on-surface">Conta Moni</p>
+                  <p className="text-label-sm text-on-surface-variant">
+                    Opcional — vincule ao abrir o ticket.
+                  </p>
+                </div>
+                {selectedMoni ? (
+                  <button
+                    type="button"
+                    className="text-label-md font-semibold text-primary"
+                    onClick={() => {
+                      setSelectedMoni(null);
+                      setMoniQuery("");
+                    }}
+                  >
+                    Remover
+                  </button>
+                ) : null}
+              </div>
+              {selectedMoni ? (
+                <p className="mt-sm text-body-md text-on-surface">
+                  Emp.{selectedMoni.empresa} · {selectedMoni.idExt || selectedMoni.codigo}
+                  {selectedMoni.nome ? ` · ${selectedMoni.nome}` : ""}
+                </p>
+              ) : (
+                <div className="relative mt-sm grid gap-sm sm:grid-cols-[minmax(0,9rem)_1fr]">
+                  <label className="text-label-md text-on-surface-variant">
+                    Empresa
+                    <select
+                      value={moniEmpresa}
+                      className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
+                      onChange={(e) => setMoniEmpresa(Number(e.target.value) || 1)}
+                    >
+                      {moniEmpresas.map((e) => (
+                        <option key={e} value={e}>
+                          {e}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-label-md text-on-surface-variant">
+                    Buscar conta
+                    <input
+                      value={moniQuery}
+                      placeholder="Código, nome ou CNPJ"
+                      className="mt-xs w-full rounded-lg border border-outline-variant/70 bg-surface px-md py-sm text-body-md"
+                      onChange={(e) => setMoniQuery(e.target.value)}
+                    />
+                  </label>
+                  {buscandoMoni ? (
+                    <p className="sm:col-span-2 text-label-sm text-on-surface-variant">Buscando…</p>
+                  ) : null}
+                  {moniSugestoes.length > 0 ? (
+                    <ul className="absolute left-0 right-0 top-full z-30 mt-xs max-h-48 overflow-auto rounded-lg border border-outline-variant bg-white shadow-lg sm:col-span-2">
+                      {moniSugestoes.map((conta) => (
+                        <li key={`${conta.empresa}-${conta.codigo}`}>
+                          <button
+                            type="button"
+                            className="block w-full px-md py-sm text-left text-body-md hover:bg-surface-container"
+                            onClick={() => {
+                              setSelectedMoni({
+                                empresa: conta.empresa || moniEmpresa,
+                                codigo: String(conta.codigo),
+                                nome: conta.nome,
+                                idExt: conta.segundoCodigo,
+                              });
+                              setMoniQuery("");
+                              setMoniSugestoes([]);
+                            }}
+                          >
+                            Emp.{conta.empresa || moniEmpresa} ·{" "}
+                            {conta.segundoCodigo || conta.codigo}
+                            {conta.nome ? ` · ${conta.nome}` : ""}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              )}
+            </div>
             <fieldset className="sm:col-span-2">
               <legend className="text-label-md text-on-surface-variant">Setores *</legend>
               <div className="mt-sm flex flex-wrap gap-sm">
@@ -1231,10 +1647,17 @@ function TicketsPage() {
                       clientCode: selectedClient.codigo,
                       omieAppId: omieAppId || null,
                       contato,
-                      codigoRef,
                       descricao,
                       prioridade: prio,
                       setores,
+                      ...(selectedMoni
+                        ? {
+                            moniEmpresa: selectedMoni.empresa,
+                            moniContaCodigo: selectedMoni.codigo,
+                            moniContaNome: selectedMoni.nome,
+                            moniContaIdExt: selectedMoni.idExt,
+                          }
+                        : {}),
                     },
                   });
                   if (created) {
@@ -1243,6 +1666,7 @@ function TicketsPage() {
                       ...prev.filter((t) => t.id !== created.id),
                     ]);
                     setSelectedId(created.id);
+                    setDetailOpen(true);
                     setFilter("ativos");
                   }
                   setNewOpen(false);

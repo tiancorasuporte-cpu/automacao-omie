@@ -54,7 +54,11 @@ import {
   syncOmieClientsFn,
   syncOmieProductsFn,
 } from "@/lib/orcamentos";
-import { createCompraSolicitacaoFn, listCotacoesOrcamentoFn } from "@/lib/compras";
+import {
+  createCompraSolicitacaoFn,
+  createCompraSolicitacoesLoteFn,
+  listCotacoesOrcamentoFn,
+} from "@/lib/compras";
 import { openOrcamentoPdf } from "@/lib/orcamento-pdf";
 import { downloadOrcamentoExcel } from "@/lib/orcamento-excel";
 import { effectiveCmc, isUnitBelowCmc, isUnitBelowSuggested, suggestedPriceFromCmc } from "@/lib/product-pricing";
@@ -609,17 +613,31 @@ function OrcamentosPage() {
         return 0;
       };
       const next: Record<number, CotacaoCartStatus> = {};
-      for (const row of rows) {
-        if (row.codigoProduto == null) continue;
-        const current = next[row.codigoProduto];
-        if (current && rank(current.status) >= rank(row.status)) continue;
-        next[row.codigoProduto] = {
+      const applyCode = (
+        codigoProduto: number | null | undefined,
+        row: (typeof rows)[number],
+        valorCompra: number | null,
+        cmcNovo: number | null,
+      ) => {
+        if (codigoProduto == null) return;
+        const current = next[codigoProduto];
+        if (current && rank(current.status) >= rank(row.status)) return;
+        next[codigoProduto] = {
           solicitacaoId: row.id,
           status: row.status,
-          valorCompra: row.valorCompra,
-          cmcNovo: row.cmcNovo,
+          valorCompra,
+          cmcNovo,
           fornecedorNome: row.fornecedorNome,
         };
+      };
+      for (const row of rows) {
+        if (row.itens?.length) {
+          for (const item of row.itens) {
+            applyCode(item.codigoProduto, row, item.valorCompra, item.cmcNovo);
+          }
+        } else {
+          applyCode(row.codigoProduto, row, row.valorCompra, row.cmcNovo);
+        }
       }
       setCotacaoByCodigo(next);
     } catch {
@@ -1069,6 +1087,24 @@ function OrcamentosPage() {
     setPedidoAprovOpen(true);
   }
 
+  async function ensureQuoteSavedForCompras() {
+    let quoteId = editingQuoteId;
+    let quoteNumero = numeroInterno;
+    if (!quoteId) {
+      const saved = await saveOrcamentoFn({ data: buildPayload() });
+      if (!saved.ok) {
+        return { ok: false as const, error: saved.error };
+      }
+      quoteId = saved.quoteId;
+      quoteNumero = saved.numeroInterno;
+      setEditingQuoteId(saved.quoteId);
+      setNumeroInterno(saved.numeroInterno);
+      setQuoteStatus("draft");
+      await refreshQuotes();
+    }
+    return { ok: true as const, quoteId, quoteNumero };
+  }
+
   async function handleEnviarCotacao(item: CartItem) {
     const existing = cotacaoByCodigo[item.codigoProduto];
     if (existing && existing.status !== "cancelada") {
@@ -1083,21 +1119,12 @@ function OrcamentosPage() {
     }
     setFeedback(null);
     try {
-      let quoteId = editingQuoteId;
-      let quoteNumero = numeroInterno;
-      if (!quoteId) {
-        const saved = await saveOrcamentoFn({ data: buildPayload() });
-        if (!saved.ok) {
-          setFeedback({ type: "error", text: saved.error });
-          return;
-        }
-        quoteId = saved.quoteId;
-        quoteNumero = saved.numeroInterno;
-        setEditingQuoteId(saved.quoteId);
-        setNumeroInterno(saved.numeroInterno);
-        setQuoteStatus("draft");
-        await refreshQuotes();
+      const saved = await ensureQuoteSavedForCompras();
+      if (!saved.ok) {
+        setFeedback({ type: "error", text: saved.error });
+        return;
       }
+      const { quoteId, quoteNumero } = saved;
       const result = await createCompraSolicitacaoFn({
         data: {
           origem: "orcamento",
@@ -1139,6 +1166,176 @@ function OrcamentosPage() {
       setFeedback({
         type: "error",
         text: error instanceof Error ? error.message : "Falha ao enviar para cotação.",
+      });
+    }
+  }
+
+  async function handleEnviarCotacaoLote() {
+    const pending = cart.filter((item) => {
+      const cotacao = cotacaoByCodigo[item.codigoProduto];
+      return !(cotacao && cotacao.status !== "cancelada");
+    });
+    if (!pending.length) {
+      setFeedback({
+        type: "error",
+        text: "Todos os itens já estão em cotação ou comprados.",
+      });
+      return;
+    }
+    setFeedback(null);
+    try {
+      const saved = await ensureQuoteSavedForCompras();
+      if (!saved.ok) {
+        setFeedback({ type: "error", text: saved.error });
+        return;
+      }
+      const { quoteId, quoteNumero } = saved;
+      const result = await createCompraSolicitacoesLoteFn({
+        data: {
+          origem: "orcamento",
+          quoteId,
+          quoteNumero,
+          motivo: `Cotação em lote do orçamento ${quoteNumero ?? quoteId}`,
+          observacao: `Itens do orçamento ${quoteNumero ?? quoteId}`,
+          items: pending.map((item) => ({
+            descricao: item.descricao,
+            unidade: item.unidade,
+            qtd: item.quantidade,
+            omieAppId: omieAppId || null,
+            codigoProduto: item.codigoProduto,
+          })),
+        },
+      });
+      if (!result.ok) {
+        setFeedback({ type: "error", text: result.error });
+        return;
+      }
+      const sol = result.solicitacao;
+      setCotacaoByCodigo((prev) => {
+        const next = { ...prev };
+        const lines = sol.itens.length
+          ? sol.itens
+          : [
+              {
+                codigoProduto: sol.codigoProduto,
+                valorCompra: sol.valorCompra,
+                cmcNovo: sol.cmcNovo,
+              },
+            ];
+        for (const item of lines) {
+          if (item.codigoProduto == null) continue;
+          next[item.codigoProduto] = {
+            solicitacaoId: sol.id,
+            status: sol.status,
+            valorCompra: item.valorCompra,
+            cmcNovo: item.cmcNovo,
+            fornecedorNome: sol.fornecedorNome,
+          };
+        }
+        return next;
+      });
+      const n = sol.itens.length || pending.length;
+      setFeedback({
+        type: "ok",
+        text: sol.isLote
+          ? `Lote com ${n} produtos enviado em um único card em Compras.`
+          : `${n} produto enviado para cotação em Compras.`,
+      });
+      try {
+        await reloadQuotesList();
+      } catch {
+        /* ignore */
+      }
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao enviar cotação em lote.",
+      });
+    }
+  }
+
+  async function handleSolicitarCompraLote() {
+    const pending = cart.filter((item) => {
+      const cotacao = cotacaoByCodigo[item.codigoProduto];
+      return !(cotacao && cotacao.status !== "cancelada");
+    });
+    if (!pending.length) {
+      setFeedback({
+        type: "error",
+        text: cart.length
+          ? "Todos os itens já possuem solicitação ativa em Compras."
+          : "Adicione produtos ao orçamento.",
+      });
+      return;
+    }
+    setFeedback(null);
+    try {
+      const saved = await ensureQuoteSavedForCompras();
+      if (!saved.ok) {
+        setFeedback({ type: "error", text: saved.error });
+        return;
+      }
+      const { quoteId, quoteNumero } = saved;
+      const result = await createCompraSolicitacoesLoteFn({
+        data: {
+          origem: "orcamento",
+          quoteId,
+          quoteNumero,
+          motivo: `Solicitação de compra em lote · orçamento ${quoteNumero ?? quoteId}`,
+          observacao: `Compra dos itens do orçamento ${quoteNumero ?? quoteId}`,
+          items: pending.map((item) => ({
+            descricao: item.descricao,
+            unidade: item.unidade,
+            qtd: item.quantidade,
+            omieAppId: omieAppId || null,
+            codigoProduto: item.codigoProduto,
+          })),
+        },
+      });
+      if (!result.ok) {
+        setFeedback({ type: "error", text: result.error });
+        return;
+      }
+      const sol = result.solicitacao;
+      setCotacaoByCodigo((prev) => {
+        const next = { ...prev };
+        const lines = sol.itens.length
+          ? sol.itens
+          : [
+              {
+                codigoProduto: sol.codigoProduto,
+                valorCompra: sol.valorCompra,
+                cmcNovo: sol.cmcNovo,
+              },
+            ];
+        for (const item of lines) {
+          if (item.codigoProduto == null) continue;
+          next[item.codigoProduto] = {
+            solicitacaoId: sol.id,
+            status: sol.status,
+            valorCompra: item.valorCompra,
+            cmcNovo: item.cmcNovo,
+            fornecedorNome: sol.fornecedorNome,
+          };
+        }
+        return next;
+      });
+      const n = sol.itens.length || pending.length;
+      setFeedback({
+        type: "ok",
+        text: sol.isLote
+          ? `Lote com ${n} itens solicitado em um único card em Compras.`
+          : `${n} solicitação de compra enviada.`,
+      });
+      try {
+        await reloadQuotesList();
+      } catch {
+        /* ignore */
+      }
+    } catch (error) {
+      setFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Falha ao solicitar compra em lote.",
       });
     }
   }
@@ -2245,6 +2442,28 @@ function OrcamentosPage() {
                 </div>
                 <div className="flex flex-wrap items-center gap-sm">
                   <p className="text-body-md font-semibold text-primary">{formatMoney(total)}</p>
+                  {cart.length > 0 ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleEnviarCotacaoLote()}
+                        className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold text-on-surface"
+                        title="Envia todos os itens ainda sem cotação para o comprador"
+                      >
+                        <Icon name="playlist_add_check" className="text-[16px]" />
+                        Cotar em lote
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleSolicitarCompraLote()}
+                        className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-white px-sm py-xs text-label-md font-semibold text-on-surface"
+                        title="Abre solicitação de compra de todos os itens"
+                      >
+                        <Icon name="shopping_cart" className="text-[16px]" />
+                        Compra em lote
+                      </button>
+                    </>
+                  ) : null}
                   {!locked ? (
                     <button
                       type="button"

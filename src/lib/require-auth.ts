@@ -65,6 +65,14 @@ export function canChecarTerceiros(
   return hasPermission(user.modules, "terceiros_checar");
 }
 
+export function canSeeContratoValores(
+  user: Pick<AppUser, "role" | "modules"> | null | undefined,
+) {
+  if (!user) return false;
+  if (isAdmin(user)) return true;
+  return hasPermission(user.modules, "contratos_valores");
+}
+
 export type OsWorkflowRole = "assistencia" | "estoque" | "compras";
 
 export function canOsWorkflow(

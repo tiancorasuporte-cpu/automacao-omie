@@ -24,6 +24,7 @@ function toPublicUser(row: AppUserRow): AppUser {
     modules: modulesForRole(role, row.modules ?? null),
     isTecnico: Boolean(row.is_tecnico),
     isComprador: Boolean(row.is_comprador),
+    isVendedor: Boolean(row.is_vendedor),
     defaultVehicleId:
       row.default_vehicle_id == null ? null : Number(row.default_vehicle_id),
   };
@@ -34,7 +35,9 @@ export async function findUserByUsername(username: string) {
   const rows = (await db`
     select id, username, password_hash, name, role, active, modules,
            coalesce(is_tecnico, false) as is_tecnico,
-           coalesce(is_comprador, false) as is_comprador, default_vehicle_id
+           coalesce(is_comprador, false) as is_comprador,
+           coalesce(is_vendedor, false) as is_vendedor,
+           default_vehicle_id
     from users
     where username = ${username}
     limit 1
@@ -48,7 +51,9 @@ export async function findUserById(id: number, opts?: { includeInactive?: boolea
     ? ((await db`
         select id, username, password_hash, name, role, active, modules,
                coalesce(is_tecnico, false) as is_tecnico,
-               coalesce(is_comprador, false) as is_comprador, default_vehicle_id
+               coalesce(is_comprador, false) as is_comprador,
+               coalesce(is_vendedor, false) as is_vendedor,
+               default_vehicle_id
         from users
         where id = ${id}
         limit 1
@@ -56,7 +61,9 @@ export async function findUserById(id: number, opts?: { includeInactive?: boolea
     : ((await db`
         select id, username, password_hash, name, role, active, modules,
                coalesce(is_tecnico, false) as is_tecnico,
-               coalesce(is_comprador, false) as is_comprador, default_vehicle_id
+               coalesce(is_comprador, false) as is_comprador,
+               coalesce(is_vendedor, false) as is_vendedor,
+               default_vehicle_id
         from users
         where id = ${id} and active = true
         limit 1
@@ -78,7 +85,9 @@ export async function listUsers() {
   const rows = (await db`
     select id, username, password_hash, name, role, active, modules,
            coalesce(is_tecnico, false) as is_tecnico,
-           coalesce(is_comprador, false) as is_comprador, default_vehicle_id
+           coalesce(is_comprador, false) as is_comprador,
+           coalesce(is_vendedor, false) as is_vendedor,
+           default_vehicle_id
     from users
     order by name
   `) as AppUserRow[];
@@ -90,9 +99,27 @@ export async function listTecnicos(activeOnly = true) {
   const rows = (await db`
     select id, username, password_hash, name, role, active, modules,
            coalesce(is_tecnico, false) as is_tecnico,
-           coalesce(is_comprador, false) as is_comprador, default_vehicle_id
+           coalesce(is_comprador, false) as is_comprador,
+           coalesce(is_vendedor, false) as is_vendedor,
+           default_vehicle_id
     from users
     where coalesce(is_tecnico, false) = true
+      and (${activeOnly}::boolean = false or active = true)
+    order by name
+  `) as AppUserRow[];
+  return rows.map(toPublicUser);
+}
+
+export async function listVendedores(activeOnly = true) {
+  const db = await getDb();
+  const rows = (await db`
+    select id, username, password_hash, name, role, active, modules,
+           coalesce(is_tecnico, false) as is_tecnico,
+           coalesce(is_comprador, false) as is_comprador,
+           coalesce(is_vendedor, false) as is_vendedor,
+           default_vehicle_id
+    from users
+    where coalesce(is_vendedor, false) = true
       and (${activeOnly}::boolean = false or active = true)
     order by name
   `) as AppUserRow[];
@@ -107,6 +134,7 @@ export async function createUser(input: {
   modules?: AppModuleId[];
   isTecnico?: boolean;
   isComprador?: boolean;
+  isVendedor?: boolean;
   defaultVehicleId?: number | null;
 }) {
   const db = await getDb();
@@ -116,18 +144,21 @@ export async function createUser(input: {
   const rows = (await db`
     insert into users (
       username, password_hash, name, role, active, modules,
-      is_tecnico, is_comprador, default_vehicle_id
+      is_tecnico, is_comprador, is_vendedor, default_vehicle_id
     )
     values (
       ${input.username}, ${passwordHash}, ${input.name}, ${input.role}, true,
       ${modulesJson},
       ${Boolean(input.isTecnico)},
       ${Boolean(input.isComprador)},
+      ${Boolean(input.isVendedor)},
       ${input.defaultVehicleId ?? null}
     )
     returning id, username, password_hash, name, role, active, modules,
               coalesce(is_tecnico, false) as is_tecnico,
-              coalesce(is_comprador, false) as is_comprador, default_vehicle_id
+              coalesce(is_comprador, false) as is_comprador,
+              coalesce(is_vendedor, false) as is_vendedor,
+              default_vehicle_id
   `) as AppUserRow[];
   const row = rows[0];
   if (!row) throw new Error("Não foi possível criar o usuário");
@@ -159,6 +190,7 @@ export async function updateUserStaff(
   input: {
     isTecnico: boolean;
     isComprador: boolean;
+    isVendedor: boolean;
     defaultVehicleId: number | null;
   },
 ) {
@@ -169,6 +201,7 @@ export async function updateUserStaff(
     update users
     set is_tecnico = ${input.isTecnico},
         is_comprador = ${input.isComprador},
+        is_vendedor = ${input.isVendedor},
         default_vehicle_id = ${input.defaultVehicleId},
         updated_at = now()
     where id = ${id}

@@ -6,7 +6,7 @@ import { updateLocalProduct, getOmieProductById, getOmieProductsByCodes } from "
 import { listProductSupplierCodes } from "@/db/suppliers";
 import { updateOsItemStatus } from "@/db/assistencia";
 
-export type CompraOrigem = "manual" | "orcamento" | "os";
+export type CompraOrigem = "manual" | "orcamento" | "os" | "uniforme";
 export type CompraStatus =
   | "aberta"
   | "em_cotacao"
@@ -18,6 +18,23 @@ export type CompraFornecedorSnap = {
   supplierId: number;
   supplierName: string;
   codigoFornecedor: string;
+};
+
+export type CompraSolicitacaoItem = {
+  id: number;
+  solicitacaoId: number;
+  productId: number | null;
+  codigoProduto: number | null;
+  descricao: string;
+  unidade: string | null;
+  qtd: number;
+  cmcOmie: number | null;
+  cmcInterno: number | null;
+  cmcEfetivo: number | null;
+  observacao: string | null;
+  valorCompra: number | null;
+  cmcNovo: number | null;
+  createdAt: string;
 };
 
 export type CompraSolicitacao = {
@@ -53,6 +70,8 @@ export type CompraSolicitacao = {
   compradoEm: string | null;
   vistoEm: string | null;
   naoVisto: boolean;
+  itens: CompraSolicitacaoItem[];
+  isLote: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -140,7 +159,29 @@ function normalizeLinks(links?: string[] | null) {
     .slice(0, 10);
 }
 
-function mapSolicitacao(row: Record<string, unknown>): CompraSolicitacao {
+function mapItem(row: Record<string, unknown>): CompraSolicitacaoItem {
+  return {
+    id: num(row["id"]),
+    solicitacaoId: num(row["solicitacao_id"]),
+    productId: row["product_id"] == null ? null : num(row["product_id"]),
+    codigoProduto: row["codigo_produto"] == null ? null : num(row["codigo_produto"]),
+    descricao: str(row["descricao"]),
+    unidade: nullableStr(row["unidade"]),
+    qtd: num(row["qtd"]),
+    cmcOmie: row["cmc_omie"] == null ? null : num(row["cmc_omie"]),
+    cmcInterno: row["cmc_interno"] == null ? null : num(row["cmc_interno"]),
+    cmcEfetivo: row["cmc_efetivo"] == null ? null : num(row["cmc_efetivo"]),
+    observacao: nullableStr(row["observacao"]),
+    valorCompra: row["valor_compra"] == null ? null : num(row["valor_compra"]),
+    cmcNovo: row["cmc_novo"] == null ? null : num(row["cmc_novo"]),
+    createdAt: iso(row["created_at"]) ?? "",
+  };
+}
+
+function mapSolicitacao(
+  row: Record<string, unknown>,
+  itens: CompraSolicitacaoItem[] = [],
+): CompraSolicitacao {
   return {
     id: num(row["id"]),
     origem: str(row["origem"]) as CompraOrigem,
@@ -176,9 +217,36 @@ function mapSolicitacao(row: Record<string, unknown>): CompraSolicitacao {
     naoVisto:
       !row["visto_em"] &&
       ["aberta", "em_cotacao", "comprada"].includes(str(row["status"])),
+    itens,
+    isLote: itens.length > 1,
     createdAt: iso(row["created_at"]) ?? "",
     updatedAt: iso(row["updated_at"]) ?? "",
   };
+}
+
+async function listItensBySolicitacaoIds(ids: number[]) {
+  const clean = [...new Set(ids.filter((id) => Number.isFinite(id) && id > 0))];
+  if (!clean.length) return new Map<number, CompraSolicitacaoItem[]>();
+  const db = await getDb();
+  const rows = (await db`
+    select *
+    from compras_solicitacao_itens
+    where solicitacao_id in ${db(clean)}
+    order by id asc
+  `) as Record<string, unknown>[];
+  const map = new Map<number, CompraSolicitacaoItem[]>();
+  for (const row of rows) {
+    const item = mapItem(row);
+    const list = map.get(item.solicitacaoId) ?? [];
+    list.push(item);
+    map.set(item.solicitacaoId, list);
+  }
+  return map;
+}
+
+async function attachItens(rows: Record<string, unknown>[]): Promise<CompraSolicitacao[]> {
+  const itensBySol = await listItensBySolicitacaoIds(rows.map((r) => num(r["id"])));
+  return rows.map((row) => mapSolicitacao(row, itensBySol.get(num(row["id"])) ?? []));
 }
 
 async function productSnapshot(input: {
@@ -248,7 +316,7 @@ export async function createCompraSolicitacao(input: {
   if (!descricao) throw new Error("Informe o produto / descrição.");
   if (!(input.qtd > 0)) throw new Error("Quantidade inválida.");
   const motivo = nullableStr(input.motivo);
-  if (input.origem === "manual" && !motivo) {
+  if ((input.origem === "manual" || input.origem === "uniforme") && !motivo) {
     throw new Error("Informe o motivo da solicitação.");
   }
   const links = normalizeLinks(input.links);
@@ -285,7 +353,153 @@ export async function createCompraSolicitacao(input: {
     returning *
   `) as Record<string, unknown>[];
   if (!row) throw new Error("Falha ao criar solicitação.");
-  return mapSolicitacao(row);
+  const [mapped] = await attachItens([row]);
+  return mapped!;
+}
+
+export type CompraSolicitacaoLoteItem = {
+  descricao?: string;
+  unidade?: string | null;
+  qtd: number;
+  productId?: number | null;
+  omieAppId?: string | null;
+  codigoProduto?: number | null;
+  observacao?: string | null;
+};
+
+/** Cria um único card de lote com N itens (ou 1 solicitação unitária se só houver 1 item). */
+export async function createCompraSolicitacoesLote(input: {
+  origem: CompraOrigem;
+  items: CompraSolicitacaoLoteItem[];
+  quoteId?: number | null;
+  quoteNumero?: string | null;
+  motivo?: string | null;
+  links?: string[] | null;
+  observacao?: string | null;
+  solicitadoPor: number | null;
+  solicitadoPorNome: string;
+}): Promise<CompraSolicitacao> {
+  if (!input.items.length) throw new Error("Informe ao menos um item.");
+
+  if (input.items.length === 1) {
+    const item = input.items[0]!;
+    return createCompraSolicitacao({
+      origem: input.origem,
+      ...(item.descricao != null ? { descricao: item.descricao } : {}),
+      unidade: item.unidade ?? null,
+      qtd: item.qtd,
+      productId: item.productId ?? null,
+      omieAppId: item.omieAppId ?? null,
+      codigoProduto: item.codigoProduto ?? null,
+      quoteId: input.quoteId ?? null,
+      quoteNumero: input.quoteNumero ?? null,
+      motivo: input.motivo ?? null,
+      links: input.links ?? null,
+      observacao: item.observacao ?? input.observacao ?? null,
+      solicitadoPor: input.solicitadoPor,
+      solicitadoPorNome: input.solicitadoPorNome,
+    });
+  }
+
+  const motivo = nullableStr(input.motivo);
+  if ((input.origem === "manual" || input.origem === "uniforme") && !motivo) {
+    throw new Error("Informe o motivo da solicitação.");
+  }
+
+  const prepared: Array<{
+    descricao: string;
+    unidade: string | null;
+    qtd: number;
+    productId: number | null;
+    codigoProduto: number | null;
+    cmcOmie: number | null;
+    cmcInterno: number | null;
+    cmcEfetivo: number | null;
+    observacao: string | null;
+  }> = [];
+
+  for (const item of input.items) {
+    if (!(item.qtd > 0)) throw new Error("Quantidade inválida em um dos itens.");
+    const snap = await productSnapshot({
+      productId: item.productId ?? null,
+      omieAppId: item.omieAppId ?? null,
+      codigoProduto: item.codigoProduto ?? null,
+    });
+    const descricao = (item.descricao?.trim() || snap.descricao || "").trim();
+    if (!descricao) throw new Error("Informe o produto / descrição em todos os itens.");
+    prepared.push({
+      descricao,
+      unidade: item.unidade ?? snap.unidade ?? null,
+      qtd: item.qtd,
+      productId: snap.productId,
+      codigoProduto: snap.codigoProduto,
+      cmcOmie: snap.cmcOmie,
+      cmcInterno: snap.cmcInterno,
+      cmcEfetivo: snap.cmcEfetivo,
+      observacao: nullableStr(item.observacao) ?? nullableStr(input.observacao),
+    });
+  }
+
+  const links = normalizeLinks(input.links);
+  const qtdTotal = prepared.reduce((acc, item) => acc + item.qtd, 0);
+  const titulo = `Lote · ${prepared.length} itens`;
+  const db = await getDb();
+  const [row] = (await db`
+    insert into compras_solicitacoes (
+      origem, status, product_id, codigo_produto, descricao, unidade, qtd,
+      quote_id, quote_numero, os_id, os_item_id,
+      cmc_omie, cmc_interno, cmc_efetivo, fornecedores_json,
+      motivo, links_json, observacao, solicitado_por, solicitado_por_nome
+    ) values (
+      ${input.origem},
+      'aberta',
+      null,
+      null,
+      ${titulo},
+      null,
+      ${qtdTotal},
+      ${input.quoteId ?? null},
+      ${nullableStr(input.quoteNumero)},
+      null,
+      null,
+      null,
+      null,
+      null,
+      ${null},
+      ${motivo},
+      ${links.length ? JSON.stringify(links) : null},
+      ${nullableStr(input.observacao)},
+      ${input.solicitadoPor},
+      ${input.solicitadoPorNome.trim() || "Usuário"}
+    )
+    returning *
+  `) as Record<string, unknown>[];
+  if (!row) throw new Error("Falha ao criar solicitação em lote.");
+  const solicitacaoId = num(row["id"]);
+
+  for (const item of prepared) {
+    await db`
+      insert into compras_solicitacao_itens (
+        solicitacao_id, product_id, codigo_produto, descricao, unidade, qtd,
+        cmc_omie, cmc_interno, cmc_efetivo, observacao
+      ) values (
+        ${solicitacaoId},
+        ${item.productId},
+        ${item.codigoProduto},
+        ${item.descricao},
+        ${item.unidade},
+        ${item.qtd},
+        ${item.cmcOmie},
+        ${item.cmcInterno},
+        ${item.cmcEfetivo},
+        ${item.observacao}
+      )
+    `;
+  }
+
+  const full = await getCompraSolicitacao(solicitacaoId);
+  if (!full) throw new Error("Falha ao carregar solicitação em lote.");
+  return full;
 }
 
 /** Cria (ou reutiliza) solicitação de compra para item OS marcado como comprar. */
@@ -303,7 +517,10 @@ export async function ensureOsCompraSolicitacao(input: {
     order by id desc
     limit 1
   `) as Record<string, unknown>[];
-  if (existing[0]) return mapSolicitacao(existing[0]);
+  if (existing[0]) {
+    const [mapped] = await attachItens([existing[0]]);
+    return mapped!;
+  }
 
   const rows = (await db`
     select
@@ -337,7 +554,9 @@ export async function ensureOsCompraSolicitacao(input: {
     osItemId: num(row["item_id"]),
     motivo: `Compra da OS ${osNum}${clientName ? ` · ${clientName}` : ""}`,
     solicitadoPor: input.solicitadoPor ?? null,
-    solicitadoPorNome: input.solicitadoPorNome?.trim() || "Assistência",
+    ...(input.solicitadoPorNome != null
+      ? { solicitadoPorNome: input.solicitadoPorNome.trim() || "Assistência" }
+      : { solicitadoPorNome: "Assistência" }),
   });
 }
 
@@ -400,7 +619,7 @@ export async function listCompraSolicitacoesForQuote(input: {
     order by created_at desc, id desc
     limit ${limit}
   `) as Record<string, unknown>[];
-  return rows.map(mapSolicitacao);
+  return attachItens(rows);
 }
 
 export async function listCompraSolicitacoes(input?: {
@@ -441,7 +660,7 @@ export async function listCompraSolicitacoes(input?: {
           limit ${limit}
         `
   ) as Record<string, unknown>[];
-  return rows.map(mapSolicitacao);
+  return attachItens(rows);
 }
 
 export async function getCompraSolicitacao(id: number) {
@@ -449,7 +668,9 @@ export async function getCompraSolicitacao(id: number) {
   const [row] = (await db`
     select * from compras_solicitacoes where id = ${id} limit 1
   `) as Record<string, unknown>[];
-  return row ? mapSolicitacao(row) : null;
+  if (!row) return null;
+  const [mapped] = await attachItens([row]);
+  return mapped ?? null;
 }
 
 export async function setCompraSolicitacaoStatus(input: {
@@ -463,12 +684,15 @@ export async function setCompraSolicitacaoStatus(input: {
     where id = ${input.id}
     returning *
   `) as Record<string, unknown>[];
-  return row ? mapSolicitacao(row) : null;
+  if (!row) return null;
+  const [mapped] = await attachItens([row]);
+  return mapped ?? null;
 }
 
 export type CotacaoProposta = {
   id: number;
   solicitacaoId: number;
+  itemId: number | null;
   supplierId: number | null;
   supplierName: string;
   valorUnitario: number;
@@ -483,6 +707,7 @@ function mapProposta(row: Record<string, unknown>): CotacaoProposta {
   return {
     id: num(row["id"]),
     solicitacaoId: num(row["solicitacao_id"]),
+    itemId: row["item_id"] == null ? null : num(row["item_id"]),
     supplierId: row["supplier_id"] == null ? null : num(row["supplier_id"]),
     supplierName: str(row["supplier_name"]),
     valorUnitario: num(row["valor_unitario"]),
@@ -529,6 +754,7 @@ export async function getCotacaoProposta(id: number) {
 export async function saveCotacaoProposta(input: {
   id?: number | null;
   solicitacaoId: number;
+  itemId?: number | null;
   supplierId?: number | null;
   supplierName: string;
   valorUnitario: number;
@@ -550,6 +776,18 @@ export async function saveCotacaoProposta(input: {
   if (!(input.valorUnitario >= 0) || !Number.isFinite(input.valorUnitario)) {
     throw new Error("Valor unitário inválido.");
   }
+  let itemId =
+    input.itemId != null && Number.isFinite(input.itemId) && input.itemId > 0
+      ? Number(input.itemId)
+      : null;
+  if (solicitacao.isLote) {
+    if (itemId == null) throw new Error("Informe o item do lote para cotar.");
+    if (!solicitacao.itens.some((i) => i.id === itemId)) {
+      throw new Error("Item não pertence a este lote.");
+    }
+  } else {
+    itemId = null;
+  }
   const previsao = nullableStr(input.previsao)?.slice(0, 10) ?? null;
   const observacao = nullableStr(input.observacao);
   const supplierId =
@@ -565,7 +803,8 @@ export async function saveCotacaoProposta(input: {
           supplier_name = ${supplierName},
           valor_unitario = ${input.valorUnitario},
           previsao = ${previsao},
-          observacao = ${observacao}
+          observacao = ${observacao},
+          item_id = ${itemId}
       where id = ${input.id} and solicitacao_id = ${input.solicitacaoId}
       returning *
     `) as Record<string, unknown>[];
@@ -575,10 +814,11 @@ export async function saveCotacaoProposta(input: {
 
   const [row] = (await db`
     insert into compras_cotacao_propostas (
-      solicitacao_id, supplier_id, supplier_name, valor_unitario, previsao, observacao,
+      solicitacao_id, item_id, supplier_id, supplier_name, valor_unitario, previsao, observacao,
       created_by, created_by_name
     ) values (
       ${input.solicitacaoId},
+      ${itemId},
       ${supplierId},
       ${supplierName},
       ${input.valorUnitario},
@@ -595,6 +835,53 @@ export async function saveCotacaoProposta(input: {
     await setCompraSolicitacaoStatus({ id: input.solicitacaoId, status: "em_cotacao" });
   }
   return mapProposta(row);
+}
+
+export type CotacaoPropostaLoteItem = {
+  itemId: number;
+  valorUnitario: number;
+  observacao?: string | null;
+};
+
+/** Registra cotação (mesmo fornecedor) para os itens de um card de lote. */
+export async function saveCotacaoPropostasLote(input: {
+  solicitacaoId: number;
+  supplierId?: number | null;
+  supplierName: string;
+  previsao?: string | null;
+  items: CotacaoPropostaLoteItem[];
+  createdBy: number | null;
+  createdByName: string;
+}) {
+  if (!input.items.length) throw new Error("Informe ao menos um item para cotar.");
+  const solicitacao = await getCompraSolicitacao(input.solicitacaoId);
+  if (!solicitacao) throw new Error("Solicitação não encontrada.");
+  if (!solicitacao.isLote) {
+    throw new Error("Esta solicitação não é um lote.");
+  }
+  const propostas: CotacaoProposta[] = [];
+  for (const item of input.items) {
+    if (!(item.valorUnitario >= 0) || !Number.isFinite(item.valorUnitario)) {
+      throw new Error("Valor unitário inválido em um dos itens.");
+    }
+    const proposta = await saveCotacaoProposta({
+      solicitacaoId: input.solicitacaoId,
+      itemId: item.itemId,
+      supplierId: input.supplierId ?? null,
+      supplierName: input.supplierName,
+      valorUnitario: item.valorUnitario,
+      previsao: input.previsao ?? null,
+      observacao: item.observacao ?? null,
+      createdBy: input.createdBy,
+      createdByName: input.createdByName,
+    });
+    propostas.push(proposta);
+  }
+  const updated = await getCompraSolicitacao(input.solicitacaoId);
+  return {
+    propostas: await listCotacaoPropostas(input.solicitacaoId),
+    solicitacao: updated,
+  };
 }
 
 export async function deleteCotacaoProposta(input: { id: number; solicitacaoId?: number }) {
@@ -637,6 +924,70 @@ export async function concluirCompraSolicitacao(input: {
   let valorCompra = input.valorCompra ?? null;
   let previsao = input.previsao ?? null;
   let notasCompra = input.notasCompra ?? null;
+  const db = await getDb();
+
+  if (current.isLote) {
+    const propostas = await listCotacaoPropostas(current.id);
+    const byItem = new Map<number, CotacaoProposta>();
+    for (const p of propostas) {
+      if (p.itemId == null) continue;
+      const prev = byItem.get(p.itemId);
+      if (!prev || p.id > prev.id) byItem.set(p.itemId, p);
+    }
+    const missing = current.itens.filter((item) => !byItem.has(item.id));
+    if (missing.length) {
+      throw new Error(
+        `Faltam cotações para ${missing.length} item(ns) do lote antes de registrar a compra.`,
+      );
+    }
+    const first = byItem.get(current.itens[0]!.id)!;
+    fornecedorNome = first.supplierName;
+    fornecedorId = first.supplierId;
+    if (first.previsao) previsao = first.previsao;
+    let total = 0;
+    for (const item of current.itens) {
+      const prop = byItem.get(item.id)!;
+      const cmcItem = prop.valorUnitario;
+      total += prop.valorUnitario * item.qtd;
+      await db`
+        update compras_solicitacao_itens
+        set valor_compra = ${prop.valorUnitario},
+            cmc_novo = ${cmcItem}
+        where id = ${item.id}
+      `;
+      if (input.updateCmcInterno !== false && item.productId != null) {
+        const product = await getOmieProductById(item.productId);
+        if (product) {
+          await updateLocalProduct({
+            id: product.id,
+            cmcInterno: cmcItem,
+            markup: product.markup,
+            valorUnitario: product.valorUnitario,
+          });
+        }
+      }
+    }
+    valorCompra = total;
+    const [row] = (await db`
+      update compras_solicitacoes
+      set status = 'comprada',
+          fornecedor_nome = ${nullableStr(fornecedorNome)},
+          fornecedor_id = ${fornecedorId},
+          valor_compra = ${valorCompra},
+          cmc_novo = null,
+          previsao = ${previsao},
+          notas_compra = ${nullableStr(notasCompra)},
+          comprado_por = ${input.compradoPor},
+          comprado_por_nome = ${input.compradoPorNome.trim() || "Comprador"},
+          comprado_em = now(),
+          updated_at = now()
+      where id = ${input.id}
+      returning *
+    `) as Record<string, unknown>[];
+    if (!row) return null;
+    const [mapped] = await attachItens([row]);
+    return mapped ?? null;
+  }
 
   if (input.propostaId != null && input.propostaId > 0) {
     const proposta = await getCotacaoProposta(input.propostaId);
@@ -669,7 +1020,6 @@ export async function concluirCompraSolicitacao(input: {
     }
   }
 
-  const db = await getDb();
   const [row] = (await db`
     update compras_solicitacoes
     set status = 'comprada',
@@ -686,7 +1036,9 @@ export async function concluirCompraSolicitacao(input: {
     where id = ${input.id}
     returning *
   `) as Record<string, unknown>[];
-  const result = row ? mapSolicitacao(row) : null;
+  if (!row) return null;
+  const [mapped] = await attachItens([row]);
+  const result = mapped ?? null;
   if (result?.osItemId) {
     try {
       await markOsItemComprado({

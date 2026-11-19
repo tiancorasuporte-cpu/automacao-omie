@@ -77,6 +77,10 @@ export type ClienteContratoGrupo = {
   qtdAtivos: number;
   qtdTotal: number;
   valorMensalAtivos: number;
+  /** Contas Moni vinculadas a contratos ativos deste cliente. */
+  moniQtdAtivos: number;
+  /** Contratos ativos que têm ao menos 1 conta Moni. */
+  moniContratosAtivos: number;
   codigoCliente: number | null;
   omieAppId: string | null;
 };
@@ -280,6 +284,7 @@ export async function listClientesComContratoAtivo(input?: {
   const rows = (await db`
     with base as (
       select
+        id,
         case
           when nullif(trim(cnpj_cpf), '') is not null then cnpj_cpf
           else omie_app_id || ':' || codigo_cliente::text
@@ -300,6 +305,11 @@ export async function listClientesComContratoAtivo(input?: {
       where situacao = '10'
       group by group_key
     ),
+    moni_por_contrato as (
+      select omie_contrato_id, count(*)::int as moni_qtd
+      from omie_contrato_moni_contas
+      group by omie_contrato_id
+    ),
     grouped as (
       select
         b.group_key,
@@ -312,6 +322,10 @@ export async function listClientesComContratoAtivo(input?: {
         count(*) filter (where b.situacao = '10')::int as qtd_ativos,
         count(*)::int as qtd_total,
         coalesce(sum(b.valor_mensal) filter (where b.situacao = '10'), 0)::float8 as valor_mensal_ativos,
+        coalesce(sum(m.moni_qtd) filter (where b.situacao = '10'), 0)::int as moni_qtd_ativos,
+        count(*) filter (
+          where b.situacao = '10' and coalesce(m.moni_qtd, 0) > 0
+        )::int as moni_contratos_ativos,
         json_agg(jsonb_build_object('id', b.omie_app_id, 'name', b.omie_app_name))
           filter (where b.situacao = '10') as apps_json,
         max(b.codigo_cliente) filter (
@@ -322,6 +336,7 @@ export async function listClientesComContratoAtivo(input?: {
         ) as omie_app_id_sint
       from base b
       inner join with_active a on a.group_key = b.group_key
+      left join moni_por_contrato m on m.omie_contrato_id = b.id
       group by b.group_key
     ),
     filtered as (
@@ -348,6 +363,8 @@ export async function listClientesComContratoAtivo(input?: {
     qtd_ativos: number;
     qtd_total: number;
     valor_mensal_ativos: number;
+    moni_qtd_ativos: number;
+    moni_contratos_ativos: number;
     apps_json: Array<{ id: string; name: string }> | null;
     codigo_cliente_sint: string | number | null;
     omie_app_id_sint: string | null;
@@ -373,6 +390,8 @@ export async function listClientesComContratoAtivo(input?: {
       qtdAtivos: Number(row.qtd_ativos ?? 0),
       qtdTotal: Number(row.qtd_total ?? 0),
       valorMensalAtivos: Number(row.valor_mensal_ativos ?? 0),
+      moniQtdAtivos: Number(row.moni_qtd_ativos ?? 0),
+      moniContratosAtivos: Number(row.moni_contratos_ativos ?? 0),
       codigoCliente: cnpj ? null : row.codigo_cliente_sint != null ? Number(row.codigo_cliente_sint) : null,
       omieAppId: cnpj ? null : row.omie_app_id_sint,
     };
