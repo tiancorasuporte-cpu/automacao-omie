@@ -160,6 +160,18 @@ export type AssistOs = {
     itens: Array<{ qtd: number; nome: string; obs: string | null }>;
     obs: string | null;
   } | null;
+  /** Numeração L.T. 0001 (tipo visita / levantamento técnico). */
+  ltNumero: string | null;
+  levStatus: "rascunho" | "finalizado" | null;
+  levFinalizadoEm: string | null;
+  levFinalizadoPor: string | null;
+  ltItems: Array<{
+    id: number;
+    productId: number;
+    codigoProduto: number;
+    nome: string;
+    qtd: number;
+  }>;
   rel: {
     texto: string;
     fotos: string[];
@@ -296,6 +308,15 @@ function mapOs(row: Record<string, unknown>, items: AssistOsItem[] = []): Assist
           .filter((it) => it.nome),
       };
     })(),
+    ltNumero: nullableStr(row["lt_numero"]),
+    levStatus: (() => {
+      const s = nullableStr(row["lev_status"]);
+      if (s === "rascunho" || s === "finalizado") return s;
+      return null;
+    })(),
+    levFinalizadoEm: iso(row["lev_finalizado_em"]),
+    levFinalizadoPor: nullableStr(row["lev_finalizado_por"]),
+    ltItems: [],
     rel: (() => {
       const raw = parseJson<{
         texto?: string;
@@ -556,6 +577,14 @@ export async function getOsById(id: number) {
     select * from assist_os_events where os_id = ${id} order by id asc
   `) as Record<string, unknown>[];
   os.events = events.map(mapEvent);
+  if (os.tipo === "visita") {
+    try {
+      const { listLtItems } = await import("@/db/assistencia-lt");
+      os.ltItems = await listLtItems(os.id);
+    } catch {
+      os.ltItems = [];
+    }
+  }
   return attachOsMoniDetalhe(os);
 }
 
@@ -2169,26 +2198,40 @@ export async function finishVisita(input: {
 }) {
   const os = await getOsById(input.osId);
   if (!os) throw new Error("OS não encontrada.");
-  if (os.tipo !== "visita") throw new Error("Somente visita técnica.");
+  if (os.tipo !== "visita") throw new Error("Somente Levantamento Técnico.");
+
+  // Novo fluxo: itens de catálogo Omie
+  const { listLtItems, finalizeLevantamentoTecnico } = await import("@/db/assistencia-lt");
+  const ltItems = await listLtItems(os.id);
+  if (ltItems.length > 0 || os.levStatus === "rascunho" || os.ltNumero) {
+    const res = await finalizeLevantamentoTecnico({
+      osId: os.id,
+      quem: input.quem,
+      userId: input.userId,
+      isAdmin: input.isAdmin,
+      canRole: input.canRole,
+    });
+    return res.os;
+  }
+
+  // Compat: levantamento legado (texto livre em lev_json)
   if (!os.lev) throw new Error("Salve o levantamento antes.");
   if (!os.coAt) throw new Error("Faça check-out antes.");
   assertCanMoveStage(5, input.canRole, input.isAdmin);
   const db = await getDb();
   await db`
-    update assist_os set stage = 6, updated_at = now() where id = ${os.id}
+    update assist_os set stage = 6, lev_status = 'finalizado', updated_at = now() where id = ${os.id}
   `;
   await addOsEvent({
     osId: os.id,
     quem: input.quem,
     userId: input.userId,
-    acao: "Visita concluída · Executado",
+    acao: "Levantamento Técnico concluído · Executado",
   });
   const done = await getOsById(os.id);
   if (done?.lev) {
     try {
       const { createOportunidadeFromOs } = await import("@/db/crm");
-      const { getDb } = await import("@/db/schema");
-      await getDb();
       await createOportunidadeFromOs({
         osNum: done.num,
         osId: done.id,
@@ -2199,13 +2242,16 @@ export async function finishVisita(input: {
         dataVisita: done.coAt ? new Date(done.coAt).toISOString().slice(0, 10) : null,
         vendedor: done.createdByName || input.quem,
         autor: input.quem,
+        ltNumero: done.ltNumero,
+        omieAppId: done.omieAppId,
+        codigoClienteOmie: done.clientCode,
         itens: (done.lev.itens || []).map((it) => ({
           qtd: Number(it.qtd) || 1,
           nome: String(it.nome || "").trim() || "Item",
         })),
       });
     } catch {
-      // CRM best-effort: não impede finalizar a visita
+      // CRM best-effort
     }
   }
   return done;

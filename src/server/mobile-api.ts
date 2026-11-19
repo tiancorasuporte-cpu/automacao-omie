@@ -95,6 +95,17 @@ function serializeOs(
     needsMaterialConfirm,
     execStatus: exec.key,
     execStatusLabel: exec.label,
+    ltNumero: os.ltNumero ?? null,
+    levStatus: os.levStatus ?? null,
+    levFinalizadoEm: os.levFinalizadoEm ?? null,
+    ltItems: (os.ltItems ?? []).map((i) => ({
+      id: i.id,
+      productId: i.productId,
+      codigoProduto: i.codigoProduto,
+      nome: i.nome,
+      qtd: i.qtd,
+    })),
+    isLevantamentoTecnico: os.tipo === "visita",
     envio: os.envio
       ? {
           equipe: os.envio.equipe,
@@ -1025,6 +1036,55 @@ async function applySyncAction(
         { includeRel: true },
       );
     }
+    if (action.type === "os_lt_save") {
+      const { replaceLtItems } = await import("@/db/assistencia-lt");
+      const rawItems = Array.isArray(payload.items) ? payload.items : [];
+      const items = rawItems
+        .map((it) => {
+          const row = it as { productId?: unknown; qtd?: unknown };
+          return {
+            productId: Number(row.productId),
+            qtd: Number(row.qtd),
+          };
+        })
+        .filter((it) => Number.isFinite(it.productId) && it.productId > 0 && it.qtd > 0);
+      return serializeOs(
+        (await replaceLtItems({
+          osId: action.osId,
+          items,
+          quem: user.name,
+          userId: user.id,
+        }))!,
+      );
+    }
+    if (action.type === "os_lt_upsert") {
+      const { upsertLtItem } = await import("@/db/assistencia-lt");
+      const productId = Number(payload.productId);
+      const qtd = Number(payload.qtd);
+      if (!Number.isFinite(productId) || productId <= 0) {
+        throw new Error("productId obrigatório.");
+      }
+      return serializeOs(
+        (await upsertLtItem({
+          osId: action.osId,
+          productId,
+          qtd,
+          quem: user.name,
+          userId: user.id,
+        }))!,
+      );
+    }
+    if (action.type === "os_lt_finalize") {
+      const { finalizeLevantamentoTecnico } = await import("@/db/assistencia-lt");
+      const res = await finalizeLevantamentoTecnico({
+        osId: action.osId,
+        quem: user.name,
+        userId: user.id,
+        isAdmin: roles.isAdmin,
+        canRole: roles.canRole,
+      });
+      return serializeOs(res.os!);
+    }
     throw new Error(`Ação O.S. desconhecida: ${action.type}`);
   }
 
@@ -1133,4 +1193,89 @@ async function applySyncAction(
   }
 
   throw new Error(`Ação desconhecida: ${action.type}`);
+}
+
+export async function handleMobileSearchProducts(request: Request) {
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const url = new URL(request.url);
+  const q = (url.searchParams.get("q") || url.searchParams.get("query") || "").trim();
+  const omieAppId = url.searchParams.get("omieAppId") || undefined;
+  if (q.length < 2) {
+    return jsonOk({ items: [] });
+  }
+  const { listOmieProducts } = await import("@/db/products");
+  const { requireOrcamentosOmieApp } = await import("@/server/omie/client");
+  let appId = omieAppId?.trim() || "";
+  if (!appId) {
+    const app = await requireOrcamentosOmieApp();
+    appId = app.id;
+  }
+  const items = await listOmieProducts({
+    omieAppId: appId,
+    query: q,
+    limit: 40,
+  });
+  return jsonOk({
+    items: items.map((p) => ({
+      id: p.id,
+      codigoProduto: p.codigoProduto,
+      codigoInterno: p.codigoInterno,
+      descricao: p.descricao,
+      unidade: p.unidade,
+    })),
+  });
+}
+
+export async function handleMobileSaveLt(request: Request, osId: number) {
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const owned = await assertOsOwnedByTecnico(osId, auth.user);
+  if (!owned.ok) return jsonError(owned.error, 403);
+  const body = await readJsonBody<{
+    items?: Array<{ productId: number; qtd: number }>;
+    productId?: number;
+    qtd?: number;
+  }>(request);
+
+  if (body?.productId != null) {
+    const { upsertLtItem } = await import("@/db/assistencia-lt");
+    const os = await upsertLtItem({
+      osId,
+      productId: Number(body.productId),
+      qtd: Number(body.qtd ?? 1),
+      quem: auth.user.name,
+      userId: auth.user.id,
+    });
+    return jsonOk({ ok: true, os: serializeOs(os!) });
+  }
+
+  const { replaceLtItems } = await import("@/db/assistencia-lt");
+  const items = (body?.items ?? [])
+    .map((it) => ({ productId: Number(it.productId), qtd: Number(it.qtd) }))
+    .filter((it) => it.productId > 0 && it.qtd > 0);
+  const os = await replaceLtItems({
+    osId,
+    items,
+    quem: auth.user.name,
+    userId: auth.user.id,
+  });
+  return jsonOk({ ok: true, os: serializeOs(os!) });
+}
+
+export async function handleMobileFinalizeLt(request: Request, osId: number) {
+  const auth = await requireMobileTecnico(request);
+  if (!auth.ok) return auth.response;
+  const owned = await assertOsOwnedByTecnico(osId, auth.user);
+  if (!owned.ok) return jsonError(owned.error, 403);
+  const roles = mobileOsRoles(auth.user);
+  const { finalizeLevantamentoTecnico } = await import("@/db/assistencia-lt");
+  const res = await finalizeLevantamentoTecnico({
+    osId,
+    quem: auth.user.name,
+    userId: auth.user.id,
+    isAdmin: roles.isAdmin,
+    canRole: roles.canRole,
+  });
+  return jsonOk({ ok: true, os: serializeOs(res.os!), already: res.already });
 }

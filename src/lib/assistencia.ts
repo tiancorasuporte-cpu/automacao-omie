@@ -968,26 +968,30 @@ export const finishVisitaFn = createServerFn({ method: "POST" })
       canRole: roles.canRole,
     });
     if (!os) throw new Error("OS não encontrada.");
-    if (os.lev && !os.ticketComId) {
+    const levItens =
+      os.ltItems?.length > 0
+        ? os.ltItems.map((it) => ({
+            qtd: it.qtd,
+            nome: it.nome,
+            obs: null as string | null,
+          }))
+        : os.lev?.itens ?? [];
+    if (levItens.length && !os.ticketComId) {
       const ticket = await createTicket({
         cat: "levorc",
         clientName: os.clientName,
         omieAppId: os.omieAppId,
         clientCode: os.clientCode,
-        descricao: `Levantamento da visita OS ${os.num}`,
+        descricao: `Levantamento Técnico OS ${os.num}${os.ltNumero ? ` · ${os.ltNumero}` : ""}`,
         setores: ["com"],
         openedBy: user.id,
         openedByName: user.name,
         lev: {
           origem: os.num,
-          obs: os.lev.obs,
-          itens: os.lev.itens.map((it) => ({
-            qtd: it.qtd,
-            nome: it.nome,
-            obs: it.obs,
-          })),
+          obs: os.lev?.obs ?? null,
+          itens: levItens,
         },
-        codigoRef: os.num,
+        codigoRef: os.ltNumero || os.num,
       });
       if (ticket) {
         await linkOsTicketCom(os.id, ticket.id);
@@ -1007,6 +1011,7 @@ export const saveOsLevFn = createServerFn({ method: "POST" })
             qtd: z.number().positive(),
             nome: z.string().min(1),
             obs: z.string().optional(),
+            productId: z.number().int().positive().optional(),
           }),
         ),
         obs: z.string().optional(),
@@ -1016,6 +1021,19 @@ export const saveOsLevFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const { user } = await auth();
     await boot();
+    const withProduct = data.itens.filter((i) => i.productId);
+    if (withProduct.length > 0) {
+      const { replaceLtItems } = await import("@/db/assistencia-lt");
+      return replaceLtItems({
+        osId: data.osId,
+        items: withProduct.map((i) => ({
+          productId: i.productId!,
+          qtd: i.qtd,
+        })),
+        quem: user.name,
+        userId: user.id,
+      });
+    }
     return saveOsLev({
       osId: data.osId,
       lev: {
@@ -1029,6 +1047,67 @@ export const saveOsLevFn = createServerFn({ method: "POST" })
       quem: user.name,
       userId: user.id,
     });
+  });
+
+export const upsertOsLtItemFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        productId: z.number().int().positive(),
+        qtd: z.number().positive(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const { upsertLtItem } = await import("@/db/assistencia-lt");
+    return upsertLtItem({
+      osId: data.osId,
+      productId: data.productId,
+      qtd: data.qtd,
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const removeOsLtItemFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        osId: z.number().int().positive(),
+        itemId: z.number().int().positive(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const { removeLtItem } = await import("@/db/assistencia-lt");
+    return removeLtItem({
+      osId: data.osId,
+      itemId: data.itemId,
+      quem: user.name,
+      userId: user.id,
+    });
+  });
+
+export const finalizeOsLtFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ osId: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { user } = await auth();
+    await boot();
+    const roles = roleFns(user);
+    const { finalizeLevantamentoTecnico } = await import("@/db/assistencia-lt");
+    const res = await finalizeLevantamentoTecnico({
+      osId: data.osId,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+    return res.os;
   });
 
 export const requestReturnFn = createServerFn({ method: "POST" })

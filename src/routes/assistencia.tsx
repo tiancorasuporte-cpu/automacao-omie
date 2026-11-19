@@ -47,6 +47,7 @@ import {
   deleteOsFn,
   pauseOsFn,
   resumeOsFn,
+  finalizeOsLtFn,
   finishVisitaFn,
   getAssistenciaBootstrapFn,
   getOsFn,
@@ -57,6 +58,7 @@ import {
   markExecutedFn,
   moveOsKanbanFn,
   receivePurchaseFn,
+  removeOsLtItemFn,
   reopenOsFn,
   requestReturnFn,
   resolveOsMaterialBaixaFn,
@@ -74,6 +76,7 @@ import {
   syncOsClientLocationFn,
   updateOsItemFn,
   updateOsPrioridadeFn,
+  upsertOsLtItemFn,
 } from "@/lib/assistencia";
 import { moniDetailLines, moniShortLabel } from "@/lib/moni-display";
 import { notifyComprasUnreadChanged } from "@/lib/compras";
@@ -235,7 +238,7 @@ function osScheduleTitle(tipo: string) {
   if (tipo === "pedido") return "AGENDAR INSTALAÇÃO";
   if (tipo === "manut") return "AGENDAR MANUTENÇÃO";
   if (tipo === "monit") return "AGENDAR MONITORAMENTO";
-  if (tipo === "visita") return "AGENDAR ORÇAMENTO";
+  if (tipo === "visita") return "AGENDAR L.T.";
   return "AGENDAR OS";
 }
 
@@ -243,7 +246,7 @@ function osDetailTitle(tipo: string) {
   if (tipo === "pedido") return "DETALHE · INSTALAÇÃO";
   if (tipo === "manut") return "DETALHE · MANUTENÇÃO";
   if (tipo === "monit") return "DETALHE · MONITORAMENTO";
-  if (tipo === "visita") return "DETALHE · ORÇAMENTO";
+  if (tipo === "visita") return "DETALHE · L.T.";
   return "DETALHE DA OS";
 }
 
@@ -526,7 +529,25 @@ function AssistenciaPage() {
   const [confQty, setConfQty] = useState<Record<number, string>>({});
   const [levNome, setLevNome] = useState("");
   const [levQtd, setLevQtd] = useState("1");
-  const [levItens, setLevItens] = useState<Array<{ qtd: number; nome: string }>>([]);
+  const [levProductId, setLevProductId] = useState<number | null>(null);
+  const [levProductResults, setLevProductResults] = useState<
+    Array<{
+      id: number;
+      codigoProduto: number;
+      descricao: string;
+      unidade: string | null;
+    }>
+  >([]);
+  const [searchingLevProducts, setSearchingLevProducts] = useState(false);
+  const [levItens, setLevItens] = useState<
+    Array<{
+      id?: number;
+      qtd: number;
+      nome: string;
+      productId?: number;
+      codigoProduto?: number;
+    }>
+  >([]);
   const [extraNome, setExtraNome] = useState("");
   const [extraQtd, setExtraQtd] = useState("1");
   const [extraProductId, setExtraProductId] = useState<number | null>(null);
@@ -582,6 +603,37 @@ function AssistenciaPage() {
     }, 280);
     return () => clearTimeout(timer);
   }, [extraNome, extraProductId, selected?.omieAppId, omieAppId]);
+
+  useEffect(() => {
+    const q = levNome.trim();
+    if (q.length < 2 || levProductId != null) {
+      setLevProductResults([]);
+      setSearchingLevProducts(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setSearchingLevProducts(true);
+      try {
+        const appId = selected?.omieAppId || omieAppId || undefined;
+        const rows = await searchAssistProductsFn({
+          data: { omieAppId: appId, query: q, limit: 40 },
+        });
+        setLevProductResults(
+          rows.map((r) => ({
+            id: r.id,
+            codigoProduto: r.codigoProduto,
+            descricao: r.descricao,
+            unidade: r.unidade,
+          })),
+        );
+      } catch {
+        setLevProductResults([]);
+      } finally {
+        setSearchingLevProducts(false);
+      }
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [levNome, levProductId, selected?.omieAppId, omieAppId]);
 
   const globalDateRange = useMemo(
     () => resolveDatePreset(globalDatePreset, globalDateFrom, globalDateTo),
@@ -1024,12 +1076,18 @@ function AssistenciaPage() {
             );
             setCheckoutAnexos(updated.rel?.anexos ?? []);
           }
+          if (updated.tipo === "visita") {
+            applyOsDetailState(updated);
+          }
         } else if (selectedId === updated.id && updated.stage === 5) {
           setCheckoutText(updated.resolucao ?? updated.rel?.texto ?? "");
           setCheckoutFotos(
             (updated.rel?.fotos ?? []).map((foto) => ({ foto, thumb: foto })),
           );
           setCheckoutAnexos(updated.rel?.anexos ?? []);
+          if (updated.tipo === "visita") {
+            applyOsDetailState(updated);
+          }
         }
       } else {
         await reload();
@@ -1105,7 +1163,28 @@ function AssistenciaPage() {
     setCheckoutFotos((os.rel?.fotos ?? []).map((foto) => ({ foto, thumb: foto })));
     setCheckoutAnexos(os.rel?.anexos ?? []);
     setConfQty(Object.fromEntries(os.items.map((i) => [i.id, String(i.usado ?? i.qtd)])));
-    setLevItens(os.lev?.itens ?? []);
+    if (os.ltItems?.length) {
+      setLevItens(
+        os.ltItems.map((it) => ({
+          id: it.id,
+          qtd: it.qtd,
+          nome: it.nome,
+          productId: it.productId,
+          codigoProduto: it.codigoProduto,
+        })),
+      );
+    } else {
+      setLevItens(
+        (os.lev?.itens ?? []).map((it) => ({
+          qtd: it.qtd,
+          nome: it.nome,
+        })),
+      );
+    }
+    setLevNome("");
+    setLevQtd("1");
+    setLevProductId(null);
+    setLevProductResults([]);
   }
 
   async function openDetail(os: OsRow, opts?: { fromCalendar?: boolean }) {
@@ -2498,37 +2577,123 @@ function AssistenciaPage() {
                   </div>
                 ) : null}
 
-                {selected.tipo === "visita" && selected.stage === 5 ? (
+                {selected.tipo === "visita" &&
+                selected.stage === 5 &&
+                selected.levStatus !== "finalizado" ? (
                   <div className="rounded-lg border border-outline-variant/60 p-sm">
-                    <h3 className="text-label-md font-semibold">Levantamento (visita)</h3>
+                    <h3 className="text-label-md font-semibold">
+                      Levantamento Técnico
+                      {selected.ltNumero ? ` · ${selected.ltNumero}` : ""}
+                    </h3>
+                    <p className="mt-2xs text-label-sm text-on-surface-variant">
+                      Selecione produtos do catálogo Omie (sem preço no L.T.).
+                    </p>
                     <ul className="mt-xs space-y-2xs text-body-md">
                       {levItens.map((it, idx) => (
-                        <li key={`${it.nome}-${idx}`}>
-                          {it.qtd}× {it.nome}
+                        <li
+                          key={`${it.productId ?? it.nome}-${idx}`}
+                          className="flex items-center justify-between gap-sm"
+                        >
+                          <span>
+                            {it.qtd}× {it.nome}
+                            {it.codigoProduto ? (
+                              <span className="text-on-surface-variant">
+                                {" "}
+                                · {it.codigoProduto}
+                              </span>
+                            ) : null}
+                          </span>
+                          {it.id ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() =>
+                                run(async () => {
+                                  const updated = await removeOsLtItemFn({
+                                    data: { osId: selected.id, itemId: it.id! },
+                                  });
+                                  if (updated) applyOsDetailState(updated);
+                                  return updated;
+                                })
+                              }
+                              className="text-label-sm text-error"
+                            >
+                              Remover
+                            </button>
+                          ) : null}
                         </li>
                       ))}
+                      {!levItens.length ? (
+                        <li className="text-on-surface-variant">Nenhum produto ainda.</li>
+                      ) : null}
                     </ul>
-                    <div className="mt-sm flex gap-sm">
+                    <div className="mt-sm flex flex-wrap gap-sm">
                       <input
                         value={levQtd}
                         onChange={(e) => setLevQtd(e.target.value)}
                         className="w-16 rounded border border-outline-variant px-sm py-xs"
+                        title="Quantidade"
                       />
-                      <input
-                        value={levNome}
-                        onChange={(e) => setLevNome(e.target.value)}
-                        placeholder="Item"
-                        className="min-w-0 flex-1 rounded border border-outline-variant px-sm py-xs"
-                      />
+                      <div className="relative min-w-0 flex-1">
+                        <input
+                          value={levNome}
+                          onChange={(e) => {
+                            setLevNome(e.target.value);
+                            setLevProductId(null);
+                          }}
+                          placeholder="Buscar produto Omie…"
+                          className="w-full rounded border border-outline-variant px-sm py-xs"
+                        />
+                        {searchingLevProducts ? (
+                          <p className="mt-2xs text-label-sm text-on-surface-variant">
+                            Buscando…
+                          </p>
+                        ) : null}
+                        {levProductResults.length && levProductId == null ? (
+                          <ul className="absolute z-20 mt-2xs max-h-48 w-full overflow-auto rounded border border-outline-variant bg-surface shadow-md">
+                            {levProductResults.map((r) => (
+                              <li key={r.id}>
+                                <button
+                                  type="button"
+                                  className="block w-full px-sm py-xs text-left text-body-md hover:bg-surface-container"
+                                  onClick={() => {
+                                    setLevProductId(r.id);
+                                    setLevNome(r.descricao);
+                                    setLevProductResults([]);
+                                  }}
+                                >
+                                  {r.descricao}
+                                  <span className="text-on-surface-variant">
+                                    {" "}
+                                    · {r.codigoProduto}
+                                    {r.unidade ? ` · ${r.unidade}` : ""}
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
                       <button
                         type="button"
+                        disabled={busy || !levProductId}
                         onClick={() => {
-                          if (!levNome.trim()) return;
-                          setLevItens((prev) => [
-                            ...prev,
-                            { qtd: Number(levQtd) || 1, nome: levNome.trim() },
-                          ]);
-                          setLevNome("");
+                          if (!levProductId) return;
+                          const qtd = Number(levQtd) || 1;
+                          run(async () => {
+                            const updated = await upsertOsLtItemFn({
+                              data: {
+                                osId: selected.id,
+                                productId: levProductId,
+                                qtd,
+                              },
+                            });
+                            if (updated) applyOsDetailState(updated);
+                            setLevNome("");
+                            setLevQtd("1");
+                            setLevProductId(null);
+                            return updated;
+                          });
                         }}
                         className="rounded border border-outline-variant px-sm py-xs text-label-sm"
                       >
@@ -2538,31 +2703,83 @@ function AssistenciaPage() {
                     <div className="mt-sm flex flex-wrap gap-sm">
                       <button
                         type="button"
-                        disabled={busy || !levItens.length}
+                        disabled={busy || !levItens.some((i) => i.productId)}
                         onClick={() =>
                           run(() =>
                             saveOsLevFn({
-                              data: { osId: selected.id, itens: levItens },
+                              data: {
+                                osId: selected.id,
+                                itens: levItens
+                                  .filter((i) => i.productId)
+                                  .map((i) => ({
+                                    qtd: i.qtd,
+                                    nome: i.nome,
+                                    productId: i.productId,
+                                  })),
+                              },
+                            }).then((updated) => {
+                              if (updated) applyOsDetailState(updated);
+                              return updated;
                             }),
                           )
                         }
                         className="rounded-lg border border-outline-variant px-md py-sm text-label-md"
                       >
-                        Salvar levantamento
+                        Salvar rascunho
                       </button>
-                      {selected.coAt && selected.lev ? (
+                      {selected.ciAt ? (
+                        <button
+                          type="button"
+                          disabled={busy || !levItens.some((i) => i.productId)}
+                          onClick={() =>
+                            run(async () => {
+                              const updated = await finalizeOsLtFn({
+                                data: { osId: selected.id },
+                              });
+                              if (updated) applyOsDetailState(updated);
+                              return updated;
+                            })
+                          }
+                          className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
+                        >
+                          Finalizar L.T.
+                        </button>
+                      ) : (
+                        <p className="text-label-sm text-on-surface-variant">
+                          Check-in necessário para finalizar.
+                        </p>
+                      )}
+                      {selected.coAt && selected.lev && !selected.ltItems?.length ? (
                         <button
                           type="button"
                           disabled={busy}
                           onClick={() =>
                             run(() => finishVisitaFn({ data: { osId: selected.id } }))
                           }
-                          className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
+                          className="rounded-lg border border-outline-variant px-md py-sm text-label-md"
                         >
-                          Concluir visita
+                          Concluir visita (legado)
                         </button>
                       ) : null}
                     </div>
+                  </div>
+                ) : null}
+
+                {selected.tipo === "visita" &&
+                (selected.levStatus === "finalizado" || selected.stage >= 6) &&
+                (selected.ltItems?.length || selected.ltNumero) ? (
+                  <div className="rounded-lg border border-outline-variant/60 p-sm">
+                    <h3 className="text-label-md font-semibold">
+                      L.T. finalizado
+                      {selected.ltNumero ? ` · ${selected.ltNumero}` : ""}
+                    </h3>
+                    <ul className="mt-xs space-y-2xs text-body-md">
+                      {(selected.ltItems ?? []).map((it) => (
+                        <li key={it.id}>
+                          {it.qtd}× {it.nome}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 ) : null}
 

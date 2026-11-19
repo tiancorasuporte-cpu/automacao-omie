@@ -40,7 +40,8 @@ export type AcaoGaveta =
   | "reagendar"
   | "reabrir"
   | "encerrar"
-  | "reativar";
+  | "reativar"
+  | "gerar_orcamento";
 
 interface Props {
   o: Oportunidade;
@@ -377,10 +378,31 @@ export function OpportunityDrawer({
             <div>
               <div className="meta">
                 {o.cod} ·{" "}
-                {o.os ? `Origem: ${o.os} (visita de orçamento)` : "Origem: cadastro manual"}
+                {o.ltNumero
+                  ? `${o.ltNumero}${o.os ? ` · OS ${o.os}` : ""}`
+                  : o.os
+                    ? `Origem: OS ${o.os} (levantamento técnico)`
+                    : "Origem: cadastro manual"}
                 {o.codigoClienteOmie ? ` · Omie #${o.codigoClienteOmie}` : ""}
               </div>
               <h2>{o.cliente}</h2>
+              {o.ltNumero ? (
+                <div className="meta" style={{ marginTop: 4 }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      background: "#FEF3C7",
+                      border: "1px solid #F59E0B",
+                      borderRadius: 6,
+                      padding: "2px 8px",
+                      fontWeight: 600,
+                      fontSize: 12,
+                    }}
+                  >
+                    {o.ltNumero}
+                  </span>
+                </div>
+              ) : null}
               <div className="meta">
                 {tv.ic} {tv.nome} · {etapaInfo(o.etapa).nome}
                 {a.txt ? " · " + a.txt : ""}
@@ -650,11 +672,30 @@ export function OpportunityDrawer({
 
               <div className="sec">
                 <h3>Levantamento do técnico ({o.itens.length} itens)</h3>
+                {o.ltNumero || o.os ? (
+                  <div style={{ marginBottom: 8 }}>
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={ro || !o.itens.length}
+                      onClick={() => onAcao("gerar_orcamento")}
+                    >
+                      Gerar orçamento
+                      {o.ltNumero ? ` · ${o.ltNumero}` : ""}
+                    </button>
+                    <div className="note" style={{ marginTop: 6 }}>
+                      Abre o orçamento local com os produtos do L.T. (preços pelo comercial). Depois
+                      use &quot;Enviar pedido&quot; no módulo Orçamentos para criar a O.S. de
+                      instalação no quadro — sem envio automático à Omie.
+                    </div>
+                  </div>
+                ) : null}
                 <table className="it">
                   <thead>
                     <tr>
                       <th>Qtd</th>
                       <th>Equipamento / material</th>
+                      <th>Cód.</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -663,11 +704,12 @@ export function OpportunityDrawer({
                         <tr key={k}>
                           <td className="q">{i.q}</td>
                           <td>{i.d}</td>
+                          <td>{i.codigoProduto ?? "—"}</td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={2} className="empty">
+                        <td colSpan={3} className="empty">
                           Sem itens
                         </td>
                       </tr>

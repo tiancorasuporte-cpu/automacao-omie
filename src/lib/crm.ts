@@ -430,6 +430,129 @@ export const crmFinalizarFn = createServerFn({ method: "POST" })
     );
   });
 
+/** Cria orçamento local a partir do L.T. (não envia à Omie). Idempotente por os_origem_id. */
+export const gerarOrcamentoFromOportunidadeFn = createServerFn({ method: "POST" })
+  .validator((input) => z.object({ id: z.number().int().positive() }).parse(input ?? {}))
+  .handler(async ({ data }) => {
+    const { user } = await authCrm();
+    const { getOportunidade } = await import("@/db/crm");
+    const { getDb } = await import("@/db/schema");
+    const { createQuoteRecord } = await import("@/db/quotes");
+    const { getOmieProductsByCodes } = await import("@/db/products");
+    const { requireOrcamentosOmieApp, listOrcamentosOmieApps } = await import(
+      "@/server/omie/client"
+    );
+
+    const o = await getOportunidade(data.id);
+    if (!o) throw new Error("Oportunidade não encontrada.");
+    if (!o.itens.length) throw new Error("Sem itens do levantamento para montar o orçamento.");
+
+    const db = await getDb();
+    if (o.osOrigemId) {
+      const [existing] = (await db`
+        select id, numero_interno
+        from quotes
+        where os_origem_id = ${o.osOrigemId} and lt_numero is not null
+        order by id asc
+        limit 1
+      `) as Array<{ id: number; numero_interno: string }>;
+      if (existing) {
+        return {
+          quoteId: existing.id,
+          numeroInterno: existing.numero_interno,
+          already: true as const,
+        };
+      }
+    }
+
+    let appId = o.omieAppId?.trim() || "";
+    let appName = appId;
+    if (!appId) {
+      const app = requireOrcamentosOmieApp();
+      appId = app.id;
+      appName = app.name;
+    } else {
+      const apps = listOrcamentosOmieApps();
+      appName = apps.find((a) => a.id === appId)?.name ?? appId;
+    }
+    const clientCode = o.codigoClienteOmie;
+    if (!clientCode || clientCode <= 0) {
+      throw new Error("Vincule o cliente Omie na oportunidade antes de gerar o orçamento.");
+    }
+
+    const codes = o.itens
+      .map((it) => Number(it.codigoProduto))
+      .filter((c) => Number.isFinite(c) && c > 0);
+    const products = await getOmieProductsByCodes(appId, codes);
+    const byCode = new Map(products.map((p) => [p.codigoProduto, p]));
+
+    const items = o.itens.map((it) => {
+      const codigo = Number(it.codigoProduto);
+      if (!Number.isFinite(codigo) || codigo <= 0) {
+        throw new Error(
+          `Item "${it.d}" sem código Omie. Refaça o levantamento com produtos do catálogo.`,
+        );
+      }
+      const prod = byCode.get(codigo);
+      return {
+        codigoProduto: codigo,
+        descricao: it.d,
+        quantidade: Number(it.q) || 1,
+        valorUnitario: Number(prod?.precoSugerido ?? prod?.valorUnitario ?? 0) || 0,
+        unidade: prod?.unidade ?? null,
+        ncm: prod?.ncm ?? null,
+      };
+    });
+
+    const total = items.reduce((s, i) => s + i.quantidade * i.valorUnitario, 0);
+    const obsParts = [
+      o.ltNumero ? `Origem ${o.ltNumero}` : null,
+      o.os ? `OS ${o.os}` : null,
+      `OP ${o.cod}`,
+    ].filter(Boolean);
+
+    const created = await createQuoteRecord({
+      omieAppId: appId,
+      omieAppName: appName,
+      clientCode,
+      clientName: o.cliente,
+      observacao: obsParts.join(" · "),
+      total,
+      createdBy: user.id,
+      items,
+    });
+
+    await db`
+      update quotes
+      set lt_numero = ${o.ltNumero ?? null},
+          oportunidade_id = ${o.id},
+          os_origem_id = ${o.osOrigemId ?? null},
+          updated_at = now()
+      where id = ${created.quoteId}
+    `;
+    await db`
+      update crm_oportunidade
+      set num_orcamento = ${created.numeroInterno}, updated_at = now()
+      where id = ${o.id}
+    `;
+    await db`
+      insert into crm_evento (oportunidade_id, data, tipo, texto, autor)
+      values (
+        ${o.id},
+        ${new Date().toISOString().slice(0, 10)},
+        'sis',
+        ${`Orçamento ${created.numeroInterno} gerado a partir do levantamento técnico.`},
+        ${user.name}
+      )
+    `;
+
+    return {
+      quoteId: created.quoteId,
+      numeroInterno: created.numeroInterno,
+      already: false as const,
+    };
+  });
+
 export const crmVoltarFn = createServerFn({ method: "POST" })
   .validator((input) =>
     z

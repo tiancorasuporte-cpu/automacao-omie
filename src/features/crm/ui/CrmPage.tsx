@@ -221,6 +221,23 @@ export function CrmPage(props: CrmPageProps) {
           () => props.encerrarContrato(o.id, null),
           "Encerramento do contrato desfeito",
         );
+      case "gerar_orcamento":
+        return void (async () => {
+          try {
+            const res = await props.gerarOrcamento(o.id);
+            toast(
+              res.already
+                ? `Orçamento já existia: ${res.numeroInterno}`
+                : `Orçamento criado: ${res.numeroInterno}`,
+            );
+            await props.refresh();
+            if (typeof window !== "undefined") {
+              window.open(`/orcamentos?quoteId=${res.quoteId}`, "_blank");
+            }
+          } catch (e) {
+            toast(msgErro(e));
+          }
+        })();
     }
   };
 

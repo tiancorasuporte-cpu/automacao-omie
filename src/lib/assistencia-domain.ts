@@ -2,7 +2,7 @@ export const OS_TIPOS = [
   { id: "pedido", label: "Pedido aprovado (instalação)", entryStage: 0 },
   { id: "manut", label: "Manutenção", entryStage: 3 },
   { id: "monit", label: "Monitoramento", entryStage: 3 },
-  { id: "visita", label: "Orçamento · visita técnica", entryStage: 3 },
+  { id: "visita", label: "Levantamento Técnico", entryStage: 3 },
 ] as const;
 
 export type OsTipo = (typeof OS_TIPOS)[number]["id"];
@@ -125,8 +125,13 @@ export function osTipoBadgeLabel(tipo: string) {
   if (tipo === "pedido") return "PEDIDO";
   if (tipo === "manut") return "MANUTENÇÃO";
   if (tipo === "monit") return "MONITORAMENTO";
-  if (tipo === "visita") return "ORÇAMENTO";
+  if (tipo === "visita") return "L.T.";
   return tipo.toUpperCase();
+}
+
+/** OS de levantamento técnico (tipo histórico `visita`). */
+export function isLevantamentoTecnico(tipo: string | null | undefined) {
+  return tipo === "visita";
 }
 
 export function osStageName(stage: number) {

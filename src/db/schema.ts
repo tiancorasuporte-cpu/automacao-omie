@@ -66,7 +66,7 @@ let ready: Promise<void> | undefined;
 let readyForVersion: number | undefined;
 
 /** Bump quando adicionar migração real em migrateSchema. Evita ~200 roundtrips a cada boot. */
-const SCHEMA_VERSION = 14;
+const SCHEMA_VERSION = 15;
 
 export function resetSchemaReady() {
   ready = undefined;
@@ -159,7 +159,9 @@ async function migrateSchema() {
     (await columnExists("assist_os", "prioridade")) &&
     (await columnExists("assist_os", "ag_date_first")) &&
     (await columnExists("assist_os", "moni_conta_codigo")) &&
-    (await columnExists("tickets", "moni_conta_codigo"))
+    (await columnExists("tickets", "moni_conta_codigo")) &&
+    (await columnExists("assist_os", "lt_numero")) &&
+    (await tableExists("assist_lt_items"))
   ) {
     return;
   }
@@ -2559,6 +2561,75 @@ async function migrateSchema() {
       )
     `;
   }
+
+  // —— Levantamento Técnico (evolui tipo visita) ——
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "lt_numero"))) {
+    await sql.unsafe("alter table assist_os add column lt_numero varchar(20)");
+    await sql.unsafe(
+      "create unique index if not exists assist_os_lt_numero_uidx on assist_os (lt_numero) where lt_numero is not null",
+    );
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "lev_status"))) {
+    await sql.unsafe("alter table assist_os add column lev_status varchar(16)");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "lev_finalizado_em"))) {
+    await sql.unsafe("alter table assist_os add column lev_finalizado_em timestamptz");
+  }
+  if ((await tableExists("assist_os")) && !(await columnExists("assist_os", "lev_finalizado_por"))) {
+    await sql.unsafe("alter table assist_os add column lev_finalizado_por varchar(160)");
+  }
+
+  if (!(await tableExists("assist_lt_items"))) {
+    await sql`
+      create table assist_lt_items (
+        id serial primary key,
+        os_id integer not null references assist_os(id) on delete cascade,
+        product_id integer not null references omie_products(id) on delete restrict,
+        codigo_produto bigint not null,
+        nome varchar(400) not null,
+        qtd numeric(14, 4) not null default 1,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique (os_id, product_id)
+      )
+    `;
+    await sql.unsafe(
+      "create index if not exists assist_lt_items_os_idx on assist_lt_items (os_id)",
+    );
+  }
+
+  if ((await tableExists("crm_item")) && !(await columnExists("crm_item", "product_id"))) {
+    await sql.unsafe(
+      "alter table crm_item add column product_id integer references omie_products(id) on delete set null",
+    );
+  }
+  if ((await tableExists("crm_item")) && !(await columnExists("crm_item", "codigo_produto"))) {
+    await sql.unsafe("alter table crm_item add column codigo_produto bigint");
+  }
+  if (
+    (await tableExists("crm_oportunidade")) &&
+    !(await columnExists("crm_oportunidade", "lt_numero"))
+  ) {
+    await sql.unsafe("alter table crm_oportunidade add column lt_numero varchar(20)");
+  }
+  if ((await tableExists("quotes")) && !(await columnExists("quotes", "lt_numero"))) {
+    await sql.unsafe("alter table quotes add column lt_numero varchar(20)");
+  }
+  if ((await tableExists("quotes")) && !(await columnExists("quotes", "oportunidade_id"))) {
+    await sql.unsafe("alter table quotes add column oportunidade_id integer");
+  }
+  if ((await tableExists("quotes")) && !(await columnExists("quotes", "os_origem_id"))) {
+    await sql.unsafe("alter table quotes add column os_origem_id integer");
+    await sql.unsafe(
+      "create unique index if not exists quotes_lt_os_origem_uidx on quotes (os_origem_id) where os_origem_id is not null and lt_numero is not null",
+    );
+  }
+
+  await sql`
+    insert into app_settings (key, value, updated_at)
+    values ('assist_lt_seq', '0', now())
+    on conflict (key) do nothing
+  `;
 
   const superUsername = process.env["APP_SUPERADMIN_USERNAME"] ?? "superadmin";
   const superPassword = process.env["APP_SUPERADMIN_PASSWORD"] ?? "ancora";

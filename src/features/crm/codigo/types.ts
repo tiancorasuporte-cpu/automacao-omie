@@ -19,6 +19,8 @@ export type TipoEvento = 'sis' | 'etapa' | 'contato' | 'acao' | 'feito' | 'final
 export interface ItemLevantamento {
   q: number;      // quantidade
   d: string;      // descrição do equipamento/material (vem da OS do técnico)
+  productId?: number | null;
+  codigoProduto?: number | null;
 }
 
 /** Ação agendada na 2ª ou 3ª ação */
@@ -105,6 +107,10 @@ export interface Oportunidade {
   omieAppId?: string;
   /** Código do cliente na Omie */
   codigoClienteOmie?: number;
+  /** Identificação L.T. 0001 quando veio de levantamento técnico */
+  ltNumero?: string;
+  /** ID da OS de origem (L.T.) */
+  osOrigemId?: number;
 }
 
 /** Tipo de contrato recorrente (Portaria remota, Comodato de equipamentos, Rastreamento…) */

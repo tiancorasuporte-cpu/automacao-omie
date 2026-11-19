@@ -37,6 +37,7 @@ import {
   crmUploadDocFn,
   crmVoltarFn,
   deleteCrmOportunidadeFn,
+  gerarOrcamentoFromOportunidadeFn,
   getCrmBootstrapFn,
   listCrmOportunidadesFn,
   patchCrmOportunidadeFn,
@@ -282,6 +283,10 @@ function CrmRoutePage() {
     await crmEncerrarContratoFn({ data: { id, contrato: d } });
   };
 
+  const gerarOrcamento = async (id: number) => {
+    return gerarOrcamentoFromOportunidadeFn({ data: { id } });
+  };
+
   const abrirDocumento = async (doc: Documento) => {
     const full = await crmGetDocFn({ data: { docId: doc.id } });
     const mime = full.mime || "application/octet-stream";
@@ -322,6 +327,7 @@ function CrmRoutePage() {
         vincularOmie={vincularOmie}
         saveRegras={saveRegras}
         encerrarContrato={encerrarContrato}
+        gerarOrcamento={gerarOrcamento}
         abrirDocumento={abrirDocumento}
       />
     </AppShell>

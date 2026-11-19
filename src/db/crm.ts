@@ -99,6 +99,9 @@ function mapOp(
   const codigoOmie = num(row["codigo_cliente_omie"]);
   if (omieAppId) op.omieAppId = omieAppId;
   if (codigoOmie > 0) op.codigoClienteOmie = codigoOmie;
+  const ltNum = str(row["lt_numero"] ?? "");
+  if (ltNum) op.ltNumero = ltNum;
+  if (row["os_origem_id"] != null) op.osOrigemId = num(row["os_origem_id"]);
   return op;
 }
 
@@ -112,14 +115,25 @@ async function loadRelated(ids: number[]) {
   if (!ids.length) return { itens, aux, apoio, docs, hist };
 
   const itemRows = (await db`
-    select oportunidade_id, qtd, descricao
+    select oportunidade_id, qtd, descricao, product_id, codigo_produto
     from crm_item
     where oportunidade_id = any(${ids})
     order by id
-  `) as Array<{ oportunidade_id: number; qtd: number; descricao: string }>;
+  `) as Array<{
+    oportunidade_id: number;
+    qtd: number;
+    descricao: string;
+    product_id: number | null;
+    codigo_produto: number | null;
+  }>;
   for (const r of itemRows) {
     const list = itens.get(r.oportunidade_id) ?? [];
-    list.push({ q: Number(r.qtd), d: r.descricao });
+    list.push({
+      q: Number(r.qtd),
+      d: r.descricao,
+      productId: r.product_id != null ? Number(r.product_id) : null,
+      codigoProduto: r.codigo_produto != null ? Number(r.codigo_produto) : null,
+    });
     itens.set(r.oportunidade_id, list);
   }
 
@@ -281,7 +295,7 @@ export async function createOportunidadeManual(input: {
   return getOportunidade(row.id);
 }
 
-/** Cria OP a partir de OS de visita (orçamento) finalizada. Idempotente por os_origem. */
+/** Cria OP a partir de OS de L.T. (visita) finalizada. Idempotente por os_origem. */
 export async function createOportunidadeFromOs(input: {
   osNum: string;
   osId: number;
@@ -292,25 +306,48 @@ export async function createOportunidadeFromOs(input: {
   dataVisita?: string | null;
   vendedor: string;
   autor: string;
-  itens: Array<{ qtd: number; nome: string }>;
+  ltNumero?: string | null;
+  omieAppId?: string | null;
+  codigoClienteOmie?: number | null;
+  itens: Array<{
+    qtd: number;
+    nome: string;
+    productId?: number | null;
+    codigoProduto?: number | null;
+  }>;
 }) {
   const db = await getDb();
   const existing = (await db`
     select id from crm_oportunidade where os_origem = ${input.osNum} limit 1
   `) as Array<{ id: number }>;
-  if (existing[0]) return getOportunidade(existing[0].id);
+  if (existing[0]) {
+    // Atualiza L.T. / itens se reprocessar
+    if (input.ltNumero) {
+      await db`
+        update crm_oportunidade
+        set lt_numero = ${input.ltNumero}, updated_at = now()
+        where id = ${existing[0].id}
+      `;
+    }
+    return getOportunidade(existing[0].id);
+  }
 
   const cod = await nextCod();
   const hoje = hojeISO();
+  const tituloServico = input.ltNumero
+    ? `${input.ltNumero} — ${input.cliente.trim()}`
+    : input.servico?.trim() || "CFTV";
   const [row] = (await db`
     insert into crm_oportunidade (
       cod, cliente, contato, tel, cidade, servico, tipo_venda, os_origem, os_origem_id,
-      tecnico, data_visita, responsavel, etapa, etapa_desde, criado_em, valor_mensal, prazo_meses
+      tecnico, data_visita, responsavel, etapa, etapa_desde, criado_em, valor_mensal, prazo_meses,
+      lt_numero, omie_app_id, codigo_cliente_omie
     ) values (
       ${cod}, ${input.cliente.trim()}, '', '', ${input.cidade?.trim() || ""},
-      ${input.servico?.trim() || "CFTV"}, null, ${input.osNum}, ${input.osId},
+      ${tituloServico}, null, ${input.osNum}, ${input.osId},
       ${input.tecnico?.trim() || ""}, ${input.dataVisita?.slice(0, 10) || hoje},
-      ${input.vendedor}, 'montar', ${hoje}, ${hoje}, 0, 0
+      ${input.vendedor}, 'montar', ${hoje}, ${hoje}, 0, 0,
+      ${input.ltNumero ?? null}, ${input.omieAppId ?? null}, ${input.codigoClienteOmie ?? null}
     )
     returning id
   `) as Array<{ id: number }>;
@@ -318,18 +355,23 @@ export async function createOportunidadeFromOs(input: {
 
   for (const it of input.itens) {
     await db`
-      insert into crm_item (oportunidade_id, qtd, descricao)
-      values (${row.id}, ${it.qtd}, ${it.nome.trim()})
+      insert into crm_item (oportunidade_id, qtd, descricao, product_id, codigo_produto)
+      values (
+        ${row.id},
+        ${it.qtd},
+        ${it.nome.trim()},
+        ${it.productId ?? null},
+        ${it.codigoProduto ?? null}
+      )
     `;
-  }
-  if (input.tecnico?.trim()) {
-    // técnico da visita fica disponível como apoio (só entra se marcado depois)
   }
   await addEvent(
     row.id,
     input.autor,
     "sis",
-    `Criada automaticamente ao finalizar a ${input.osNum} (visita de orçamento).`,
+    input.ltNumero
+      ? `Criada automaticamente ao finalizar ${input.ltNumero} (OS ${input.osNum}).`
+      : `Criada automaticamente ao finalizar a ${input.osNum} (levantamento técnico).`,
   );
   return getOportunidade(row.id);
 }

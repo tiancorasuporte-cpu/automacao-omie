@@ -159,6 +159,10 @@ export interface CrmAcoes {
   saveRegras: (r: RegrasComissao) => Promise<void>;
   /** `null` = desfazer o encerramento */
   encerrarContrato: (id: number, d: { fim: string; motivo: string } | null) => Promise<void>;
+  /** Gera orçamento local a partir do L.T. (não envia Omie). */
+  gerarOrcamento: (
+    id: number,
+  ) => Promise<{ quoteId: number; numeroInterno: string; already: boolean }>;
   /** abrir/baixar um documento anexado (opcional) */
   abrirDocumento?: ((doc: Documento) => void) | undefined;
 }

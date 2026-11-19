@@ -278,6 +278,23 @@ function ContratosContent({
     }
   }
 
+  async function refreshClientesList() {
+    const result = await listContratosClientesFn({
+      data: {
+        ...(omieAppId ? { omieAppId } : {}),
+        ...(buscaCliente ? { query: buscaCliente } : {}),
+        limit: pageSize,
+        offset: (Math.max(1, page) - 1) * pageSize,
+      },
+    });
+    setClientes(result.items);
+    setClientesTotal(result.total);
+    if (selected) {
+      const next = result.items.find((c) => c.groupKey === selected.groupKey);
+      if (next) setSelected(next);
+    }
+  }
+
   async function refreshDetalhe(id: number) {
     const data = await getContratoDetalheFn({ data: { id } });
     if (data) setDetalhe(data);
@@ -290,6 +307,8 @@ function ContratosContent({
       });
       setContratos(rows);
     }
+    // Atualiza a coluna Moni da lista de clientes sem precisar de F5.
+    await refreshClientesList();
   }
 
   async function handleVincularMoni(conta: MoniContaBusca) {

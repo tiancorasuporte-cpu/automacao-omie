@@ -41,6 +41,7 @@ import { Route as ApiMobileLocationRouteImport } from './routes/api/mobile/locat
 import { Route as ApiMobileLoginRouteImport } from './routes/api/mobile/login'
 import { Route as ApiMobileLogoutRouteImport } from './routes/api/mobile/logout'
 import { Route as ApiMobileMeRouteImport } from './routes/api/mobile/me'
+import { Route as ApiMobileProductsRouteImport } from './routes/api/mobile/products'
 import { Route as ApiMobileSyncRouteImport } from './routes/api/mobile/sync'
 import { Route as ApiWahaWebhookRouteImport } from './routes/api/waha/webhook'
 import { Route as ApiMobileEstoqueIndexRouteImport } from './routes/api/mobile/estoque/index'
@@ -55,6 +56,8 @@ import { Route as ApiMobileOsIdCheckInRouteImport } from './routes/api/mobile/os
 import { Route as ApiMobileOsIdCheckOutRouteImport } from './routes/api/mobile/os/$id/check-out'
 import { Route as ApiMobileOsIdChecklistRouteImport } from './routes/api/mobile/os/$id/checklist'
 import { Route as ApiMobileOsIdConfirmarItemRouteImport } from './routes/api/mobile/os/$id/confirmar-item'
+import { Route as ApiMobileOsIdLtRouteImport } from './routes/api/mobile/os/$id/lt'
+import { Route as ApiMobileOsIdLtFinalizeRouteImport } from './routes/api/mobile/os/$id/lt-finalize'
 import { Route as ApiMobileOsIdPauseRouteImport } from './routes/api/mobile/os/$id/pause'
 import { Route as ApiMobileOsIdResumeRouteImport } from './routes/api/mobile/os/$id/resume'
 import { Route as ApiMobileOsIdStartRouteImport } from './routes/api/mobile/os/$id/start'
@@ -220,6 +223,11 @@ const ApiMobileMeRoute = ApiMobileMeRouteImport.update({
   path: '/api/mobile/me',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMobileProductsRoute = ApiMobileProductsRouteImport.update({
+  id: '/api/mobile/products',
+  path: '/api/mobile/products',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiMobileSyncRoute = ApiMobileSyncRouteImport.update({
   id: '/api/mobile/sync',
   path: '/api/mobile/sync',
@@ -293,6 +301,16 @@ const ApiMobileOsIdConfirmarItemRoute =
     path: '/api/mobile/os/$id/confirmar-item',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiMobileOsIdLtRoute = ApiMobileOsIdLtRouteImport.update({
+  id: '/api/mobile/os/$id/lt',
+  path: '/api/mobile/os/$id/lt',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMobileOsIdLtFinalizeRoute = ApiMobileOsIdLtFinalizeRouteImport.update({
+  id: '/api/mobile/os/$id/lt-finalize',
+  path: '/api/mobile/os/$id/lt-finalize',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiMobileOsIdPauseRoute = ApiMobileOsIdPauseRouteImport.update({
   id: '/api/mobile/os/$id/pause',
   path: '/api/mobile/os/$id/pause',
@@ -348,6 +366,7 @@ export interface FileRoutesByFullPath {
   '/api/mobile/login': typeof ApiMobileLoginRoute
   '/api/mobile/logout': typeof ApiMobileLogoutRoute
   '/api/mobile/me': typeof ApiMobileMeRoute
+  '/api/mobile/products': typeof ApiMobileProductsRoute
   '/api/mobile/sync': typeof ApiMobileSyncRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
   '/api/mobile/estoque/confirmar': typeof ApiMobileEstoqueConfirmarRoute
@@ -361,6 +380,8 @@ export interface FileRoutesByFullPath {
   '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
   '/api/mobile/os/$id/checklist': typeof ApiMobileOsIdChecklistRoute
   '/api/mobile/os/$id/confirmar-item': typeof ApiMobileOsIdConfirmarItemRoute
+  '/api/mobile/os/$id/lt': typeof ApiMobileOsIdLtRoute
+  '/api/mobile/os/$id/lt-finalize': typeof ApiMobileOsIdLtFinalizeRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
@@ -400,6 +421,7 @@ export interface FileRoutesByTo {
   '/api/mobile/login': typeof ApiMobileLoginRoute
   '/api/mobile/logout': typeof ApiMobileLogoutRoute
   '/api/mobile/me': typeof ApiMobileMeRoute
+  '/api/mobile/products': typeof ApiMobileProductsRoute
   '/api/mobile/sync': typeof ApiMobileSyncRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
   '/api/mobile/estoque/confirmar': typeof ApiMobileEstoqueConfirmarRoute
@@ -413,6 +435,8 @@ export interface FileRoutesByTo {
   '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
   '/api/mobile/os/$id/checklist': typeof ApiMobileOsIdChecklistRoute
   '/api/mobile/os/$id/confirmar-item': typeof ApiMobileOsIdConfirmarItemRoute
+  '/api/mobile/os/$id/lt': typeof ApiMobileOsIdLtRoute
+  '/api/mobile/os/$id/lt-finalize': typeof ApiMobileOsIdLtFinalizeRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
@@ -453,6 +477,7 @@ export interface FileRoutesById {
   '/api/mobile/login': typeof ApiMobileLoginRoute
   '/api/mobile/logout': typeof ApiMobileLogoutRoute
   '/api/mobile/me': typeof ApiMobileMeRoute
+  '/api/mobile/products': typeof ApiMobileProductsRoute
   '/api/mobile/sync': typeof ApiMobileSyncRoute
   '/api/waha/webhook': typeof ApiWahaWebhookRoute
   '/api/mobile/estoque/confirmar': typeof ApiMobileEstoqueConfirmarRoute
@@ -466,6 +491,8 @@ export interface FileRoutesById {
   '/api/mobile/os/$id/check-out': typeof ApiMobileOsIdCheckOutRoute
   '/api/mobile/os/$id/checklist': typeof ApiMobileOsIdChecklistRoute
   '/api/mobile/os/$id/confirmar-item': typeof ApiMobileOsIdConfirmarItemRoute
+  '/api/mobile/os/$id/lt': typeof ApiMobileOsIdLtRoute
+  '/api/mobile/os/$id/lt-finalize': typeof ApiMobileOsIdLtFinalizeRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
@@ -507,6 +534,7 @@ export interface FileRouteTypes {
     | '/api/mobile/login'
     | '/api/mobile/logout'
     | '/api/mobile/me'
+    | '/api/mobile/products'
     | '/api/mobile/sync'
     | '/api/waha/webhook'
     | '/api/mobile/estoque/confirmar'
@@ -520,6 +548,8 @@ export interface FileRouteTypes {
     | '/api/mobile/os/$id/check-out'
     | '/api/mobile/os/$id/checklist'
     | '/api/mobile/os/$id/confirmar-item'
+    | '/api/mobile/os/$id/lt'
+    | '/api/mobile/os/$id/lt-finalize'
     | '/api/mobile/os/$id/pause'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
@@ -559,6 +589,7 @@ export interface FileRouteTypes {
     | '/api/mobile/login'
     | '/api/mobile/logout'
     | '/api/mobile/me'
+    | '/api/mobile/products'
     | '/api/mobile/sync'
     | '/api/waha/webhook'
     | '/api/mobile/estoque/confirmar'
@@ -572,6 +603,8 @@ export interface FileRouteTypes {
     | '/api/mobile/os/$id/check-out'
     | '/api/mobile/os/$id/checklist'
     | '/api/mobile/os/$id/confirmar-item'
+    | '/api/mobile/os/$id/lt'
+    | '/api/mobile/os/$id/lt-finalize'
     | '/api/mobile/os/$id/pause'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
@@ -611,6 +644,7 @@ export interface FileRouteTypes {
     | '/api/mobile/login'
     | '/api/mobile/logout'
     | '/api/mobile/me'
+    | '/api/mobile/products'
     | '/api/mobile/sync'
     | '/api/waha/webhook'
     | '/api/mobile/estoque/confirmar'
@@ -624,6 +658,8 @@ export interface FileRouteTypes {
     | '/api/mobile/os/$id/check-out'
     | '/api/mobile/os/$id/checklist'
     | '/api/mobile/os/$id/confirmar-item'
+    | '/api/mobile/os/$id/lt'
+    | '/api/mobile/os/$id/lt-finalize'
     | '/api/mobile/os/$id/pause'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
@@ -664,6 +700,7 @@ export interface RootRouteChildren {
   ApiMobileLoginRoute: typeof ApiMobileLoginRoute
   ApiMobileLogoutRoute: typeof ApiMobileLogoutRoute
   ApiMobileMeRoute: typeof ApiMobileMeRoute
+  ApiMobileProductsRoute: typeof ApiMobileProductsRoute
   ApiMobileSyncRoute: typeof ApiMobileSyncRoute
   ApiWahaWebhookRoute: typeof ApiWahaWebhookRoute
   ApiMobileEstoqueConfirmarRoute: typeof ApiMobileEstoqueConfirmarRoute
@@ -677,6 +714,8 @@ export interface RootRouteChildren {
   ApiMobileOsIdCheckOutRoute: typeof ApiMobileOsIdCheckOutRoute
   ApiMobileOsIdChecklistRoute: typeof ApiMobileOsIdChecklistRoute
   ApiMobileOsIdConfirmarItemRoute: typeof ApiMobileOsIdConfirmarItemRoute
+  ApiMobileOsIdLtRoute: typeof ApiMobileOsIdLtRoute
+  ApiMobileOsIdLtFinalizeRoute: typeof ApiMobileOsIdLtFinalizeRoute
   ApiMobileOsIdPauseRoute: typeof ApiMobileOsIdPauseRoute
   ApiMobileOsIdResumeRoute: typeof ApiMobileOsIdResumeRoute
   ApiMobileOsIdStartRoute: typeof ApiMobileOsIdStartRoute
@@ -910,6 +949,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMobileMeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mobile/products': {
+      id: '/api/mobile/products'
+      path: '/api/mobile/products'
+      fullPath: '/api/mobile/products'
+      preLoaderRoute: typeof ApiMobileProductsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/mobile/sync': {
       id: '/api/mobile/sync'
       path: '/api/mobile/sync'
@@ -1008,6 +1054,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMobileOsIdConfirmarItemRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mobile/os/$id/lt': {
+      id: '/api/mobile/os/$id/lt'
+      path: '/api/mobile/os/$id/lt'
+      fullPath: '/api/mobile/os/$id/lt'
+      preLoaderRoute: typeof ApiMobileOsIdLtRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mobile/os/$id/lt-finalize': {
+      id: '/api/mobile/os/$id/lt-finalize'
+      path: '/api/mobile/os/$id/lt-finalize'
+      fullPath: '/api/mobile/os/$id/lt-finalize'
+      preLoaderRoute: typeof ApiMobileOsIdLtFinalizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/mobile/os/$id/pause': {
       id: '/api/mobile/os/$id/pause'
       path: '/api/mobile/os/$id/pause'
@@ -1072,6 +1132,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMobileLoginRoute: ApiMobileLoginRoute,
   ApiMobileLogoutRoute: ApiMobileLogoutRoute,
   ApiMobileMeRoute: ApiMobileMeRoute,
+  ApiMobileProductsRoute: ApiMobileProductsRoute,
   ApiMobileSyncRoute: ApiMobileSyncRoute,
   ApiWahaWebhookRoute: ApiWahaWebhookRoute,
   ApiMobileEstoqueConfirmarRoute: ApiMobileEstoqueConfirmarRoute,
@@ -1085,6 +1146,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMobileOsIdCheckOutRoute: ApiMobileOsIdCheckOutRoute,
   ApiMobileOsIdChecklistRoute: ApiMobileOsIdChecklistRoute,
   ApiMobileOsIdConfirmarItemRoute: ApiMobileOsIdConfirmarItemRoute,
+  ApiMobileOsIdLtRoute: ApiMobileOsIdLtRoute,
+  ApiMobileOsIdLtFinalizeRoute: ApiMobileOsIdLtFinalizeRoute,
   ApiMobileOsIdPauseRoute: ApiMobileOsIdPauseRoute,
   ApiMobileOsIdResumeRoute: ApiMobileOsIdResumeRoute,
   ApiMobileOsIdStartRoute: ApiMobileOsIdStartRoute,
