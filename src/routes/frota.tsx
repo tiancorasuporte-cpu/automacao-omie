@@ -8,6 +8,7 @@ import { FleetBrandMark } from "@/components/FleetBrandMark";
 import { Icon } from "@/components/Icon";
 import { PhotoCapture, type CapturedPhoto } from "@/components/PhotoCapture";
 import { SuggestInput } from "@/components/SuggestInput";
+import { TablePager, paginateList } from "@/components/TablePager";
 import {
   Dialog,
   DialogContent,
@@ -22,7 +23,8 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart";
 import { APP_NAME } from "@/lib/brand";
-import { FLEET_BRAND_LABELS, FLEET_BRAND_OPTIONS } from "@/lib/fleet-brands";
+import { FLEET_BRAND_LABELS, FLEET_BRAND_OPTIONS, fleetBrandLabel } from "@/lib/fleet-brands";
+import { matchesQuery } from "@/lib/text-search";
 import {
   closeReadingFn,
   createChecklistFn,
@@ -1456,9 +1458,41 @@ function VehiclesPanel({
   onDelete: (v: Vehicle) => void | Promise<void>;
   onRefresh: () => Promise<void>;
 }) {
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(12);
+
+  const filtered = useMemo(() => {
+    const q = query.trim();
+    if (!q) return vehicles;
+    return vehicles.filter((v) =>
+      matchesQuery(q, [
+        v.name,
+        v.brand,
+        v.model,
+        v.plate,
+        fleetBrandLabel(v.brand),
+        v.active ? "ativo" : "inativo",
+      ]),
+    );
+  }, [vehicles, query]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, pageSize]);
+
+  const paged = useMemo(
+    () => paginateList(filtered, page, pageSize),
+    [filtered, page, pageSize],
+  );
+
+  useEffect(() => {
+    if (page !== paged.page) setPage(paged.page);
+  }, [page, paged.page]);
+
   return (
     <div className="space-y-md">
-      <div className="flex justify-end gap-sm">
+      <div className="flex flex-wrap items-center justify-end gap-sm">
         <button
           type="button"
           className="rounded-xl border border-outline-variant px-md py-sm text-label-md"
@@ -1474,52 +1508,97 @@ function VehiclesPanel({
           Novo veículo
         </button>
       </div>
+
+      <div className="grid grid-cols-1 gap-sm sm:grid-cols-[minmax(0,1fr)_7.5rem] sm:items-end">
+        <label className="block w-full min-w-0 space-y-xs">
+          <span className="text-label-md text-on-surface-variant">Pesquisar veículo</span>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Nome, marca, modelo ou placa…"
+            className="box-border w-full min-w-0 rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+          />
+        </label>
+        <label className="block w-full space-y-xs">
+          <span className="text-label-md text-on-surface-variant">Por página</span>
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="box-border w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
+          >
+            <option value={8}>8</option>
+            <option value={12}>12</option>
+            <option value={20}>20</option>
+            <option value={40}>40</option>
+          </select>
+        </label>
+      </div>
+
       {!vehicles.length ? (
         <div className="flex min-h-[10rem] items-center justify-center text-body-sm text-on-surface-variant">
           Nenhum veículo cadastrado.
         </div>
+      ) : !filtered.length ? (
+        <div className="flex min-h-[10rem] items-center justify-center text-body-sm text-on-surface-variant">
+          Nenhum veículo encontrado com “{query.trim()}”.
+        </div>
       ) : (
-        <div className="grid gap-sm sm:grid-cols-2">
-          {vehicles.map((v) => (
-            <div
-              key={v.id}
-              className="rounded-xl border border-outline-variant bg-surface px-md py-md"
-            >
-              <div className="flex items-start gap-md">
-                <FleetBrandMark brand={v.brand} size="md" />
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-on-surface">{v.name}</div>
-                  <div className="mt-2xs text-body-sm text-on-surface-variant">
-                    {[v.brand, v.model].filter(Boolean).join(" · ") || "Sem marca/modelo"}
-                  </div>
-                  <div className="mt-2xs text-body-sm text-on-surface-variant">
-                    {v.plate ? `${v.plate} · ` : ""}
-                    {formatKm(v.currentOdometer)}
-                    {!v.active ? " · inativo" : ""}
-                  </div>
-                  <div className="mt-sm flex flex-wrap gap-xs">
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-2xs rounded-lg border border-outline-variant px-sm py-2xs text-label-sm font-semibold text-primary"
-                      onClick={() => onEdit(v)}
-                    >
-                      <Icon name="edit" className="text-[16px]" />
-                      Editar / KM
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-2xs rounded-lg border border-error/30 px-sm py-2xs text-label-sm font-semibold text-error"
-                      onClick={() => void onDelete(v)}
-                    >
-                      <Icon name="delete" className="text-[16px]" />
-                      Excluir
-                    </button>
+        <>
+          <p className="text-label-md text-on-surface-variant">
+            {filtered.length === vehicles.length
+              ? `${vehicles.length} veículo(s)`
+              : `${filtered.length} de ${vehicles.length} veículo(s)`}
+          </p>
+          <div className="grid gap-sm sm:grid-cols-2">
+            {paged.items.map((v) => (
+              <div
+                key={v.id}
+                className="rounded-xl border border-outline-variant bg-surface px-md py-md"
+              >
+                <div className="flex items-start gap-md">
+                  <FleetBrandMark brand={v.brand} size="md" />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-on-surface">{v.name}</div>
+                    <div className="mt-2xs text-body-sm text-on-surface-variant">
+                      {[v.brand, v.model].filter(Boolean).join(" · ") || "Sem marca/modelo"}
+                    </div>
+                    <div className="mt-2xs text-body-sm text-on-surface-variant">
+                      {v.plate ? `${v.plate} · ` : ""}
+                      {formatKm(v.currentOdometer)}
+                      {!v.active ? " · inativo" : ""}
+                    </div>
+                    <div className="mt-sm flex flex-wrap gap-xs">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-2xs rounded-lg border border-outline-variant px-sm py-2xs text-label-sm font-semibold text-primary"
+                        onClick={() => onEdit(v)}
+                      >
+                        <Icon name="edit" className="text-[16px]" />
+                        Editar / KM
+                      </button>
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-2xs rounded-lg border border-error/30 px-sm py-2xs text-label-sm font-semibold text-error"
+                        onClick={() => void onDelete(v)}
+                      >
+                        <Icon name="delete" className="text-[16px]" />
+                        Excluir
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+          <TablePager
+            page={paged.page}
+            totalPages={paged.totalPages}
+            totalItems={paged.totalItems}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            className="rounded-xl border border-outline-variant bg-surface"
+          />
+        </>
       )}
     </div>
   );
