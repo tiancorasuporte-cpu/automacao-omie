@@ -1,9 +1,19 @@
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { TIPOS_VENDA, VALIDADE_PADRAO } from "../../codigo/config";
 import { addDias, brl, contratoDe, extrairValores, tipoVenda } from "../../codigo/regras";
 import type { Oportunidade, RegrasComissao, TipoVenda } from "../../codigo/types";
+import { listCrmOrcamentosFn } from "@/lib/crm";
 import type { DadosProposta } from "../tipos-ui";
 import { ftam, icDoc, listaContratos, msgErro } from "../utils";
+
+type QuoteOpt = {
+  id: number;
+  numeroInterno: string;
+  clientName: string | null;
+  total: number | null;
+  status: string;
+  ltNumero: string | null;
+};
 
 type CampoAuto = "tv" | "orc" | "mensal" | "total" | "prazo" | "validade";
 type Info =
@@ -76,6 +86,72 @@ export function BlocoDocumento({ o, regras, titulo, form, setForm }: Props) {
   const rec = form.tv === "recorrente";
   const cls = (c: CampoAuto) => (form.auto[c] ? "auto" : "");
   const manual = (c: CampoAuto) => (p: FormDoc) => ({ ...p, auto: { ...p.auto, [c]: false } });
+  const [quotes, setQuotes] = useState<QuoteOpt[]>([]);
+  const [loadingQuotes, setLoadingQuotes] = useState(false);
+  const selectedQuoteId = (() => {
+    const match = quotes.find((q) => q.numeroInterno === form.orc.trim());
+    return match ? String(match.id) : "";
+  })();
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingQuotes(true);
+    const cliente = o.cliente?.trim() || "";
+    void (async () => {
+      try {
+        const byClient = await listCrmOrcamentosFn({
+          data: { ...(cliente ? { query: cliente } : {}), limit: 40 },
+        });
+        let list = byClient.quotes;
+        if (!list.length && cliente) {
+          const recent = await listCrmOrcamentosFn({ data: { limit: 40 } });
+          list = recent.quotes;
+        }
+        if (!cancelled) setQuotes(list);
+      } catch {
+        if (!cancelled) setQuotes([]);
+      } finally {
+        if (!cancelled) setLoadingQuotes(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [o.cliente, o.id]);
+
+  // Se já tem nº de orçamento, preenche o valor total a partir do cadastro.
+  useEffect(() => {
+    if (!quotes.length) return;
+    setForm((p) => {
+      const num = p.orc.trim();
+      if (!num) return p;
+      const q = quotes.find((x) => x.numeroInterno === num);
+      if (!q || q.total == null || !(q.total > 0)) return p;
+      const atual = Number(String(p.total).replace(",", "."));
+      if (Number.isFinite(atual) && atual > 0 && !p.auto.total) return p;
+      return {
+        ...p,
+        total: String(q.total),
+        auto: { ...p.auto, orc: true, total: true },
+      };
+    });
+  }, [quotes, setForm]);
+
+  const aplicarOrcamento = (quoteId: string) => {
+    if (!quoteId) return;
+    const q = quotes.find((x) => String(x.id) === quoteId);
+    if (!q) return;
+    setForm((p) => ({
+      ...p,
+      orc: q.numeroInterno,
+      total: q.total != null ? String(q.total) : p.total,
+      auto: {
+        ...p.auto,
+        orc: true,
+        ...(q.total != null ? { total: true } : {}),
+      },
+    }));
+  };
 
   const lerArquivo = async (f: File) => {
     setForm((p) => ({ ...p, arquivo: f, info: { tipo: "lendo" } }));
@@ -210,6 +286,39 @@ export function BlocoDocumento({ o, regras, titulo, form, setForm }: Props) {
         </select>
       </div>
 
+      <div className="f">
+        <label>Escolher orçamento do sistema</label>
+        <select
+          value={selectedQuoteId}
+          disabled={loadingQuotes}
+          onChange={(e) => aplicarOrcamento(e.target.value)}
+        >
+          <option value="">
+            {loadingQuotes
+              ? "Carregando orçamentos…"
+              : quotes.length
+                ? "Selecione um orçamento…"
+                : "Nenhum orçamento no sistema"}
+          </option>
+          {quotes.map((q) => {
+            const totalTxt =
+              q.total != null
+                ? q.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+                : "—";
+            const lt = q.ltNumero ? ` · ${q.ltNumero}` : "";
+            return (
+              <option key={q.id} value={q.id}>
+                {q.numeroInterno}
+                {lt} · {q.clientName || "Cliente"} · {totalTxt}
+              </option>
+            );
+          })}
+        </select>
+        <div className="note" style={{ marginTop: 6 }}>
+          Ao escolher, preenche o nº e o valor total da venda. Ainda dá para ajustar na mão.
+        </div>
+      </div>
+
       <div className="grid">
         <div className="f">
           <label>Nº do orçamento</label>
@@ -220,6 +329,20 @@ export function BlocoDocumento({ o, regras, titulo, form, setForm }: Props) {
             onChange={(e) => {
               const v = e.target.value;
               setForm((p) => ({ ...manual("orc")(p), orc: v }));
+            }}
+          />
+        </div>
+        <div className="f">
+          <label>{rec ? "Taxa de implantação (R$)" : "Valor total da venda (R$)"}</label>
+          <input
+            className={cls("total")}
+            type="number"
+            step="0.01"
+            value={form.total}
+            placeholder="0,00"
+            onChange={(e) => {
+              const v = e.target.value;
+              setForm((p) => ({ ...manual("total")(p), total: v }));
             }}
           />
         </div>
@@ -256,19 +379,6 @@ export function BlocoDocumento({ o, regras, titulo, form, setForm }: Props) {
             />
           </div>
         ) : null}
-        <div className="f">
-          <label>{rec ? "Taxa de implantação (R$)" : "Valor total da venda (R$)"}</label>
-          <input
-            className={cls("total")}
-            type="number"
-            step="0.01"
-            value={form.total}
-            onChange={(e) => {
-              const v = e.target.value;
-              setForm((p) => ({ ...manual("total")(p), total: v }));
-            }}
-          />
-        </div>
         {rec ? (
           <div className="f">
             <label>Prazo contratual (meses)</label>

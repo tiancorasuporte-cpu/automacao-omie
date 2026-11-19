@@ -553,6 +553,37 @@ export const gerarOrcamentoFromOportunidadeFn = createServerFn({ method: "POST" 
     };
   });
 
+/** Lista orçamentos locais para vincular na oportunidade (modal Montado/Envio). */
+export const listCrmOrcamentosFn = createServerFn({ method: "GET" })
+  .validator((input) =>
+    z
+      .object({
+        query: z.string().trim().optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    await authCrm();
+    const { listQuotes } = await import("@/db/quotes");
+    const result = await listQuotes({
+      query: data.query?.trim() || null,
+      limit: data.limit ?? 40,
+      offset: 0,
+    });
+    return {
+      quotes: result.quotes.map((q) => ({
+        id: q.id,
+        numeroInterno: q.numeroInterno,
+        clientName: q.clientName,
+        total: q.total,
+        status: q.status,
+        ltNumero: q.ltNumero,
+        createdAt: q.createdAt,
+      })),
+    };
+  });
+
 export const crmVoltarFn = createServerFn({ method: "POST" })
   .validator((input) =>
     z
