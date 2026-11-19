@@ -20,7 +20,12 @@ export default defineConfig({
   },
   vite: {
     ssr: {
-      external: ["postgres", "bcryptjs"],
+      external: ["postgres", "bcryptjs", "canvas"],
+    },
+    build: {
+      rolldownOptions: {
+        external: ["canvas"],
+      },
     },
     server: {
       https,
