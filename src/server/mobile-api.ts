@@ -65,6 +65,7 @@ function serializeOs(
     coAt: os.coAt,
     pausedAt: os.pausedAt,
     needsMaterialConfirm,
+    tipo: os.tipo,
   });
   const base = {
     id: os.id,
@@ -310,8 +311,10 @@ export async function handleMobileUsarEstoque(
     if (!Number.isFinite(quantidade) || quantidade <= 0) {
       return jsonError("Quantidade inválida.");
     }
-    if (ownedOs.stage !== 5) {
-      return jsonError("Só é possível usar estoque com a O.S. em execução.");
+    if (ownedOs.stage !== 5 && !(ownedOs.stage === 6 && ownedOs.coAt)) {
+      return jsonError(
+        "Só é possível usar estoque em execução ou aguardando conferência.",
+      );
     }
 
     const teams = await listTeamsForTecnico(user.id);
@@ -696,6 +699,32 @@ export async function handleMobileCheckOutOs(request: Request, osId: number) {
   });
 }
 
+/** Atualiza resolução/evidências após check-out (antes da conferência). */
+export async function handleMobileSaveResolucao(request: Request, osId: number) {
+  return withOwnedOs(request, osId, async (user) => {
+    const body = await readJsonBody<{
+      resolucao?: string;
+      fotos?: string[];
+      anexos?: Array<{ name: string; mime: string; data: string }>;
+      assinatura?: string | null;
+    }>(request);
+    const roles = mobileOsRoles(user);
+    const { saveOsResolucao } = await import("@/db/assistencia");
+    const os = await saveOsResolucao({
+      osId,
+      resolucao: body?.resolucao ?? "",
+      fotos: body?.fotos,
+      anexos: body?.anexos,
+      assinatura: body?.assinatura,
+      quem: user.name,
+      userId: user.id,
+      isAdmin: roles.isAdmin,
+      canRole: roles.canRole,
+    });
+    return jsonOk({ ok: true, os: serializeOs(os!, { includeRel: true }) });
+  });
+}
+
 export async function handleMobileFrotaVeiculo(request: Request) {
   await ensureSchema();
   const auth = await requireMobileTecnico(request);
@@ -1028,6 +1057,28 @@ async function applySyncAction(
           assinatura:
             payload.assinatura == null ? null : String(payload.assinatura),
           finalizar: payload.finalizar !== false,
+          quem: user.name,
+          userId: user.id,
+          isAdmin: roles.isAdmin,
+          canRole: roles.canRole,
+        }))!,
+        { includeRel: true },
+      );
+    }
+    if (action.type === "os_save_resolucao") {
+      const { saveOsResolucao } = await import("@/db/assistencia");
+      return serializeOs(
+        (await saveOsResolucao({
+          osId: action.osId,
+          resolucao: String(payload.resolucao ?? ""),
+          fotos: Array.isArray(payload.fotos)
+            ? (payload.fotos as string[])
+            : undefined,
+          anexos: Array.isArray(payload.anexos)
+            ? (payload.anexos as Array<{ name: string; mime: string; data: string }>)
+            : undefined,
+          assinatura:
+            payload.assinatura == null ? null : String(payload.assinatura),
           quem: user.name,
           userId: user.id,
           isAdmin: roles.isAdmin,

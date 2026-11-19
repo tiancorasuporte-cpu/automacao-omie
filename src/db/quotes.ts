@@ -43,6 +43,8 @@ export type Quote = {
   /** OS de pedido na Assistência (quando já enviado ao Kanban). */
   assistOsId: number | null;
   assistOsNum: string | null;
+  /** Quando veio de Levantamento Técnico (ex.: L.T. 0001). */
+  ltNumero: string | null;
 };
 
 export type QuoteItem = {
@@ -109,6 +111,9 @@ function mapQuote(r: Record<string, unknown>): Quote {
     cotacaoComprados: toNumber(r["cotacao_comprados"] ?? 0),
     assistOsId: r["assist_os_id"] == null ? null : toNumber(r["assist_os_id"]),
     assistOsNum: r["assist_os_num"] == null ? null : String(r["assist_os_num"]),
+    ltNumero: r["lt_numero"] == null || String(r["lt_numero"]).trim() === ""
+      ? null
+      : String(r["lt_numero"]).trim(),
   };
 }
 
@@ -472,6 +477,7 @@ export async function listQuotes(input: {
         or coalesce(q.contato, '') ilike ${like}
         or coalesce(q.numero_pedido, '') ilike ${like}
         or coalesce(q.observacao, '') ilike ${like}
+        or coalesce(q.lt_numero, '') ilike ${like}
         or q.client_code::text ilike ${like}
         or coalesce(nullif(trim(u.name), ''), u.username, '') ilike ${like}
       )
@@ -482,7 +488,7 @@ export async function listQuotes(input: {
       q.id, q.omie_app_id, q.omie_app_name, q.client_code, q.client_name, q.contato, q.client_address,
       q.numero_interno, q.omie_pedido_code, q.integration_code, q.numero_pedido,
       q.etapa, q.data_previsao::text as data_previsao, q.observacao, q.total::text as total,
-      q.status, q.error, q.created_by,
+      q.status, q.error, q.created_by, q.lt_numero,
       coalesce(nullif(trim(u.name), ''), u.username) as created_by_name,
       q.created_at::text as created_at,
       coalesce(q.updated_at::text, q.created_at::text) as updated_at
@@ -497,6 +503,7 @@ export async function listQuotes(input: {
         or coalesce(q.contato, '') ilike ${like}
         or coalesce(q.numero_pedido, '') ilike ${like}
         or coalesce(q.observacao, '') ilike ${like}
+        or coalesce(q.lt_numero, '') ilike ${like}
         or q.client_code::text ilike ${like}
         or coalesce(nullif(trim(u.name), ''), u.username, '') ilike ${like}
       )
@@ -519,7 +526,7 @@ export async function getQuoteById(quoteId: number): Promise<Quote | null> {
       q.id, q.omie_app_id, q.omie_app_name, q.client_code, q.client_name, q.contato, q.client_address,
       q.numero_interno, q.omie_pedido_code, q.integration_code, q.numero_pedido,
       q.etapa, q.data_previsao::text as data_previsao, q.observacao, q.total::text as total,
-      q.status, q.error, q.created_by,
+      q.status, q.error, q.created_by, q.lt_numero,
       coalesce(nullif(trim(u.name), ''), u.username) as created_by_name,
       q.created_at::text as created_at,
       coalesce(q.updated_at::text, q.created_at::text) as updated_at

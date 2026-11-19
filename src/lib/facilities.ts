@@ -537,6 +537,101 @@ export const updateFacilitiesSubstitutionAlmocoFn = createServerFn({ method: "PO
     }
   });
 
+export const updateFacilitiesSubstitutionFn = createServerFn({ method: "POST" })
+  .validator((input) =>
+    z
+      .object({
+        id: z.number().int().positive(),
+        data: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        motivo: motivoSchema,
+        postoId: z.number().int().positive(),
+        ausenteId: z.number().int().positive().nullable().optional(),
+        substitutoId: z.number().int().positive(),
+        horas: z.number().positive("Informe horas e minutos maiores que zero."),
+        periodo: periodoSchema,
+        horasExtra: z.number().nonnegative().optional(),
+        periodoExtra: periodoSchema.nullable().optional(),
+        aplicaDesconto: z.boolean().optional(),
+        atestadoNome: z.string().trim().max(255).nullable().optional(),
+        atestadoMime: z.string().trim().max(120).nullable().optional(),
+        atestadoData: z.string().nullable().optional(),
+        keepExistingAtestado: z.boolean().optional(),
+        observacao: z.string().trim().nullable().optional(),
+        pagaAlmoco: z.boolean().optional(),
+        valorAlmoco: z.number().nonnegative().optional(),
+      })
+      .superRefine((value, ctx) => {
+        if (value.motivo === "extra") {
+          if (value.ausenteId != null) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Lançamento extra não deve informar ausente.",
+              path: ["ausenteId"],
+            });
+          }
+        } else if (value.ausenteId == null) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Informe quem faltou (ausente).",
+            path: ["ausenteId"],
+          });
+        }
+        if (value.motivo === "atestado") {
+          if (!value.atestadoData?.trim() && !value.keepExistingAtestado) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Anexe o atestado (PDF ou imagem).",
+              path: ["atestadoData"],
+            });
+          }
+        }
+        const he = value.horasExtra ?? 0;
+        if (he > 0 && !value.periodoExtra) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Informe o período da hora extra.",
+            path: ["periodoExtra"],
+          });
+        }
+      })
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { requireModule } = await import("@/lib/require-auth");
+    await requireModule("facilities");
+    const { updateFacilitiesSubstitution } = await import("@/db/facilities");
+    try {
+      const substitution = await updateFacilitiesSubstitution({
+        id: data.id,
+        data: data.data,
+        motivo: data.motivo,
+        postoId: data.postoId,
+        ausenteId: data.motivo === "extra" ? null : data.ausenteId ?? null,
+        substitutoId: data.substitutoId,
+        horas: data.horas,
+        periodo: data.periodo,
+        horasExtra: data.horasExtra ?? 0,
+        periodoExtra: data.periodoExtra ?? null,
+        ...(data.aplicaDesconto === undefined
+          ? {}
+          : { aplicaDesconto: data.aplicaDesconto }),
+        atestadoNome: data.atestadoNome ?? null,
+        atestadoMime: data.atestadoMime ?? null,
+        atestadoData: data.atestadoData ?? null,
+        keepExistingAtestado: data.keepExistingAtestado ?? false,
+        observacao: data.observacao ?? null,
+        pagaAlmoco: data.pagaAlmoco ?? false,
+        valorAlmoco: data.valorAlmoco ?? 0,
+      });
+      return { ok: true as const, substitution };
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Falha ao atualizar lançamento.",
+      };
+    }
+  });
+
 function normalizeImportName(value: string) {
   return value
     .normalize("NFD")

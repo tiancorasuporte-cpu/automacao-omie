@@ -59,6 +59,7 @@ import { Route as ApiMobileOsIdConfirmarItemRouteImport } from './routes/api/mob
 import { Route as ApiMobileOsIdLtRouteImport } from './routes/api/mobile/os/$id/lt'
 import { Route as ApiMobileOsIdLtFinalizeRouteImport } from './routes/api/mobile/os/$id/lt-finalize'
 import { Route as ApiMobileOsIdPauseRouteImport } from './routes/api/mobile/os/$id/pause'
+import { Route as ApiMobileOsIdResolucaoRouteImport } from './routes/api/mobile/os/$id/resolucao'
 import { Route as ApiMobileOsIdResumeRouteImport } from './routes/api/mobile/os/$id/resume'
 import { Route as ApiMobileOsIdStartRouteImport } from './routes/api/mobile/os/$id/start'
 import { Route as ApiMobileOsIdUsarEstoqueRouteImport } from './routes/api/mobile/os/$id/usar-estoque'
@@ -316,6 +317,11 @@ const ApiMobileOsIdPauseRoute = ApiMobileOsIdPauseRouteImport.update({
   path: '/api/mobile/os/$id/pause',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiMobileOsIdResolucaoRoute = ApiMobileOsIdResolucaoRouteImport.update({
+  id: '/api/mobile/os/$id/resolucao',
+  path: '/api/mobile/os/$id/resolucao',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiMobileOsIdResumeRoute = ApiMobileOsIdResumeRouteImport.update({
   id: '/api/mobile/os/$id/resume',
   path: '/api/mobile/os/$id/resume',
@@ -383,6 +389,7 @@ export interface FileRoutesByFullPath {
   '/api/mobile/os/$id/lt': typeof ApiMobileOsIdLtRoute
   '/api/mobile/os/$id/lt-finalize': typeof ApiMobileOsIdLtFinalizeRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
+  '/api/mobile/os/$id/resolucao': typeof ApiMobileOsIdResolucaoRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
   '/api/mobile/os/$id/usar-estoque': typeof ApiMobileOsIdUsarEstoqueRoute
@@ -438,6 +445,7 @@ export interface FileRoutesByTo {
   '/api/mobile/os/$id/lt': typeof ApiMobileOsIdLtRoute
   '/api/mobile/os/$id/lt-finalize': typeof ApiMobileOsIdLtFinalizeRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
+  '/api/mobile/os/$id/resolucao': typeof ApiMobileOsIdResolucaoRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
   '/api/mobile/os/$id/usar-estoque': typeof ApiMobileOsIdUsarEstoqueRoute
@@ -494,6 +502,7 @@ export interface FileRoutesById {
   '/api/mobile/os/$id/lt': typeof ApiMobileOsIdLtRoute
   '/api/mobile/os/$id/lt-finalize': typeof ApiMobileOsIdLtFinalizeRoute
   '/api/mobile/os/$id/pause': typeof ApiMobileOsIdPauseRoute
+  '/api/mobile/os/$id/resolucao': typeof ApiMobileOsIdResolucaoRoute
   '/api/mobile/os/$id/resume': typeof ApiMobileOsIdResumeRoute
   '/api/mobile/os/$id/start': typeof ApiMobileOsIdStartRoute
   '/api/mobile/os/$id/usar-estoque': typeof ApiMobileOsIdUsarEstoqueRoute
@@ -551,6 +560,7 @@ export interface FileRouteTypes {
     | '/api/mobile/os/$id/lt'
     | '/api/mobile/os/$id/lt-finalize'
     | '/api/mobile/os/$id/pause'
+    | '/api/mobile/os/$id/resolucao'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
     | '/api/mobile/os/$id/usar-estoque'
@@ -606,6 +616,7 @@ export interface FileRouteTypes {
     | '/api/mobile/os/$id/lt'
     | '/api/mobile/os/$id/lt-finalize'
     | '/api/mobile/os/$id/pause'
+    | '/api/mobile/os/$id/resolucao'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
     | '/api/mobile/os/$id/usar-estoque'
@@ -661,6 +672,7 @@ export interface FileRouteTypes {
     | '/api/mobile/os/$id/lt'
     | '/api/mobile/os/$id/lt-finalize'
     | '/api/mobile/os/$id/pause'
+    | '/api/mobile/os/$id/resolucao'
     | '/api/mobile/os/$id/resume'
     | '/api/mobile/os/$id/start'
     | '/api/mobile/os/$id/usar-estoque'
@@ -717,6 +729,7 @@ export interface RootRouteChildren {
   ApiMobileOsIdLtRoute: typeof ApiMobileOsIdLtRoute
   ApiMobileOsIdLtFinalizeRoute: typeof ApiMobileOsIdLtFinalizeRoute
   ApiMobileOsIdPauseRoute: typeof ApiMobileOsIdPauseRoute
+  ApiMobileOsIdResolucaoRoute: typeof ApiMobileOsIdResolucaoRoute
   ApiMobileOsIdResumeRoute: typeof ApiMobileOsIdResumeRoute
   ApiMobileOsIdStartRoute: typeof ApiMobileOsIdStartRoute
   ApiMobileOsIdUsarEstoqueRoute: typeof ApiMobileOsIdUsarEstoqueRoute
@@ -1075,6 +1088,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMobileOsIdPauseRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/mobile/os/$id/resolucao': {
+      id: '/api/mobile/os/$id/resolucao'
+      path: '/api/mobile/os/$id/resolucao'
+      fullPath: '/api/mobile/os/$id/resolucao'
+      preLoaderRoute: typeof ApiMobileOsIdResolucaoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/mobile/os/$id/resume': {
       id: '/api/mobile/os/$id/resume'
       path: '/api/mobile/os/$id/resume'
@@ -1149,6 +1169,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMobileOsIdLtRoute: ApiMobileOsIdLtRoute,
   ApiMobileOsIdLtFinalizeRoute: ApiMobileOsIdLtFinalizeRoute,
   ApiMobileOsIdPauseRoute: ApiMobileOsIdPauseRoute,
+  ApiMobileOsIdResolucaoRoute: ApiMobileOsIdResolucaoRoute,
   ApiMobileOsIdResumeRoute: ApiMobileOsIdResumeRoute,
   ApiMobileOsIdStartRoute: ApiMobileOsIdStartRoute,
   ApiMobileOsIdUsarEstoqueRoute: ApiMobileOsIdUsarEstoqueRoute,

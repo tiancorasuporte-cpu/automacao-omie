@@ -53,6 +53,7 @@ import {
   type UniformCondition,
   type UniformMovementType,
 } from "@/lib/uniformes-domain";
+import { notifyError, notifyOk } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 
 const TAB_IDS = ["painel", "movimentar", "historico", "estoque", "colaboradores", "relatorios"] as const;
@@ -392,8 +393,6 @@ function UniformesPage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const router = useRouter();
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [preset, setPreset] = useState<{ key: number; value: MovementPreset }>({ key: 0, value: {} });
 
   const setTab = (tab: TabId) => {
@@ -402,8 +401,8 @@ function UniformesPage() {
   };
 
   const flash = (ok: string | null, err: string | null = null) => {
-    setMessage(ok);
-    setError(err);
+    notifyOk(ok ?? "");
+    notifyError(err ?? "");
   };
 
   const refresh = async () => {
@@ -463,22 +462,6 @@ function UniformesPage() {
               })}
             </div>
           </div>
-
-          {message || error ? (
-            <div
-              className={cn(
-                "flex items-start justify-between gap-sm rounded-xl border px-md py-sm text-body-md",
-                error
-                  ? "border-error/40 bg-error/10 text-error"
-                  : "border-secondary/30 bg-secondary-container/40 text-primary",
-              )}
-            >
-              <span>{error ?? message}</span>
-              <button type="button" aria-label="Fechar aviso" onClick={() => flash(null)}>
-                <Icon name="close" className="text-[18px]" />
-              </button>
-            </div>
-          ) : null}
 
           {search.tab === "painel" ? <PainelSection ctx={ctx} /> : null}
           {search.tab === "movimentar" ? (

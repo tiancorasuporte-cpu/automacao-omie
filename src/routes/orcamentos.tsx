@@ -64,6 +64,12 @@ import { downloadOrcamentoExcel } from "@/lib/orcamento-excel";
 import { effectiveCmc, isUnitBelowCmc, isUnitBelowSuggested, suggestedPriceFromCmc } from "@/lib/product-pricing";
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
+import { notifyFeedback } from "@/lib/notify";
+
+/** Feedback global via toast (sem banner persistente na página). */
+function setFeedback(fb: { type: "ok" | "error" | "info"; text: string } | null) {
+  notifyFeedback(fb);
+}
 
 type MobileOrcamentoTab = "montar" | "salvos";
 type QuotesPageSize = 10 | 20 | 50 | 100 | "all";
@@ -179,6 +185,18 @@ function statusLabel(status: string, error?: string | null) {
   if (status === "draft") return "Salvo";
   if (status === "error") return `Erro: ${error ?? ""}`;
   return status;
+}
+
+function LtOrigemBadge({ ltNumero }: { ltNumero?: string | null }) {
+  if (!ltNumero?.trim()) return null;
+  return (
+    <span
+      className="inline-flex items-center rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-amber-900"
+      title="Origem: Levantamento Técnico"
+    >
+      {ltNumero.trim()}
+    </span>
+  );
 }
 
 function parseNumberInput(raw: string, fallback: number, opts?: { min?: number; allowZero?: boolean }) {
@@ -386,7 +404,6 @@ function OrcamentosPage() {
   const [quotesStatusFilter, setQuotesStatusFilter] = useState<"all" | "draft" | "sent" | "error">("all");
   const [quotesPage, setQuotesPage] = useState(1);
   const [quotesPageSize, setQuotesPageSize] = useState<QuotesPageSize>("all");
-  const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileOrcamentoTab>("montar");
   const [lastAddedLabel, setLastAddedLabel] = useState<string | null>(null);
   const [dragKey, setDragKey] = useState<string | null>(null);
@@ -1455,6 +1472,53 @@ function OrcamentosPage() {
     setDeleteTarget(quote);
   }
 
+  function cartItemActionsMenu(item: CartItem) {
+    const cotacao = cotacaoByCodigo[item.codigoProduto];
+    const cotacaoAtiva = Boolean(cotacao && cotacao.status !== "cancelada");
+    const cotacaoLabel =
+      cotacao?.status === "comprada"
+        ? "Comprado"
+        : cotacaoAtiva
+          ? "Em cotação"
+          : "Cotar";
+    return (
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-outline-variant bg-surface text-on-surface hover:bg-surface-container-high"
+            aria-label={`Ações do item ${item.descricao}`}
+          >
+            <Icon name="more_vert" className="text-[18px]" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[11rem]">
+          <DropdownMenuItem
+            disabled={cotacaoAtiva}
+            onSelect={() => void handleEnviarCotacao(item)}
+          >
+            <Icon name="shopping_cart" className="text-[16px]" />
+            {cotacaoLabel}
+          </DropdownMenuItem>
+          {!locked ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive focus:text-destructive"
+                onSelect={() =>
+                  setCart((prev) => prev.filter((row) => row.key !== item.key))
+                }
+              >
+                <Icon name="delete" className="text-[16px]" />
+                Remover
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
   function quoteActionsMenu(quote: (typeof quotes)[number]) {
     const omieLabel = omieCodigoLabel(quote);
     return (
@@ -2003,16 +2067,26 @@ function OrcamentosPage() {
 
         {numeroInterno ? (
           <div className="flex flex-wrap items-center justify-between gap-sm rounded-lg border border-outline-variant bg-surface-container-low px-md py-sm text-body-md text-on-surface">
-            <div>
-              Editando <strong>{numeroInterno}</strong>
-              {selectedClient ? ` — ${selectedClient.nome}` : ""}
-              {criadoPor ? ` · por ${criadoPor}` : ""}
-              {quoteStatus ? ` · ${statusLabel(quoteStatus)}` : ""}
-              {locked ? " · somente leitura (já enviado)" : ""}
-              {omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode })
-                ? ` · Omie ${omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode })}`
-                : ""}
-              {assistOsNum ? ` · Pedido OS ${assistOsNum}` : ""}
+            <div className="flex flex-wrap items-center gap-xs">
+              <span>
+                Editando <strong>{numeroInterno}</strong>
+                {selectedClient ? ` — ${selectedClient.nome}` : ""}
+                {criadoPor ? ` · por ${criadoPor}` : ""}
+                {quoteStatus ? ` · ${statusLabel(quoteStatus)}` : ""}
+                {locked ? " · somente leitura (já enviado)" : ""}
+                {omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode })
+                  ? ` · Omie ${omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode })}`
+                  : ""}
+                {assistOsNum ? ` · Pedido OS ${assistOsNum}` : ""}
+              </span>
+              <LtOrigemBadge
+                ltNumero={
+                  quotes.find((q) => q.numeroInterno === numeroInterno)?.ltNumero ??
+                  (editingQuoteId
+                    ? quotes.find((q) => q.id === editingQuoteId)?.ltNumero
+                    : null)
+                }
+              />
             </div>
             {omieCodigoLabel({ numeroPedido: numeroPedidoOmie, omiePedidoCode }) ? (
               <button
@@ -2028,18 +2102,6 @@ function OrcamentosPage() {
                 {copiedOmieCode ? "Copiado" : "Copiar cód. Omie"}
               </button>
             ) : null}
-          </div>
-        ) : null}
-
-        {feedback ? (
-          <div
-            className={`rounded-lg border px-md py-sm text-body-md ${
-              feedback.type === "ok"
-                ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                : "border-red-300 bg-red-50 text-red-900"
-            }`}
-          >
-            {feedback.text}
           </div>
         ) : null}
 
@@ -2520,7 +2582,6 @@ function OrcamentosPage() {
                       const belowSuggested =
                         !belowCmc && isUnitBelowSuggested(item.valorUnitario, sugerido);
                       const cotacao = cotacaoByCodigo[item.codigoProduto];
-                      const cotacaoAtiva = Boolean(cotacao && cotacao.status !== "cancelada");
                       return (
                         <article
                           key={item.key}
@@ -2561,17 +2622,7 @@ function OrcamentosPage() {
                                 ) : null}
                               </div>
                             </div>
-                            {!locked ? (
-                              <button
-                                type="button"
-                                className="shrink-0 text-label-md text-red-700"
-                                onClick={() =>
-                                  setCart((prev) => prev.filter((row) => row.key !== item.key))
-                                }
-                              >
-                                Remover
-                              </button>
-                            ) : null}
+                            {cartItemActionsMenu(item)}
                           </div>
                           <div className="mt-sm grid grid-cols-2 gap-sm">
                             <label className="block text-label-md text-on-surface-variant">
@@ -2626,24 +2677,6 @@ function OrcamentosPage() {
                           ) : belowSuggested ? (
                             <p className="mt-xs text-label-md text-amber-800">Abaixo do sugerido</p>
                           ) : null}
-                          <button
-                            type="button"
-                            disabled={cotacaoAtiva}
-                            className={cn(
-                              "mt-sm inline-flex items-center gap-2xs rounded-lg border px-sm py-xs text-label-md font-semibold",
-                              cotacaoAtiva
-                                ? "cursor-not-allowed border-outline-variant/60 text-on-surface-variant opacity-70"
-                                : "border-outline-variant text-on-surface",
-                            )}
-                            onClick={() => void handleEnviarCotacao(item)}
-                          >
-                            <Icon name="shopping_cart" className="text-[15px]" />
-                            {cotacao?.status === "comprada"
-                              ? "Cotado e comprado"
-                              : cotacaoAtiva
-                                ? "Enviado para cotação"
-                                : "Enviar para cotação"}
-                          </button>
                         </article>
                       );
                     })}
@@ -2669,7 +2702,6 @@ function OrcamentosPage() {
                         const belowSuggested =
                           !belowCmc && isUnitBelowSuggested(item.valorUnitario, sugerido);
                         const cotacao = cotacaoByCodigo[item.codigoProduto];
-                        const cotacaoAtiva = Boolean(cotacao && cotacao.status !== "cancelada");
                         return (
                         <tr
                           key={item.key}
@@ -2755,44 +2787,8 @@ function OrcamentosPage() {
                           <td className="whitespace-nowrap px-xs py-1 font-semibold">
                             {formatMoney(item.quantidade * item.valorUnitario)}
                           </td>
-                          <td className="px-xs py-1">
-                            <div className="flex flex-col items-end gap-2xs">
-                              <button
-                                type="button"
-                                disabled={cotacaoAtiva}
-                                className={cn(
-                                  "text-label-md font-semibold",
-                                  cotacaoAtiva
-                                    ? "cursor-not-allowed text-on-surface-variant"
-                                    : "text-primary",
-                                )}
-                                title={
-                                  cotacao?.status === "comprada"
-                                    ? "Item cotado e comprado"
-                                    : cotacaoAtiva
-                                      ? "Item já enviado para cotação"
-                                      : "Enviar produto para o comprador cotar"
-                                }
-                                onClick={() => void handleEnviarCotacao(item)}
-                              >
-                                {cotacao?.status === "comprada"
-                                  ? "Comprado"
-                                  : cotacaoAtiva
-                                    ? "Em cotação"
-                                    : "Cotar"}
-                              </button>
-                              {!locked ? (
-                                <button
-                                  type="button"
-                                  className="text-label-md text-red-700"
-                                  onClick={() =>
-                                    setCart((prev) => prev.filter((row) => row.key !== item.key))
-                                  }
-                                >
-                                  Remover
-                                </button>
-                              ) : null}
-                            </div>
+                          <td className="px-xs py-1 text-right">
+                            {cartItemActionsMenu(item)}
                           </td>
                         </tr>
                         );
@@ -2975,14 +2971,16 @@ function OrcamentosPage() {
                   >
                     <div className="flex items-start justify-between gap-sm">
                       <div className="min-w-0">
-                        <p className="text-title-md text-primary">
-                          {quote.numeroInterno || `#${quote.id}`}
+                        <p className="flex flex-wrap items-center gap-xs text-title-md text-primary">
+                          <span>{quote.numeroInterno || `#${quote.id}`}</span>
+                          <LtOrigemBadge ltNumero={quote.ltNumero} />
                         </p>
                         <p className="truncate text-body-md text-on-surface">
                           {quote.clientName ?? quote.clientCode}
                         </p>
                         <p className="text-label-md text-on-surface-variant">
                           {statusLabel(quote.status, quote.error)}
+                          {quote.ltNumero ? " · Levantamento técnico" : ""}
                           {quote.createdByName ? ` · ${quote.createdByName}` : ""}
                         </p>
                         {quoteCotacaoBadges(quote)}
@@ -3017,7 +3015,12 @@ function OrcamentosPage() {
                 <tbody>
                   {pagedQuotes.items.map((quote) => (
                     <tr key={quote.id} className="border-t border-outline-variant">
-                      <td className="px-sm py-xs font-medium">{quote.numeroInterno || "—"}</td>
+                      <td className="px-sm py-xs font-medium">
+                        <div className="flex flex-wrap items-center gap-xs">
+                          <span>{quote.numeroInterno || "—"}</span>
+                          <LtOrigemBadge ltNumero={quote.ltNumero} />
+                        </div>
+                      </td>
                       <td className="px-sm py-xs">{quote.clientName ?? quote.clientCode}</td>
                       <td className="px-sm py-xs">{quote.createdByName ?? "—"}</td>
                       <td className="px-sm py-xs">

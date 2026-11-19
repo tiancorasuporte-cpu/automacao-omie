@@ -1,4 +1,4 @@
-﻿import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -15,7 +15,6 @@ import {
   btnMuted,
   btnOutline,
   btnPrimary,
-  feedbackErrClass,
   fieldClass,
   filterControlClass,
   mobileCardClass,
@@ -26,6 +25,7 @@ import {
   tableHeadCellClass,
   tableHeadClass,
 } from "@/components/PageChrome";
+import { notifyText } from "@/lib/notify";
 import {
   SoftDialogBody,
   SoftDialogContent,
@@ -186,7 +186,8 @@ function TicketsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const setFeedback = (text: string | null) => notifyText(text, false);
+  const setFeedbackOk = (text: string) => notifyText(text, true);
   const [comment, setComment] = useState("");
   const [resolveText, setResolveText] = useState("");
   const [draftAnexos, setDraftAnexos] = useState<
@@ -1155,8 +1156,6 @@ function TicketsPage() {
             </div>
           ) : null}
 
-          {feedback ? <div className={cn(feedbackErrClass, "mb-sm")}>{feedback}</div> : null}
-
           {viewMode === "calendario" ? (
             <ActivitiesCalendar
               items={ticketCalendarItems}
@@ -1845,7 +1844,7 @@ function TicketsPage() {
                     );
                   }
                   setOsOpen(false);
-                  setFeedback(result.os ? `OS ${result.os.num} criada.` : "OS vinculada.");
+                  setFeedbackOk(result.os ? `OS ${result.os.num} criada.` : "OS vinculada.");
                 } catch (e) {
                   setFeedback(e instanceof Error ? e.message : "Falha ao abrir OS");
                 } finally {

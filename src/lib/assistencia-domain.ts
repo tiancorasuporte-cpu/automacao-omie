@@ -163,18 +163,37 @@ export function osExecStatus(input: {
   coAt?: string | null;
   pausedAt?: string | null;
   needsMaterialConfirm?: boolean;
+  tipo?: string | null;
 }): { key: OsExecStatusKey; label: string } {
+  const lt = isLevantamentoTecnico(input.tipo);
   if (input.stage >= 7) return { key: "finalizado", label: "Finalizado" };
-  if (input.stage === 6) return { key: "executado", label: "Executado" };
+  if (input.stage === 6) {
+    return {
+      key: "executado",
+      label: lt ? "L.T. finalizado" : "Executado",
+    };
+  }
   if (input.stage === 5) {
-    if (input.coAt) return { key: "pos_checkout", label: "Aguardando conferência" };
+    if (input.coAt) {
+      return {
+        key: "pos_checkout",
+        label: lt ? "L.T. enviado" : "Aguardando conferência",
+      };
+    }
     if (input.pausedAt) return { key: "pausada", label: "Pausada" };
-    if (input.ciAt) return { key: "instalando", label: "Instalando" };
+    if (input.ciAt) {
+      return {
+        key: "instalando",
+        label: lt ? "Em levantamento" : "Instalando",
+      };
+    }
     return { key: "aguardando_checkin", label: "Aguardando check-in" };
   }
   if (input.stage === 4 && input.needsMaterialConfirm) {
     return { key: "aguardando_material", label: "Confirmar equipamentos" };
   }
-  if (input.stage === 4) return { key: "agendada", label: "Agendada" };
-  return { key: "agendada", label: osStageName(input.stage) };
+  if (input.stage === 4) {
+    return { key: "agendada", label: lt ? "L.T. agendado" : "Agendada" };
+  }
+  return { key: "agendada", label: lt ? "Levantamento Técnico" : osStageName(input.stage) };
 }

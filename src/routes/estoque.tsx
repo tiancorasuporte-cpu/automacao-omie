@@ -1,4 +1,4 @@
-﻿import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
@@ -43,6 +43,12 @@ import {
 } from "@/lib/estoque";
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
+import { notifyFeedback } from "@/lib/notify";
+
+/** Feedback global via toast (sem banner persistente na página). */
+function setFeedback(fb: { type: "ok" | "error" | "info"; text: string } | null) {
+  notifyFeedback(fb);
+}
 
 export const Route = createFileRoute("/estoque")({
   beforeLoad: () => requireModule("estoque"),
@@ -138,7 +144,6 @@ function EstoquePage() {
   const [onlyBelowMin, setOnlyBelowMin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
 
   const [pdvBoot, setPdvBoot] = useState<Awaited<
     ReturnType<typeof getEstoquePdvBootstrapFn>
@@ -601,18 +606,6 @@ function EstoquePage() {
             </button>
           ))}
         </div>
-
-        {feedback ? (
-          <div
-            className={`rounded-xl border px-md py-sm text-body-md ${
-              feedback.type === "ok"
-                ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                : "border-red-300 bg-red-50 text-red-900"
-            }`}
-          >
-            {feedback.text}
-          </div>
-        ) : null}
 
         {tab === "pdv" ? (
           <div className="grid gap-lg xl:grid-cols-[minmax(0,1.15fr)_minmax(18rem,22rem)]">

@@ -2022,7 +2022,10 @@ export async function checkOutOs(input: {
   }
 }
 
-/** Salva rascunho de resolução/anexos em execução (antes do check-out). */
+/**
+ * Salva resolução/anexos em execução (stage 5) ou após check-out
+ * aguardando conferência (stage 6). Bloqueado após confirmação (7+).
+ */
 export async function saveOsResolucao(input: {
   osId: number;
   resolucao: string;
@@ -2036,13 +2039,24 @@ export async function saveOsResolucao(input: {
 }) {
   const os = await getOsById(input.osId);
   if (!os) throw new Error("OS não encontrada.");
-  if (os.stage !== 5) throw new Error("Resolução só em execução.");
-  assertCanMoveStage(5, input.canRole, input.isAdmin);
+  if (os.stage >= 7) {
+    throw new Error("O.S. já confirmada — não é possível editar a resolução.");
+  }
+  if (os.stage !== 5 && os.stage !== 6) {
+    throw new Error("Resolução só em execução ou aguardando conferência.");
+  }
+  if (!os.ciAt) throw new Error("Faça check-in antes de editar a resolução.");
+  // Stage 6 no quadro é estoque/conferência; técnico (role assistencia no app) ainda pode
+  // ajustar evidências até a confirmação — não exige o mover da etapa 6.
+  if (!input.isAdmin && !input.canRole("assistencia") && !input.canRole("estoque")) {
+    throw new Error("Sem permissão para editar a resolução.");
+  }
   const rel = buildOsRel({
     texto: input.resolucao,
     fotos: input.fotos,
     anexos: input.anexos,
     assinatura: input.assinatura,
+    fallback: os.rel,
   });
   const db = await getDb();
   await db`
@@ -2056,7 +2070,10 @@ export async function saveOsResolucao(input: {
     osId: os.id,
     quem: input.quem,
     userId: input.userId,
-    acao: "Atualizou resolução / anexos",
+    acao:
+      os.stage === 6
+        ? "Atualizou resolução / anexos (pré-conferência)"
+        : "Atualizou resolução / anexos",
   });
   return getOsById(os.id);
 }

@@ -26,6 +26,12 @@ import {
 } from "@/lib/contratos";
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
+import { notifyFeedback } from "@/lib/notify";
+
+/** Feedback global via toast (sem banner persistente na página). */
+function setFeedback(fb: { type: "ok" | "error" | "info"; text: string } | null) {
+  notifyFeedback(fb);
+}
 
 export const Route = createFileRoute("/contratos")({
   beforeLoad: () => requireModule("contratos"),
@@ -121,7 +127,6 @@ function ContratosContent({
   const [contratoCount, setContratoCount] = useState(initialContratoCount);
   const [syncing, setSyncing] = useState(false);
   const [loadingList, setLoadingList] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
 
   const [selected, setSelected] = useState<ClienteGrupo | null>(null);
   const [contratos, setContratos] = useState<ContratoRow[]>([]);
@@ -531,19 +536,6 @@ function ContratosContent({
         <p className="mt-sm text-label-md text-on-surface-variant">
           Clique no cliente e depois no contrato para ver o detalhe completo e vincular contas Moni.
         </p>
-
-        {feedback ? (
-          <p
-            className={cn(
-              "mt-md rounded-lg border px-md py-sm text-body-md",
-              feedback.type === "ok"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                : "border-red-200 bg-red-50 text-red-900",
-            )}
-          >
-            {feedback.text}
-          </p>
-        ) : null}
 
         {loadingList ? (
           <p className="mt-md text-label-md text-on-surface-variant">Atualizando lista…</p>

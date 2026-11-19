@@ -1,4 +1,4 @@
-﻿import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
@@ -32,6 +32,12 @@ import {
 } from "@/lib/produtos";
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
+import { notifyFeedback } from "@/lib/notify";
+
+/** Feedback global via toast (sem banner persistente na página). */
+function setFeedback(fb: { type: "ok" | "error" | "info"; text: string } | null) {
+  notifyFeedback(fb);
+}
 
 export const Route = createFileRoute("/produtos")({
   beforeLoad: () => requireModule("produtos"),
@@ -108,7 +114,6 @@ function ProdutosPage() {
   const [drafts, setDrafts] = useState<
     Record<number, { cmcInterno: string; markup: string; valorUnitario: string }>
   >({});
-  const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
 
   const [linksProduct, setLinksProduct] = useState<ProductRow | null>(null);
   const [linkDrafts, setLinkDrafts] = useState<SupplierLinkDraft[]>([]);
@@ -400,18 +405,6 @@ function ProdutosPage() {
             {syncing ? "Sincronizando..." : `Sync produtos (${total})`}
           </button>
         </PageTitle>
-
-        {feedback ? (
-          <div
-            className={`rounded-lg border px-md py-sm text-body-md ${
-              feedback.type === "ok"
-                ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                : "border-red-300 bg-red-50 text-red-900"
-            }`}
-          >
-            {feedback.text}
-          </div>
-        ) : null}
 
         <div className="flex flex-wrap gap-xs">
           {(

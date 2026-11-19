@@ -8,12 +8,11 @@ import {
   btnMuted,
   btnOutline,
   btnPrimary,
-  feedbackErrClass,
-  feedbackOkClass,
   fieldClass,
   PageSection,
   PageTitle,
 } from "@/components/PageChrome";
+import { notifyText } from "@/lib/notify";
 import {
   getEquipesBootstrapFn,
   saveTeamFn,
@@ -52,8 +51,8 @@ function EquipesPage() {
   const [teams, setTeams] = useState<Team[]>(boot.teams);
   const [tecnicos] = useState(boot.tecnicos);
   const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const setFeedback = (text: string | null) => notifyText(text, true);
+  const setError = (text: string | null) => notifyText(text, false);
   const [newName, setNewName] = useState("");
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(
     boot.teams[0]?.id ?? null,
@@ -200,9 +199,6 @@ function EquipesPage() {
           title="Equipes"
           subtitle="Cadastre equipes e vincule técnicos (marcados em Usuários)."
         />
-
-        {feedback ? <p className={feedbackOkClass}>{feedback}</p> : null}
-        {error ? <p className={feedbackErrClass}>{error}</p> : null}
 
         <div className="grid gap-md lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]">
           <PageSection className="space-y-md">

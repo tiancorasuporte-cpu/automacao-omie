@@ -1,4 +1,4 @@
-﻿import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
@@ -16,6 +16,12 @@ import {
   searchTerceirosOmieClientsFn,
 } from "@/lib/terceiros";
 import { cn } from "@/lib/utils";
+import { notifyFeedback } from "@/lib/notify";
+
+/** Feedback global via toast (sem banner persistente na página). */
+function setFeedback(fb: { type: "ok" | "error" | "info"; text: string } | null) {
+  notifyFeedback(fb);
+}
 
 type OmieClientPick = {
   codigo: number;
@@ -86,7 +92,6 @@ function TerceirosContent({
   }, [initialItems]);
   const [showInactive, setShowInactive] = useState(false);
   const [onlyPending, setOnlyPending] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
 
@@ -384,19 +389,6 @@ function TerceirosContent({
         <span className="font-semibold tabular-nums text-primary">{formatMoney(totalGeral)}</span>
         <span className="text-on-surface-variant"> · {filtered.length} terceiro(s)</span>
       </div>
-
-      {feedback ? (
-        <div
-          className={cn(
-            "rounded-lg border px-md py-sm text-body-md",
-            feedback.type === "ok"
-              ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-              : "border-red-300 bg-red-50 text-red-900",
-          )}
-        >
-          {feedback.text}
-        </div>
-      ) : null}
 
       {formOpen ? (
         <form

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
 import { PageSection, PageTitle } from "@/components/PageChrome";
+import { notifyText } from "@/lib/notify";
 import {
   SoftDialogBody,
   SoftDialogContent,
@@ -245,7 +246,8 @@ function ComprasPage() {
   );
   const [busy, setBusy] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const setFeedback = (text: string | null) => notifyText(text, false);
+  const setFeedbackOk = (text: string) => notifyText(text, true);
 
   useEffect(() => {
     setAbertas(boot.abertas);
@@ -882,7 +884,7 @@ function ComprasPage() {
       }
       setLoteOpen(false);
       setLoteSolicitacaoId(null);
-      setFeedback(`Cotação em lote salva (${items.length} produto(s)).`);
+      setFeedbackOk(`Cotação em lote salva (${items.length} produto(s)).`);
       await reload();
     });
   }
@@ -952,7 +954,7 @@ function ComprasPage() {
       setManualLinks("");
       setManualObs("");
       const n = result.solicitacao.itens.length || 1;
-      setFeedback(
+      setFeedbackOk(
         result.solicitacao.isLote
           ? `Lote com ${n} itens enviado em um único card.`
           : "Solicitação enviada.",
@@ -1003,7 +1005,7 @@ function ComprasPage() {
         setBoardRow(result.solicitacao);
       }
       resetPropostaForm();
-      setFeedback("Cotação salva.");
+      setFeedbackOk("Cotação salva.");
     });
   }
 
@@ -1066,7 +1068,7 @@ function ComprasPage() {
       setManualProductCode(null);
       setManualUnidade(null);
       setProductHits([]);
-      setFeedback("Solicitação enviada. Acompanhe em Minhas solicitações.");
+      setFeedbackOk("Solicitação enviada. Acompanhe em Minhas solicitações.");
       await reload();
     });
   }
@@ -1101,7 +1103,7 @@ function ComprasPage() {
       setBoardOpen(false);
       setSelected(null);
       setBoardRow(null);
-      setFeedback(
+      setFeedbackOk(
         updateCmc && selected.productId
           ? "Compra concluída e CMC interno atualizado."
           : "Compra concluída.",
@@ -1196,12 +1198,6 @@ function ComprasPage() {
               Atualizar
             </button>
           </PageTitle>
-
-          {feedback ? (
-            <p className="rounded-lg border border-outline-variant bg-surface px-md py-sm text-body-md text-on-surface">
-              {feedback}
-            </p>
-          ) : null}
 
           {!boot.user.isComprador && !canComprar ? (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-md py-sm text-label-md text-amber-900">

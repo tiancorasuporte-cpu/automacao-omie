@@ -700,6 +700,175 @@ export async function deleteFacilitiesSubstitution(id: number) {
   await db`delete from facilities_substitutions where id = ${id}`;
 }
 
+export async function updateFacilitiesSubstitution(input: {
+  id: number;
+  data: string;
+  motivo: FacilitiesMotivoId;
+  postoId: number;
+  ausenteId?: number | null;
+  substitutoId: number;
+  horas: number;
+  periodo: FacilitiesPeriodoId;
+  horasExtra?: number;
+  periodoExtra?: FacilitiesPeriodoId | null;
+  aplicaDesconto?: boolean;
+  atestadoNome?: string | null;
+  atestadoMime?: string | null;
+  atestadoData?: string | null;
+  /** Se true e não veio arquivo novo, mantém o atestado já salvo. */
+  keepExistingAtestado?: boolean;
+  observacao?: string | null;
+  pagaAlmoco?: boolean;
+  valorAlmoco?: number;
+}) {
+  const isExtra = input.motivo === "extra";
+  const ausenteId =
+    input.ausenteId != null && Number.isFinite(input.ausenteId) && input.ausenteId > 0
+      ? Number(input.ausenteId)
+      : null;
+  if (isExtra) {
+    if (ausenteId != null) {
+      throw new Error("Lançamento extra não usa ausente — só o colaborador setado no posto.");
+    }
+  } else {
+    if (ausenteId == null) {
+      throw new Error("Informe quem faltou (ausente).");
+    }
+    if (ausenteId === input.substitutoId) {
+      throw new Error("Ausente e substituto precisam ser pessoas diferentes.");
+    }
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.data)) {
+    throw new Error("Data inválida.");
+  }
+  if (!Number.isFinite(input.horas) || input.horas <= 0) {
+    throw new Error("Informe duração maior que zero.");
+  }
+  const periodo = input.periodo === "noturno" ? "noturno" : "diurno";
+  const horasExtra = Math.max(0, Number(input.horasExtra ?? 0) || 0);
+  const periodoExtra =
+    horasExtra > 0
+      ? input.periodoExtra === "noturno"
+        ? "noturno"
+        : "diurno"
+      : null;
+  const newAtestado = Boolean(input.atestadoData?.trim());
+  if (input.motivo === "atestado" && !newAtestado && !input.keepExistingAtestado) {
+    throw new Error("Anexe o atestado (PDF ou imagem) para este lançamento.");
+  }
+  const pagaAlmoco = Boolean(input.pagaAlmoco);
+  const valorAlmoco = pagaAlmoco ? Math.max(0, Number(input.valorAlmoco ?? 0)) : 0;
+  if (pagaAlmoco && !(valorAlmoco > 0)) {
+    throw new Error("Informe o valor do almoço.");
+  }
+
+  const db = await getDb();
+  const existing = (await db`
+    select
+      id,
+      atestado_nome,
+      atestado_mime,
+      atestado_data
+    from facilities_substitutions
+    where id = ${input.id}
+    limit 1
+  `) as Array<{
+    id: number;
+    atestado_nome: string | null;
+    atestado_mime: string | null;
+    atestado_data: string | null;
+  }>;
+  if (!existing[0]) throw new Error("Lançamento não encontrado.");
+
+  const [subRow] = (await db`
+    select funcao from facilities_collaborators where id = ${input.substitutoId} limit 1
+  `) as Array<{ funcao: string }>;
+  if (!subRow) throw new Error("Substituto não encontrado.");
+  const rates = await listFacilitiesHourRates();
+  const rate = pickHourRate(rates, subRow.funcao);
+  const aplicaDesconto =
+    ausenteId != null && input.aplicaDesconto != null
+      ? Boolean(input.aplicaDesconto)
+      : ausenteId != null && defaultAplicaDesconto(input.motivo);
+  const money = calcFacilitiesMoney({
+    motivo: input.motivo,
+    horas: input.horas,
+    horasExtra,
+    periodo,
+    periodoExtra,
+    aplicaDesconto,
+    hasAusente: ausenteId != null,
+    rate,
+  });
+
+  let atestadoNome: string | null = null;
+  let atestadoMime: string | null = null;
+  let atestadoData: string | null = null;
+  if (input.motivo === "atestado") {
+    if (newAtestado) {
+      atestadoNome = input.atestadoNome?.trim() || null;
+      atestadoMime = input.atestadoMime?.trim() || null;
+      atestadoData = input.atestadoData?.trim() || null;
+    } else {
+      atestadoNome = existing[0].atestado_nome;
+      atestadoMime = existing[0].atestado_mime;
+      atestadoData = existing[0].atestado_data;
+      if (!atestadoData) {
+        throw new Error("Anexe o atestado (PDF ou imagem) para este lançamento.");
+      }
+    }
+  }
+
+  await db`
+    update facilities_substitutions
+    set
+      data = ${input.data}::date,
+      motivo = ${input.motivo},
+      posto_id = ${input.postoId},
+      ausente_id = ${ausenteId},
+      substituto_id = ${input.substitutoId},
+      horas = ${input.horas},
+      periodo = ${periodo},
+      horas_extra = ${horasExtra},
+      periodo_extra = ${periodoExtra},
+      aplica_desconto = ${aplicaDesconto},
+      atestado_nome = ${atestadoNome},
+      atestado_mime = ${atestadoMime},
+      atestado_data = ${atestadoData},
+      tarifa_hora = ${money.tarifaHora},
+      tarifa_extra = ${money.tarifaExtra},
+      tarifa_desconto = ${money.tarifaDesconto},
+      valor_pagamento = ${money.valorPagamento},
+      valor_desconto = ${money.valorDesconto},
+      observacao = ${input.observacao?.trim() || null},
+      paga_almoco = ${pagaAlmoco},
+      valor_almoco = ${valorAlmoco},
+      updated_at = now()
+    where id = ${input.id}
+  `;
+
+  const loaded = (await db`
+    select
+      s.*,
+      p.nome as posto_nome,
+      a.nome as ausente_nome,
+      a.empresa as ausente_empresa,
+      sub.nome as substituto_nome,
+      sub.empresa as substituto_empresa,
+      sub.escala as substituto_escala,
+      sub.posto_base_id as substituto_posto_base_id,
+      coalesce(nullif(trim(u.name), ''), u.username) as created_by_name
+    from facilities_substitutions s
+    join facilities_posts p on p.id = s.posto_id
+    left join facilities_collaborators a on a.id = s.ausente_id
+    join facilities_collaborators sub on sub.id = s.substituto_id
+    left join users u on u.id = s.created_by
+    where s.id = ${input.id}
+    limit 1
+  `) as Array<Record<string, unknown>>;
+  return mapSubstitution(loaded[0]!);
+}
+
 function mapVacation(row: Record<string, unknown>): FacilitiesVacation {
   const colaboradorId = toNumber(row["colaborador_id"]);
   const coberturaId = toNumber(row["cobertura_id"]);

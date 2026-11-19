@@ -14,6 +14,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { APP_NAME } from "@/lib/brand";
 import {
   createFacilitiesCollaboratorFn,
@@ -33,6 +40,7 @@ import {
   updateFacilitiesCollaboratorFn,
   updateFacilitiesPostFn,
   updateFacilitiesSubstitutionAlmocoFn,
+  updateFacilitiesSubstitutionFn,
 } from "@/lib/facilities";
 import {
   combineHoursAndMinutes,
@@ -67,6 +75,7 @@ import {
 import { downloadFacilitiesFechamentoExcel } from "@/lib/facilities-excel";
 import { downloadFacilitiesFechamentoPdf } from "@/lib/facilities-fechamento-pdf";
 import { requireModule } from "@/lib/require-auth";
+import { notifyError, notifyOk } from "@/lib/notify";
 import { matchesQuery } from "@/lib/text-search";
 import { cn } from "@/lib/utils";
 
@@ -545,8 +554,6 @@ function FacilitiesPage() {
   const navigate = Route.useNavigate();
   const router = useRouter();
 
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [importReport, setImportReport] = useState<{
     title: string;
     created: number;
@@ -556,6 +563,8 @@ function FacilitiesPage() {
   const [pending, setPending] = useState(false);
 
   const [lancarMode, setLancarMode] = useState<"substituicao" | "extra">("substituicao");
+  const [editingSubstitutionId, setEditingSubstitutionId] = useState<number | null>(null);
+  const [editingKeepAtestado, setEditingKeepAtestado] = useState(false);
   const [subForm, setSubForm] = useState({
     data: todayIso(),
     motivo: "falta" as FacilitiesMotivoId,
@@ -932,9 +941,9 @@ function FacilitiesPage() {
   };
 
   const flash = (ok: string | null, err: string | null = null) => {
-    setMessage(ok);
-    setError(err);
     if (ok || err) setImportReport(null);
+    if (err) notifyError(err);
+    else if (ok) notifyOk(ok);
   };
 
   const buildFechamentoExport = () => ({
@@ -1090,7 +1099,11 @@ function FacilitiesPage() {
       return;
     }
     const motivo: FacilitiesMotivoId = isExtra ? "extra" : subForm.motivo;
-    if (motivo === "atestado" && !subForm.atestadoData) {
+    if (
+      motivo === "atestado" &&
+      !subForm.atestadoData &&
+      !(editingSubstitutionId != null && editingKeepAtestado)
+    ) {
       flash(null, "Anexe o atestado (PDF ou imagem).");
       return;
     }
@@ -1101,29 +1114,38 @@ function FacilitiesPage() {
       flash(null, "Informe o valor do almoço.");
       return;
     }
+    const payload = {
+      data: subForm.data,
+      motivo,
+      postoId: Number(subForm.postoId),
+      ausenteId: isExtra ? null : Number(subForm.ausenteId),
+      substitutoId: Number(subForm.substitutoId),
+      horas,
+      periodo: subForm.periodo,
+      horasExtra,
+      periodoExtra: horasExtra > 0 ? subForm.periodoExtra : null,
+      aplicaDesconto: isExtra ? false : subForm.aplicaDesconto,
+      atestadoNome: motivo === "atestado" ? subForm.atestadoNome : null,
+      atestadoMime: motivo === "atestado" ? subForm.atestadoMime : null,
+      atestadoData: motivo === "atestado" ? subForm.atestadoData : null,
+      observacao: subForm.observacao.trim() || null,
+      pagaAlmoco: subForm.pagaAlmoco,
+      valorAlmoco,
+    };
     setPending(true);
     flash(null);
     try {
-      const result = await createFacilitiesSubstitutionFn({
-        data: {
-          data: subForm.data,
-          motivo,
-          postoId: Number(subForm.postoId),
-          ausenteId: isExtra ? null : Number(subForm.ausenteId),
-          substitutoId: Number(subForm.substitutoId),
-          horas,
-          periodo: subForm.periodo,
-          horasExtra,
-          periodoExtra: horasExtra > 0 ? subForm.periodoExtra : null,
-          aplicaDesconto: isExtra ? false : subForm.aplicaDesconto,
-          atestadoNome: motivo === "atestado" ? subForm.atestadoNome : null,
-          atestadoMime: motivo === "atestado" ? subForm.atestadoMime : null,
-          atestadoData: motivo === "atestado" ? subForm.atestadoData : null,
-          observacao: subForm.observacao.trim() || null,
-          pagaAlmoco: subForm.pagaAlmoco,
-          valorAlmoco,
-        },
-      });
+      const result =
+        editingSubstitutionId != null
+          ? await updateFacilitiesSubstitutionFn({
+              data: {
+                id: editingSubstitutionId,
+                ...payload,
+                keepExistingAtestado:
+                  motivo === "atestado" && !subForm.atestadoData && editingKeepAtestado,
+              },
+            })
+          : await createFacilitiesSubstitutionFn({ data: payload });
       if (!result.ok) {
         flash(null, result.error);
         return;
@@ -1140,32 +1162,19 @@ function FacilitiesPage() {
         result.substitution.pagaAlmoco && result.substitution.valorAlmoco > 0
           ? ` · almoço ${formatMoneyBr(result.substitution.valorAlmoco)}`
           : "";
+      const wasEdit = editingSubstitutionId != null;
       flash(
-        isFacilitiesExtraMotivo(result.substitution.motivo)
-          ? `Extra lançado: ${result.substitution.substitutoNome} no posto ${result.substitution.postoNome} (${formatHours(result.substitution.horas)}${payTxt}${almocoTxt}).`
-          : result.substitution.pagaHoras
-            ? `Troca lançada: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${formatHours(result.substitution.horas)}${payTxt}${descTxt}${almocoTxt}).`
-            : isFacilitiesPermutaMotivo(result.substitution.motivo)
-              ? `Solicitação de troca registrada: ${result.substitution.substitutoNome} ↔ ${result.substitution.ausenteNome} (sem horas a pagar${almocoTxt}).`
-              : `Lançamento registrado: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${result.substitution.motivoLabel}, sem horas a pagar${almocoTxt}).`,
+        wasEdit
+          ? `Lançamento atualizado: ${result.substitution.substitutoNome} · ${result.substitution.postoNome} (${formatHours(result.substitution.horas)}${payTxt}${descTxt}${almocoTxt}).`
+          : isFacilitiesExtraMotivo(result.substitution.motivo)
+            ? `Extra lançado: ${result.substitution.substitutoNome} no posto ${result.substitution.postoNome} (${formatHours(result.substitution.horas)}${payTxt}${almocoTxt}).`
+            : result.substitution.pagaHoras
+              ? `Troca lançada: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${formatHours(result.substitution.horas)}${payTxt}${descTxt}${almocoTxt}).`
+              : isFacilitiesPermutaMotivo(result.substitution.motivo)
+                ? `Solicitação de troca registrada: ${result.substitution.substitutoNome} ↔ ${result.substitution.ausenteNome} (sem horas a pagar${almocoTxt}).`
+                : `Lançamento registrado: ${result.substitution.substitutoNome} cobriu ${result.substitution.ausenteNome} (${result.substitution.motivoLabel}, sem horas a pagar${almocoTxt}).`,
       );
-      setSubForm((prev) => ({
-        ...prev,
-        ausenteId: "",
-        substitutoId: "",
-        observacao: "",
-        horasHoras: "12",
-        horasMinutos: "0",
-        temHoraExtra: false,
-        horasExtraHoras: "0",
-        horasExtraMinutos: "0",
-        aplicaDesconto: defaultAplicaDesconto(prev.motivo === "extra" ? "falta" : prev.motivo),
-        atestadoNome: null,
-        atestadoMime: null,
-        atestadoData: null,
-        pagaAlmoco: false,
-        valorAlmoco: "",
-      }));
+      resetSubFormAfterSave();
       await router.invalidate();
       navigate({ search: (prev) => ({ ...prev, tab: "painel" }) });
     } finally {
@@ -1223,12 +1232,75 @@ function FacilitiesPage() {
 
   const clearSubFormAtestado = () => {
     if (atestadoInputRef.current) atestadoInputRef.current.value = "";
+    setEditingKeepAtestado(false);
     setSubForm((p) => ({
       ...p,
       atestadoNome: null,
       atestadoMime: null,
       atestadoData: null,
     }));
+  };
+
+  const resetSubFormAfterSave = () => {
+    setEditingSubstitutionId(null);
+    setEditingKeepAtestado(false);
+    if (atestadoInputRef.current) atestadoInputRef.current.value = "";
+    setSubForm((prev) => ({
+      ...prev,
+      ausenteId: "",
+      substitutoId: "",
+      observacao: "",
+      horasHoras: "12",
+      horasMinutos: "0",
+      temHoraExtra: false,
+      horasExtraHoras: "0",
+      horasExtraMinutos: "0",
+      aplicaDesconto: defaultAplicaDesconto(prev.motivo === "extra" ? "falta" : prev.motivo),
+      atestadoNome: null,
+      atestadoMime: null,
+      atestadoData: null,
+      pagaAlmoco: false,
+      valorAlmoco: "",
+    }));
+  };
+
+  const openEditSubstitution = (row: (typeof data.substitutions)[number]) => {
+    const isExtra = isFacilitiesExtraMotivo(row.motivo);
+    const horasParts = splitDecimalHours(row.horas);
+    const heParts = splitDecimalHours(row.horasExtra);
+    setLancarMode(isExtra ? "extra" : "substituicao");
+    setEditingSubstitutionId(row.id);
+    setEditingKeepAtestado(Boolean(row.hasAtestado));
+    if (atestadoInputRef.current) atestadoInputRef.current.value = "";
+    setSubForm({
+      data: row.data,
+      motivo: isExtra ? "extra" : row.motivo,
+      postoId: String(row.postoId),
+      ausenteId: row.ausenteId != null ? String(row.ausenteId) : "",
+      substitutoId: String(row.substitutoId),
+      horasHoras: String(horasParts.hours),
+      horasMinutos: String(horasParts.minutes),
+      periodo: row.periodo,
+      temHoraExtra: row.horasExtra > 0,
+      horasExtraHoras: String(heParts.hours),
+      horasExtraMinutos: String(heParts.minutes),
+      periodoExtra: row.periodoExtra ?? "diurno",
+      aplicaDesconto: row.aplicaDesconto,
+      atestadoNome: row.hasAtestado ? row.atestadoNome : null,
+      atestadoMime: row.hasAtestado ? row.atestadoMime : null,
+      atestadoData: null,
+      observacao: row.observacao ?? "",
+      pagaAlmoco: Boolean(row.pagaAlmoco),
+      valorAlmoco:
+        row.pagaAlmoco && Number(row.valorAlmoco) > 0 ? String(Number(row.valorAlmoco)) : "",
+    });
+    setTab("lancar");
+    flash(`Editando lançamento de ${formatDateBr(row.data)} · ${row.postoNome}.`);
+  };
+
+  const cancelEditSubstitution = () => {
+    resetSubFormAfterSave();
+    flash("Edição cancelada.");
   };
 
   const submitVacation = async (event: FormEvent) => {
@@ -1402,6 +1474,73 @@ function FacilitiesPage() {
     });
   };
 
+  const substitutionActionsMenu = (row: (typeof data.substitutions)[number]) => (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-outline-variant bg-surface text-on-surface hover:bg-surface-container-high disabled:opacity-50"
+          aria-label={`Ações do lançamento ${row.postoNome} · ${formatDateBr(row.data)}`}
+          disabled={pending}
+        >
+          <Icon name="more_vert" className="text-[18px]" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[12rem]">
+        <DropdownMenuItem
+          disabled={pending}
+          onSelect={() => openEditSubstitution(row)}
+        >
+          <Icon name="edit" className="text-[16px]" />
+          Editar
+        </DropdownMenuItem>
+        {row.hasAtestado ? (
+          <>
+            <DropdownMenuItem
+              disabled={pending}
+              onSelect={() => void downloadAtestado(row.id)}
+            >
+              <Icon name="attach_file" className="text-[16px]" />
+              Baixar atestado
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={pending}
+              className="text-destructive focus:text-destructive"
+              onSelect={() => void removeAtestado(row.id)}
+            >
+              <Icon name="delete" className="text-[16px]" />
+              Apagar anexo
+            </DropdownMenuItem>
+          </>
+        ) : null}
+        {hasObservacao(row.observacao) ? (
+          <DropdownMenuItem onSelect={() => setObsDialog(row)}>
+            <Icon name="notes" className="text-[16px]" />
+            Ver observação
+          </DropdownMenuItem>
+        ) : null}
+        {canEditAlmocoMonth ? (
+          <DropdownMenuItem
+            disabled={pending}
+            onSelect={() => openAlmocoDialog(row)}
+          >
+            <Icon name="restaurant" className="text-[16px]" />
+            Almoço
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          disabled={pending}
+          className="text-destructive focus:text-destructive"
+          onSelect={() => void removeSubstitution(row.id)}
+        >
+          <Icon name="delete" className="text-[16px]" />
+          Excluir
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   const saveAlmocoEdit = async (e: FormEvent) => {
     e.preventDefault();
     if (!almocoDialog) return;
@@ -1459,22 +1598,17 @@ function FacilitiesPage() {
       errors: input.errors,
     });
     if (input.created > 0 || input.skipped > 0) {
-      setMessage(`${input.title}: ${summary}`);
-      setError(null);
+      notifyOk(`${input.title}: ${summary}`);
     } else if (input.errors.length > 0) {
-      setMessage(null);
-      setError(`${input.title}: nenhum cadastrado · ${input.errors.length} com erro.`);
+      notifyError(`${input.title}: nenhum cadastrado · ${input.errors.length} com erro.`);
     } else {
-      setMessage(null);
-      setError(`${input.title}: nenhuma linha válida para importar.`);
+      notifyError(`${input.title}: nenhuma linha válida para importar.`);
     }
   };
 
   const importPostsFromFile = async (file: File | null) => {
     if (!file) return;
     setPending(true);
-    setMessage(null);
-    setError(null);
     setImportReport(null);
     try {
       const matrix = await readFacilitiesSpreadsheetMatrix(file);
@@ -1507,8 +1641,6 @@ function FacilitiesPage() {
   const importCollaboratorsFromFile = async (file: File | null) => {
     if (!file) return;
     setPending(true);
-    setMessage(null);
-    setError(null);
     setImportReport(null);
     try {
       const matrix = await readFacilitiesSpreadsheetMatrix(file);
@@ -1596,19 +1728,6 @@ function FacilitiesPage() {
               })}
             </div>
           </div>
-
-          {(message || error) && (
-            <div
-              className={cn(
-                "rounded-xl border px-md py-sm text-body-md",
-                error
-                  ? "border-error/40 bg-error/10 text-error"
-                  : "border-secondary/30 bg-secondary-container/40 text-primary",
-              )}
-            >
-              {error ?? message}
-            </div>
-          )}
 
           {importReport && importReport.errors.length > 0 ? (
             <div className="rounded-xl border border-error/40 bg-error/10 px-md py-sm text-body-md text-error">
@@ -1775,7 +1894,10 @@ function FacilitiesPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setTab("lancar")}
+                    onClick={() => {
+                      resetSubFormAfterSave();
+                      setTab("lancar");
+                    }}
                     className="hidden items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary md:inline-flex"
                   >
                     <Icon name="add" className="text-[18px]" />
@@ -1863,24 +1985,27 @@ function FacilitiesPage() {
                             </p>
                             <p className="mt-xs text-title-md text-primary">{row.postoNome}</p>
                           </div>
-                          <div className="text-right">
-                            {row.pagaHoras ? (
-                              <>
-                                <p className="text-title-md font-semibold text-primary">
-                                  {formatHours(row.horas)}
+                          <div className="flex shrink-0 items-start gap-xs">
+                            <div className="text-right">
+                              {row.pagaHoras ? (
+                                <>
+                                  <p className="text-title-md font-semibold text-primary">
+                                    {formatHours(row.horas)}
+                                  </p>
+                                  <p className="text-label-md text-on-surface-variant">
+                                    {formatMoneyBr(row.valorPagamento ?? 0)}
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="text-label-md font-semibold text-on-surface-variant">
+                                  Sem pgto
                                 </p>
-                                <p className="text-label-md text-on-surface-variant">
-                                  {formatMoneyBr(row.valorPagamento ?? 0)}
-                                </p>
-                              </>
-                            ) : (
-                              <p className="text-label-md font-semibold text-on-surface-variant">
-                                Sem pgto
-                              </p>
-                            )}
-                            {almocoLabel(row) ? (
-                              <p className="text-label-md text-secondary">{almocoLabel(row)}</p>
-                            ) : null}
+                              )}
+                              {almocoLabel(row) ? (
+                                <p className="text-label-md text-secondary">{almocoLabel(row)}</p>
+                              ) : null}
+                            </div>
+                            {substitutionActionsMenu(row)}
                           </div>
                         </div>
                         <div className="mt-sm grid gap-xs text-body-md">
@@ -1916,57 +2041,6 @@ function FacilitiesPage() {
                           {row.foraDoPostoBase ? (
                             <p className="text-label-md text-secondary">Fora do posto base</p>
                           ) : null}
-                        </div>
-                        <div className="mt-sm flex flex-wrap gap-sm">
-                          {row.hasAtestado ? (
-                            <>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-primary"
-                                disabled={pending}
-                                onClick={() => void downloadAtestado(row.id)}
-                              >
-                                <Icon name="attach_file" className="text-[16px]" />
-                                Atestado
-                              </button>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-error"
-                                disabled={pending}
-                                onClick={() => void removeAtestado(row.id)}
-                              >
-                                Apagar anexo
-                              </button>
-                            </>
-                          ) : null}
-                          {hasObservacao(row.observacao) ? (
-                            <button
-                              type="button"
-                              className="inline-flex items-center gap-xs rounded-lg border border-outline-variant px-sm py-xs text-label-md font-semibold text-primary"
-                              onClick={() => setObsDialog(row)}
-                            >
-                              <Icon name="notes" className="text-[16px]" />
-                              Ver observação
-                            </button>
-                          ) : null}
-                          {canEditAlmocoMonth ? (
-                            <button
-                              type="button"
-                              className="text-label-md font-semibold text-primary"
-                              disabled={pending}
-                              onClick={() => openAlmocoDialog(row)}
-                            >
-                              Editar almoço
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="text-label-md font-semibold text-error"
-                            disabled={pending}
-                            onClick={() => void removeSubstitution(row.id)}
-                          >
-                            Excluir
-                          </button>
                         </div>
                       </article>
                     ))
@@ -2048,60 +2122,7 @@ function FacilitiesPage() {
                               {row.createdByName ?? "—"}
                             </td>
                             <td className="px-md py-sm text-right">
-                              <div className="inline-flex flex-wrap items-center justify-end gap-sm">
-                                {row.hasAtestado ? (
-                                  <>
-                                    <button
-                                      type="button"
-                                      className="inline-flex items-center gap-xs text-label-md font-semibold text-primary hover:underline"
-                                      disabled={pending}
-                                      onClick={() => void downloadAtestado(row.id)}
-                                      title="Baixar atestado"
-                                    >
-                                      <Icon name="attach_file" className="text-[16px]" />
-                                      Atestado
-                                    </button>
-                                    <button
-                                      type="button"
-                                      className="text-label-md font-semibold text-error hover:underline"
-                                      disabled={pending}
-                                      onClick={() => void removeAtestado(row.id)}
-                                      title="Apagar atestado"
-                                    >
-                                      Apagar anexo
-                                    </button>
-                                  </>
-                                ) : null}
-                                {hasObservacao(row.observacao) ? (
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center gap-xs text-label-md font-semibold text-primary hover:underline"
-                                    onClick={() => setObsDialog(row)}
-                                    title="Ver observação"
-                                  >
-                                    <Icon name="notes" className="text-[16px]" />
-                                    Obs.
-                                  </button>
-                                ) : null}
-                                {canEditAlmocoMonth ? (
-                                  <button
-                                    type="button"
-                                    className="text-label-md font-semibold text-primary hover:underline"
-                                    disabled={pending}
-                                    onClick={() => openAlmocoDialog(row)}
-                                  >
-                                    Almoço
-                                  </button>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  className="text-label-md text-error hover:underline"
-                                  disabled={pending}
-                                  onClick={() => void removeSubstitution(row.id)}
-                                >
-                                  Excluir
-                                </button>
-                              </div>
+                              {substitutionActionsMenu(row)}
                             </td>
                           </tr>
                         ))
@@ -2140,12 +2161,29 @@ function FacilitiesPage() {
           {search.tab === "lancar" && (
             <section className="mx-auto w-full max-w-[42rem] space-y-md rounded-xl border border-outline-variant bg-surface-container-lowest p-md md:p-lg">
               <div>
-                <h3 className="text-title-lg text-primary">Lançamentos</h3>
+                <h3 className="text-title-lg text-primary">
+                  {editingSubstitutionId ? "Editar lançamento" : "Lançamentos"}
+                </h3>
                 <p className="mt-xs text-body-md text-on-surface-variant">
-                  Substituição cobre um ausente. Extra é colaborador a mais solicitado pelo posto —
-                  quem for setado ganha as horas.
+                  {editingSubstitutionId
+                    ? "Altere os dados e salve. O pagamento e o desconto são recalculados."
+                    : "Substituição cobre um ausente. Extra é colaborador a mais solicitado pelo posto — quem for setado ganha as horas."}
                 </p>
               </div>
+              {editingSubstitutionId ? (
+                <div className="flex flex-wrap items-center justify-between gap-sm rounded-lg border border-outline-variant bg-surface px-md py-sm">
+                  <p className="text-body-md text-on-surface">
+                    Editando lançamento <strong>#{editingSubstitutionId}</strong>
+                  </p>
+                  <button
+                    type="button"
+                    className="text-label-md font-semibold text-primary hover:underline"
+                    onClick={cancelEditSubstitution}
+                  >
+                    Cancelar edição
+                  </button>
+                </div>
+              ) : null}
 
               <div className="flex flex-wrap gap-xs">
                 {(
@@ -2454,7 +2492,10 @@ function FacilitiesPage() {
                         ref={atestadoInputRef}
                         type="file"
                         accept="application/pdf,image/jpeg,image/png,image/webp"
-                        required={!subForm.atestadoData}
+                        required={
+                          !subForm.atestadoData &&
+                          !(editingSubstitutionId != null && editingKeepAtestado)
+                        }
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (!file) {
@@ -2482,10 +2523,13 @@ function FacilitiesPage() {
                         }}
                         className="w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
                       />
-                      {subForm.atestadoNome ? (
+                      {subForm.atestadoNome ||
+                      (editingSubstitutionId != null && editingKeepAtestado) ? (
                         <div className="flex flex-wrap items-center gap-sm">
                           <span className="text-label-md text-on-surface-variant">
-                            Anexo: {subForm.atestadoNome}
+                            Anexo:{" "}
+                            {subForm.atestadoNome ||
+                              (editingKeepAtestado ? "atestado já salvo (mantido)" : "—")}
                           </span>
                           <button
                             type="button"
@@ -2557,11 +2601,13 @@ function FacilitiesPage() {
                     <Icon name="check" className="text-[18px]" />
                     {pending
                       ? "Salvando..."
-                      : isExtraMode
-                        ? "Registrar extra"
-                        : isPermuta
-                          ? "Registrar permuta"
-                          : "Registrar troca"}
+                      : editingSubstitutionId
+                        ? "Salvar alterações"
+                        : isExtraMode
+                          ? "Registrar extra"
+                          : isPermuta
+                            ? "Registrar permuta"
+                            : "Registrar troca"}
                   </button>
                 </form>
               )}
@@ -2752,14 +2798,28 @@ function FacilitiesPage() {
                               {row.coberturaPropria ? " (própria)" : ""} · {row.postoNome}
                             </p>
                           </div>
-                          <button
-                            type="button"
-                            disabled={pending}
-                            className="text-label-md text-red-700 disabled:opacity-50"
-                            onClick={() => void deleteVacation(row.id)}
-                          >
-                            Excluir
-                          </button>
+                          <DropdownMenu modal={false}>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                disabled={pending}
+                                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-outline-variant bg-surface text-on-surface hover:bg-surface-container-high disabled:opacity-50"
+                                aria-label={`Ações das férias de ${row.colaboradorNome}`}
+                              >
+                                <Icon name="more_vert" className="text-[18px]" />
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="min-w-[10rem]">
+                              <DropdownMenuItem
+                                disabled={pending}
+                                className="text-destructive focus:text-destructive"
+                                onSelect={() => void deleteVacation(row.id)}
+                              >
+                                <Icon name="delete" className="text-[16px]" />
+                                Excluir
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </article>
                     ))
@@ -2805,15 +2865,29 @@ function FacilitiesPage() {
                             <td className="px-md py-sm">{row.postoNome}</td>
                             <td className="px-md py-sm">{row.dias}</td>
                             <td className="px-md py-sm font-semibold">{formatHours(row.horas)}</td>
-                            <td className="px-md py-sm">
-                              <button
-                                type="button"
-                                disabled={pending}
-                                className="text-label-md text-red-700 disabled:opacity-50"
-                                onClick={() => void deleteVacation(row.id)}
-                              >
-                                Excluir
-                              </button>
+                            <td className="px-md py-sm text-right">
+                              <DropdownMenu modal={false}>
+                                <DropdownMenuTrigger asChild>
+                                  <button
+                                    type="button"
+                                    disabled={pending}
+                                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-outline-variant bg-surface text-on-surface hover:bg-surface-container-high disabled:opacity-50"
+                                    aria-label={`Ações das férias de ${row.colaboradorNome}`}
+                                  >
+                                    <Icon name="more_vert" className="text-[18px]" />
+                                  </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="min-w-[10rem]">
+                                  <DropdownMenuItem
+                                    disabled={pending}
+                                    className="text-destructive focus:text-destructive"
+                                    onSelect={() => void deleteVacation(row.id)}
+                                  >
+                                    <Icon name="delete" className="text-[16px]" />
+                                    Excluir
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </td>
                           </tr>
                         ))
@@ -4404,7 +4478,10 @@ function FacilitiesPage() {
         {search.tab === "painel" ? (
           <button
             type="button"
-            onClick={() => setTab("lancar")}
+            onClick={() => {
+              resetSubFormAfterSave();
+              setTab("lancar");
+            }}
             className="fixed bottom-[calc(6.5rem+env(safe-area-inset-bottom,0px))] right-margin-mobile z-40 inline-flex items-center gap-xs rounded-full bg-secondary-container px-md py-sm text-label-md font-semibold text-primary shadow-lg md:hidden"
           >
             <Icon name="add" className="text-[20px]" />

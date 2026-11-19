@@ -148,6 +148,7 @@ export function OpportunityDrawer({
   const idx = ETAPAS.findIndex((e) => e.id === o.etapa);
   const a = alerta(o);
   const ro = o.etapa === "final";
+  const isLt = Boolean(o.ltNumero || o.osOrigemId);
   const rec = isRecorrente(o);
   const tv = TIPOS_VENDA[tipoVenda(o)];
   const stepCls = (i: number) =>
@@ -174,8 +175,33 @@ export function OpportunityDrawer({
     </button>
   );
 
+  const gerarOrcBtn = (
+    <button
+      type="button"
+      className="btn lt-cta"
+      disabled={ro || !o.itens.length}
+      onClick={() => onAcao("gerar_orcamento")}
+      title={
+        !o.itens.length
+          ? "Sem itens do levantamento"
+          : "Cria o orçamento local com os produtos do L.T."
+      }
+    >
+      Gerar orçamento
+      {o.ltNumero ? ` · ${o.ltNumero}` : ""}
+      {o.itens.length ? ` (${o.itens.length} itens)` : ""}
+    </button>
+  );
+
   const acaoPrincipal: Partial<Record<EtapaId, ReactNode>> = {
-    montar: btn("montado", "pri", "Marcar orçamento como montado"),
+    montar: isLt ? (
+      <>
+        {gerarOrcBtn}
+        {btn("montado", "", "Marcar orçamento como montado")}
+      </>
+    ) : (
+      btn("montado", "pri", "Marcar orçamento como montado")
+    ),
     montado: btn("enviado", "pri", "Registrar envio ao cliente (1ª ação)"),
     enviado: btn("acao2", "pri", "Agendar 2ª ação"),
     acao2: btn("acao3", "pri", "Agendar 3ª ação"),
@@ -371,7 +397,7 @@ export function OpportunityDrawer({
   const painel = (
     <div className="crm-root crm-portal" aria-modal="true" role="dialog">
       <div className={`shade ${on ? "on" : ""}`.trim()} onClick={onFechar} />
-      <aside className={`drawer ${on ? "on" : ""}`.trim()}>
+      <aside className={`drawer ${on ? "on" : ""} ${isLt ? "lt" : ""}`.trim()}>
         {/* 1) cabeçalho */}
         <div className="dh">
           <div className="r">
@@ -386,20 +412,12 @@ export function OpportunityDrawer({
                 {o.codigoClienteOmie ? ` · Omie #${o.codigoClienteOmie}` : ""}
               </div>
               <h2>{o.cliente}</h2>
-              {o.ltNumero ? (
-                <div className="meta" style={{ marginTop: 4 }}>
-                  <span
-                    style={{
-                      display: "inline-block",
-                      background: "#FEF3C7",
-                      border: "1px solid #F59E0B",
-                      borderRadius: 6,
-                      padding: "2px 8px",
-                      fontWeight: 600,
-                      fontSize: 12,
-                    }}
-                  >
-                    {o.ltNumero}
+              {isLt ? (
+                <div className="lt-chip-row">
+                  <span className="lt-chip">{o.ltNumero || "L.T."}</span>
+                  <span className="lt-chip-sub">
+                    Levantamento técnico
+                    {o.itens.length ? ` · ${o.itens.length} itens` : ""}
                   </span>
                 </div>
               ) : null}
@@ -430,9 +448,25 @@ export function OpportunityDrawer({
           </div>
         </div>
 
-        {/* 2) situação */}
-        {o.res || boxAcao || boxAprov ? (
-          <div className="dst">
+        {/* 2) situação + CTA L.T. */}
+        {isLt || o.res || boxAcao || boxAprov ? (
+          <div className={`dst ${isLt ? "lt-dst" : ""}`.trim()}>
+            {isLt ? (
+              <div className="lt-banner">
+                <div className="lt-banner-copy">
+                  <strong>
+                    {o.ltNumero ? `${o.ltNumero} — ` : ""}
+                    Itens do técnico prontos
+                  </strong>
+                  <span>
+                    {o.itens.length
+                      ? `${o.itens.length} produto(s) para montar o orçamento comercial.`
+                      : "Aguardando itens do levantamento."}
+                  </span>
+                </div>
+                {gerarOrcBtn}
+              </div>
+            ) : null}
             {blocoResultado}
             {boxAcao}
             {boxAprov}
@@ -467,70 +501,150 @@ export function OpportunityDrawer({
                       </option>
                     ))}
                   </Campo>
-                  <div className="f">
-                    <label>Visita técnica</label>
-                    <div className="ro">
-                      {o.tecnico ? `${o.tecnico} · ${fdata(o.visita)}` : "—"}
+                  {!isLt ? (
+                    <div className="f">
+                      <label>Visita técnica</label>
+                      <div className="ro">
+                        {o.tecnico ? `${o.tecnico} · ${fdata(o.visita)}` : "—"}
+                      </div>
                     </div>
-                  </div>
+                  ) : null}
                 </div>
               </div>
 
-              <div className="sec">
-                <h3>Proposta</h3>
-                <div className="tvsel">
-                  {(Object.keys(TIPOS_VENDA) as TipoVenda[]).map((id) => {
-                    const t = TIPOS_VENDA[id];
-                    return (
-                      <button
-                        key={id}
-                        className={`${t.cls} ${tipoVenda(o) === id ? "on" : ""}`.trim()}
-                        disabled={ro}
-                        onClick={() => {
-                          if (o.tv !== id) onPatch({ tv: id });
-                        }}
-                      >
-                        {t.ic} {t.nome}
-                      </button>
-                    );
-                  })}
+              {isLt ? (
+                <div className="sec">
+                  <h3>Levantamento técnico</h3>
+                  <div className="grid">
+                    <div className="f">
+                      <label>Identificação</label>
+                      <div className="ro">
+                        {o.ltNumero || "L.T."}
+                        {o.os ? ` · OS ${o.os}` : ""}
+                      </div>
+                    </div>
+                    <div className="f">
+                      <label>Técnico / visita</label>
+                      <div className="ro">
+                        {o.tecnico ? `${o.tecnico} · ${fdata(o.visita)}` : "—"}
+                      </div>
+                    </div>
+                    <div className="f">
+                      <label>Cliente Omie</label>
+                      <div className="ro">
+                        {o.codigoClienteOmie
+                          ? `#${o.codigoClienteOmie}${o.omieAppId ? ` · ${o.omieAppId}` : ""}`
+                          : "Não vinculado — vincule antes de gerar o orçamento"}
+                      </div>
+                    </div>
+                    <div className="f">
+                      <label>Itens levantados</label>
+                      <div className="ro">
+                        {o.itens.length
+                          ? `${o.itens.length} produto(s) · ${o.itens.reduce((s, i) => s + (Number(i.q) || 0), 0)} un.`
+                          : "Nenhum item"}
+                      </div>
+                    </div>
+                  </div>
+                  <table className="it" style={{ marginTop: 10 }}>
+                    <thead>
+                      <tr>
+                        <th>Qtd</th>
+                        <th>Equipamento / material</th>
+                        <th>Cód.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {o.itens.length ? (
+                        o.itens.map((i, k) => (
+                          <tr key={k}>
+                            <td className="q">{i.q}</td>
+                            <td>{i.d}</td>
+                            <td>{i.codigoProduto ?? "—"}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={3} className="empty">
+                            Sem itens
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <div className="note" style={{ marginTop: 10 }}>
+                    Valores, validade e nº do orçamento entram depois de{" "}
+                    <b>Gerar orçamento</b> — nesta etapa o foco é o material do técnico.
+                  </div>
                 </div>
-                <div className="grid">
-                  {rec ? (
-                    <>
+              ) : (
+                <div className="sec">
+                  <h3>Proposta</h3>
+                  <div className="tvsel">
+                    {(Object.keys(TIPOS_VENDA) as TipoVenda[]).map((id) => {
+                      const t = TIPOS_VENDA[id];
+                      return (
+                        <button
+                          key={id}
+                          className={`${t.cls} ${tipoVenda(o) === id ? "on" : ""}`.trim()}
+                          disabled={ro}
+                          onClick={() => {
+                            if (o.tv !== id) onPatch({ tv: id });
+                          }}
+                        >
+                          {t.ic} {t.nome}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="grid">
+                    {rec ? (
+                      <>
+                        <Campo
+                          label="Tipo de contrato"
+                          tipo="select"
+                          valor={modalidadeId}
+                          ro={ro}
+                          onCommit={patchTxt("modalidade")}
+                        >
+                          {listaContratos(regras).map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.nome}
+                            </option>
+                          ))}
+                        </Campo>
+                        <Campo
+                          label="Valor mensal (R$)"
+                          tipo="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0,00"
+                          valor={o.valor}
+                          ro={ro}
+                          onCommit={patchNum("valor")}
+                        />
+                        <Campo
+                          label="Prazo contratual (meses)"
+                          tipo="number"
+                          min="1"
+                          valor={o.prazo}
+                          ro={ro}
+                          onCommit={patchNum("prazo")}
+                        />
+                        <Campo
+                          label="Taxa de implantação (R$)"
+                          tipo="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0,00"
+                          valor={o.total}
+                          ro={ro}
+                          onCommit={patchNum("total")}
+                        />
+                      </>
+                    ) : (
                       <Campo
-                        label="Tipo de contrato"
-                        tipo="select"
-                        valor={modalidadeId}
-                        ro={ro}
-                        onCommit={patchTxt("modalidade")}
-                      >
-                        {listaContratos(regras).map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.nome}
-                          </option>
-                        ))}
-                      </Campo>
-                      <Campo
-                        label="Valor mensal (R$)"
-                        tipo="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="0,00"
-                        valor={o.valor}
-                        ro={ro}
-                        onCommit={patchNum("valor")}
-                      />
-                      <Campo
-                        label="Prazo contratual (meses)"
-                        tipo="number"
-                        min="1"
-                        valor={o.prazo}
-                        ro={ro}
-                        onCommit={patchNum("prazo")}
-                      />
-                      <Campo
-                        label="Taxa de implantação (R$)"
+                        label="Valor total da venda (R$)"
                         tipo="number"
                         step="0.01"
                         min="0"
@@ -539,41 +653,30 @@ export function OpportunityDrawer({
                         ro={ro}
                         onCommit={patchNum("total")}
                       />
-                    </>
-                  ) : (
+                    )}
                     <Campo
-                      label="Valor total da venda (R$)"
-                      tipo="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="0,00"
-                      valor={o.total}
+                      label="Validade da proposta"
+                      tipo="date"
+                      valor={o.validade}
                       ro={ro}
-                      onCommit={patchNum("total")}
+                      onCommit={patchTxt("validade")}
                     />
-                  )}
-                  <Campo
-                    label="Validade da proposta"
-                    tipo="date"
-                    valor={o.validade}
-                    ro={ro}
-                    onCommit={patchTxt("validade")}
-                  />
-                  <Campo
-                    label="Nº do orçamento"
-                    placeholder="ORC-2026-00131"
-                    valor={o.orc || ""}
-                    ro={ro}
-                    onCommit={patchTxt("orc")}
-                  />
-                </div>
-                {o.validade && diasAte(o.validade) < 0 && !ro ? (
-                  <div className="note">
-                    A validade da proposta venceu em {fdata(o.validade)}. Revise valores antes do
-                    próximo contato.
+                    <Campo
+                      label="Nº do orçamento"
+                      placeholder="ORC-2026-00131"
+                      valor={o.orc || ""}
+                      ro={ro}
+                      onCommit={patchTxt("orc")}
+                    />
                   </div>
-                ) : null}
-              </div>
+                  {o.validade && diasAte(o.validade) < 0 && !ro ? (
+                    <div className="note">
+                      A validade da proposta venceu em {fdata(o.validade)}. Revise valores antes do
+                      próximo contato.
+                    </div>
+                  ) : null}
+                </div>
+              )}
 
               <div className="sec">
                 <h3>Equipe da oportunidade</h3>
@@ -672,17 +775,9 @@ export function OpportunityDrawer({
 
               <div className="sec">
                 <h3>Levantamento do técnico ({o.itens.length} itens)</h3>
-                {o.ltNumero || o.os ? (
+                {isLt ? (
                   <div style={{ marginBottom: 8 }}>
-                    <button
-                      className="btn"
-                      type="button"
-                      disabled={ro || !o.itens.length}
-                      onClick={() => onAcao("gerar_orcamento")}
-                    >
-                      Gerar orçamento
-                      {o.ltNumero ? ` · ${o.ltNumero}` : ""}
-                    </button>
+                    {gerarOrcBtn}
                     <div className="note" style={{ marginTop: 6 }}>
                       Abre o orçamento local com os produtos do L.T. (preços pelo comercial). Depois
                       use &quot;Enviar pedido&quot; no módulo Orçamentos para criar a O.S. de

@@ -1,4 +1,4 @@
-﻿import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
@@ -21,6 +21,12 @@ import {
 import { requireModule } from "@/lib/require-auth";
 import { matchesQuery } from "@/lib/text-search";
 import { cn } from "@/lib/utils";
+import { notifyFeedback } from "@/lib/notify";
+
+/** Feedback global via toast (sem banner persistente na página). */
+function setFeedback(fb: { type: "ok" | "error" | "info"; text: string } | null) {
+  notifyFeedback(fb);
+}
 
 export const Route = createFileRoute("/tabela-precos")({
   beforeLoad: () => requireModule("orcamentos"),
@@ -98,7 +104,6 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
   }, [bootstrap.services]);
 
   const [showInactive, setShowInactive] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [nome, setNome] = useState("");
@@ -351,19 +356,6 @@ function TabelaPrecosContent({ bootstrap }: { bootstrap: Bootstrap }) {
             ) : null}
           </div>
         </div>
-
-        {feedback ? (
-          <div
-            className={cn(
-              "rounded-lg border px-md py-sm text-body-md",
-              feedback.type === "ok"
-                ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                : "border-red-300 bg-red-50 text-red-900",
-            )}
-          >
-            {feedback.text}
-          </div>
-        ) : null}
 
         {canManage ? (
           <form

@@ -130,9 +130,11 @@ export const tableHeadClass =
 
 export const tableHeadCellClass = "px-sm py-xs";
 
+/** @deprecated Prefer `notifyOk` / `notifyError` de `@/lib/notify` (toast no canto). */
 export const feedbackOkClass =
   "rounded-lg border border-emerald-300 bg-emerald-50 px-md py-sm text-body-md text-emerald-900";
 
+/** @deprecated Prefer `notifyOk` / `notifyError` de `@/lib/notify` (toast no canto). */
 export const feedbackErrClass =
   "rounded-lg border border-red-300 bg-red-50 px-md py-sm text-body-md text-red-900";
 

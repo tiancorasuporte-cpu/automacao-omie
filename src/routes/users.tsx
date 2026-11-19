@@ -1,5 +1,13 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { Fragment, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 
 import { AppShell, useShellSearch } from "@/components/AppShell";
 import { Icon } from "@/components/Icon";
@@ -8,8 +16,6 @@ import {
   btnMuted,
   btnOutline,
   btnPrimary,
-  feedbackErrClass,
-  feedbackOkClass,
   fieldClass,
   filterControlClass,
   mobileCardClass,
@@ -37,6 +43,7 @@ import {
 } from "@/lib/modules";
 import { isSuperadmin, roleLabel, requireAdmin } from "@/lib/require-auth";
 import { matchesQuery } from "@/lib/text-search";
+import { notifyText } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { Route as RootRoute } from "@/routes/__root";
 
@@ -217,8 +224,8 @@ function UserDetails({
   vehicles: FleetVehicleOption[];
   busyId: number | null;
   setBusyId: Dispatch<SetStateAction<number | null>>;
-  setError: Dispatch<SetStateAction<string | null>>;
-  setMessage: Dispatch<SetStateAction<string | null>>;
+  setError: (text: string | null) => void;
+  setMessage: (text: string | null) => void;
   canResetPassword: boolean;
   passwordUserId: number | null;
   setPasswordUserId: Dispatch<SetStateAction<number | null>>;
@@ -606,8 +613,8 @@ function UsersPage() {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const setError = (text: string | null) => notifyText(text, false);
+  const setMessage = (text: string | null) => notifyText(text, true);
   const [role, setRole] = useState<"admin" | "operator">("operator");
   const [modules, setModules] = useState<AppModuleId[]>(APP_MODULES.map((m) => m.id));
   const [editingModulesId, setEditingModulesId] = useState<number | null>(null);
@@ -619,12 +626,21 @@ function UsersPage() {
   const [createIsComprador, setCreateIsComprador] = useState(false);
   const [createIsVendedor, setCreateIsVendedor] = useState(false);
   const [createVehicleId, setCreateVehicleId] = useState<number | "">("");
+  const createFormRef = useRef<HTMLDivElement | null>(null);
   const users = loaded.ok ? loaded.users : [];
   const vehicles = loaded.ok ? loaded.vehicles : [];
   const activeVehicles = useMemo(
     () => vehicles.filter((v) => v.active),
     [vehicles],
   );
+
+  useEffect(() => {
+    if (!createOpen) return;
+    const id = window.setTimeout(() => {
+      createFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+    return () => window.clearTimeout(id);
+  }, [createOpen]);
   const { query } = useShellSearch();
   const [roleFilter, setRoleFilter] = useState<"all" | "admin" | "operator" | "superadmin">(
     "all",
@@ -696,6 +712,7 @@ function UsersPage() {
           </PageTitle>
 
           {createOpen ? (
+            <div ref={createFormRef} className="scroll-mt-24">
             <PageSection className="space-y-sm">
               <div>
                 <p className="text-title-md text-on-surface">Novo usuário</p>
@@ -857,10 +874,8 @@ function UsersPage() {
                 </div>
               </form>
             </PageSection>
+            </div>
           ) : null}
-
-          {message ? <p className={feedbackOkClass}>{message}</p> : null}
-          {error ? <p className={feedbackErrClass}>{error}</p> : null}
 
           <PageSection>
             <SectionHeader

@@ -1,4 +1,4 @@
-﻿import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 
@@ -20,6 +20,12 @@ import { requireModule } from "@/lib/require-auth";
 import { APP_NAME } from "@/lib/brand";
 import { cn } from "@/lib/utils";
 import type { DueItem, DueItemType } from "@/db/schema";
+import { notifyFeedback } from "@/lib/notify";
+
+/** Feedback global via toast (sem banner persistente na página). */
+function setFeedback(fb: { type: "ok" | "error" | "info"; text: string } | null) {
+  notifyFeedback(fb);
+}
 
 const PAGE_SIZE = 15;
 
@@ -188,7 +194,6 @@ function VencimentosPage() {
   const [editingPhoneId, setEditingPhoneId] = useState<number | null>(null);
   const [phoneDraft, setPhoneDraft] = useState("");
   const [savingPhoneId, setSavingPhoneId] = useState<number | null>(null);
-  const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const busy =
     sendingId !== null ||
@@ -642,19 +647,6 @@ function VencimentosPage() {
                 </label>
               </div>
             </section>
-          ) : null}
-
-          {feedback ? (
-            <p
-              className={cn(
-                "rounded-lg px-md py-sm text-body-md",
-                feedback.type === "ok"
-                  ? "bg-secondary-fixed/30 text-primary"
-                  : "bg-error-container/30 text-error",
-              )}
-            >
-              {feedback.text}
-            </p>
           ) : null}
 
           {selectedIds.size > 0 ? (

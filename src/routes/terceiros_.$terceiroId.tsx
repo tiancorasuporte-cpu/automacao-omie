@@ -1,4 +1,4 @@
-﻿import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { AppShell } from "@/components/AppShell";
@@ -36,6 +36,12 @@ import {
   updateTerceiroServicoFn,
 } from "@/lib/terceiros";
 import { cn } from "@/lib/utils";
+import { notifyFeedback } from "@/lib/notify";
+
+/** Feedback global via toast (sem banner persistente na página). */
+function setFeedback(fb: { type: "ok" | "error" | "info"; text: string } | null) {
+  notifyFeedback(fb);
+}
 
 type OmieClientPick = {
   codigo: number;
@@ -179,7 +185,6 @@ function TerceiroDetailContent({
 }) {
   const router = useRouter();
   const [detail, setDetail] = useState(initial);
-  const [feedback, setFeedback] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [empresaOpen, setEmpresaOpen] = useState(false);
@@ -895,19 +900,6 @@ function TerceiroDetailContent({
           </p>
         </div>
       </section>
-
-      {feedback ? (
-        <div
-          className={cn(
-            "rounded-lg border px-md py-sm text-body-md",
-            feedback.type === "ok"
-              ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-              : "border-red-300 bg-red-50 text-red-900",
-          )}
-        >
-          {feedback.text}
-        </div>
-      ) : null}
 
       {detail.pendingReview || pendingServicos.length > 0 ? (
         <div className="space-y-sm rounded-xl border border-amber-300 bg-amber-50 px-md py-sm text-amber-950">

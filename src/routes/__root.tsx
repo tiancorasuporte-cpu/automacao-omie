@@ -11,6 +11,7 @@ import { useEffect, type ReactNode } from "react";
 
 import type { AppUser } from "@/db/schema";
 import { PwaInstallBanner } from "@/components/PwaInstall";
+import { Toaster } from "@/components/ui/sonner";
 import { getCurrentUser } from "@/lib/auth";
 import { APP_NAME } from "@/lib/brand";
 import appCss from "../styles.css?url";
@@ -152,6 +153,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
+      <Toaster />
       <PwaInstallBanner />
     </QueryClientProvider>
   );

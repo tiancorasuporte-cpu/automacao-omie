@@ -41,11 +41,67 @@ async function assertLtEditable(os: AssistOs) {
   if (!isLevantamentoTecnico(os.tipo)) {
     throw new Error("Somente O.S. de Levantamento Técnico.");
   }
-  if (os.levStatus === "finalizado") {
+  if (os.stage >= 7) {
+    throw new Error("O.S. já confirmada/finalizada — não é possível editar o L.T.");
+  }
+  // Etapa 6 = aguardando confirmação no quadro: ainda pode ajustar itens.
+  if (os.levStatus === "finalizado" && os.stage !== 6) {
     throw new Error("Levantamento finalizado — reabra para editar.");
   }
   if (os.stage < 4) {
     throw new Error("Agende a O.S. antes de montar o levantamento.");
+  }
+}
+
+/** Espelha itens no lev_json e atualiza a OP do CRM (se existir). */
+async function syncLtAfterEdit(osId: number, quem: string) {
+  const os = await getOsById(osId);
+  if (!os) return;
+  const items = await listLtItems(osId);
+  const db = await getDb();
+  await db`
+    update assist_os
+    set lev_json = ${JSON.stringify({
+      obs: null,
+      itens: items.map((i) => ({
+        qtd: i.qtd,
+        nome: i.nome,
+        obs: null,
+        productId: i.productId,
+        codigoProduto: i.codigoProduto,
+      })),
+    })},
+    updated_at = now()
+    where id = ${os.id}
+  `;
+
+  if (os.levStatus !== "finalizado" && os.stage !== 6) return;
+
+  try {
+    const { createOportunidadeFromOs } = await import("@/db/crm");
+    await createOportunidadeFromOs({
+      osNum: os.num,
+      osId: os.id,
+      cliente: os.clientName,
+      cidade: os.clientCity,
+      servico: os.servico || null,
+      tecnico: os.tecnicoNome || os.teamName || quem,
+      dataVisita: (os.levFinalizadoEm || os.coAt || new Date().toISOString()).slice(0, 10),
+      vendedor: os.createdByName || quem,
+      autor: quem,
+      ltNumero: os.ltNumero,
+      omieAppId: os.omieAppId,
+      codigoClienteOmie: os.clientCode,
+      itens: items.map((i) => ({
+        qtd: i.qtd,
+        nome: i.nome,
+        productId: i.productId,
+        codigoProduto: i.codigoProduto,
+      })),
+      replaceItems: true,
+    });
+  } catch {
+    // CRM best-effort
   }
 }
 
@@ -114,6 +170,7 @@ export async function upsertLtItem(input: {
     userId: input.userId,
     acao: `L.T. item: ${qtd}× ${prod.descricao}`,
   });
+  await syncLtAfterEdit(os.id, input.quem);
   return getOsById(os.id);
 }
 
@@ -139,6 +196,7 @@ export async function removeLtItem(input: {
       userId: input.userId,
       acao: `L.T. removeu: ${row.nome}`,
     });
+    await syncLtAfterEdit(os.id, input.quem);
   }
   return getOsById(os.id);
 }
@@ -172,7 +230,9 @@ export async function replaceLtItems(input: {
         ${String(prod.descricao).slice(0, 400)}, ${qtd}, now()
       )
       on conflict (os_id, product_id) do update set
-        qtd = assist_lt_items.qtd + excluded.qtd,
+        qtd = excluded.qtd,
+        nome = excluded.nome,
+        codigo_produto = excluded.codigo_produto,
         updated_at = now()
     `;
   }
@@ -185,8 +245,9 @@ export async function replaceLtItems(input: {
     osId: os.id,
     quem: input.quem,
     userId: input.userId,
-    acao: "L.T. rascunho salvo",
+    acao: os.stage === 6 ? "L.T. ajustado no quadro" : "L.T. rascunho salvo",
   });
+  await syncLtAfterEdit(os.id, input.quem);
   return getOsById(os.id);
 }
 

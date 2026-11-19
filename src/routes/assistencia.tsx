@@ -17,8 +17,6 @@ import {
   btnMuted,
   btnOutline,
   btnPrimary,
-  feedbackErrClass,
-  feedbackOkClass,
   fieldClass,
   PageSection,
   PageTitle,
@@ -35,6 +33,7 @@ import {
   softPrimaryBtnClass,
 } from "@/components/SoftOsDialog";
 import { Dialog } from "@/components/ui/dialog";
+import { notifyText } from "@/lib/notify";
 import {
   acceptConferenceFn,
   addOsItemFn,
@@ -322,8 +321,16 @@ function AssistenciaPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [histOpen, setHistOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [feedbackOk, setFeedbackOk] = useState(false);
+  const feedbackOkRef = useRef(false);
+  const setFeedbackOk = (ok: boolean) => {
+    feedbackOkRef.current = ok;
+  };
+  const setFeedback = (text: string | null) => {
+    if (!text) return;
+    const ok = feedbackOkRef.current;
+    feedbackOkRef.current = false;
+    notifyText(text, ok);
+  };
   const [baixaAlert, setBaixaAlert] = useState<{
     ok: boolean;
     title: string;
@@ -1442,11 +1449,6 @@ function AssistenciaPage() {
     return (
       <>
         <div className="flex flex-col gap-md">
-                {feedback ? (
-                  <div className={feedbackOk ? feedbackOkClass : feedbackErrClass}>
-                    {feedback}
-                  </div>
-                ) : null}
                 {variant === "dialog" ? (
                   <div className="flex flex-wrap items-start justify-between gap-sm">
                     <div className="min-w-0 flex-1">
@@ -1464,12 +1466,12 @@ function AssistenciaPage() {
                               setOsList((prev) =>
                                 prev.map((o) => (o.id === next.id ? next : o)),
                               );
+                              setFeedbackOk(next.distanceKm != null);
                               setFeedback(
                                 next.distanceKm != null
                                   ? `Localização atualizada · ${formatDistanceKm(next.distanceKm)} da base`
                                   : "Endereço salvo, mas não achamos coords no mapa. Confira rua/número/CEP no Omie.",
                               );
-                              setFeedbackOk(next.distanceKm != null);
                             })
                           }
                         >
@@ -2401,8 +2403,8 @@ function AssistenciaPage() {
                       setFeedback(null);
                       return;
                     }
-                    setFeedback(v.text);
                     setFeedbackOk(v.type === "ok");
+                    setFeedback(v.text);
                   }}
                   onOsUpdated={(os) => {
                     const row = os as OsRow;
@@ -2578,15 +2580,18 @@ function AssistenciaPage() {
                 ) : null}
 
                 {selected.tipo === "visita" &&
-                selected.stage === 5 &&
-                selected.levStatus !== "finalizado" ? (
+                (selected.stage === 5 || selected.stage === 6) &&
+                selected.stage < 7 ? (
                   <div className="rounded-lg border border-outline-variant/60 p-sm">
                     <h3 className="text-label-md font-semibold">
                       Levantamento Técnico
                       {selected.ltNumero ? ` · ${selected.ltNumero}` : ""}
+                      {selected.stage === 6 ? " · editável" : ""}
                     </h3>
                     <p className="mt-2xs text-label-sm text-on-surface-variant">
-                      Selecione produtos do catálogo Omie (sem preço no L.T.).
+                      {selected.stage === 6
+                        ? "Ajuste produtos/quantidades antes de confirmar a O.S. no quadro. Alterações atualizam o CRM."
+                        : "Selecione produtos do catálogo Omie (sem preço no L.T.)."}
                     </p>
                     <ul className="mt-xs space-y-2xs text-body-md">
                       {levItens.map((it, idx) => (
@@ -2725,28 +2730,34 @@ function AssistenciaPage() {
                         }
                         className="rounded-lg border border-outline-variant px-md py-sm text-label-md"
                       >
-                        Salvar rascunho
+                        {selected.stage === 6 ? "Salvar alterações" : "Salvar rascunho"}
                       </button>
-                      {selected.ciAt ? (
-                        <button
-                          type="button"
-                          disabled={busy || !levItens.some((i) => i.productId)}
-                          onClick={() =>
-                            run(async () => {
-                              const updated = await finalizeOsLtFn({
-                                data: { osId: selected.id },
-                              });
-                              if (updated) applyOsDetailState(updated);
-                              return updated;
-                            })
-                          }
-                          className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
-                        >
-                          Finalizar L.T.
-                        </button>
+                      {selected.levStatus !== "finalizado" ? (
+                        selected.ciAt ? (
+                          <button
+                            type="button"
+                            disabled={busy || !levItens.some((i) => i.productId)}
+                            onClick={() =>
+                              run(async () => {
+                                const updated = await finalizeOsLtFn({
+                                  data: { osId: selected.id },
+                                });
+                                if (updated) applyOsDetailState(updated);
+                                return updated;
+                              })
+                            }
+                            className="rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-on-secondary-container"
+                          >
+                            Finalizar L.T.
+                          </button>
+                        ) : (
+                          <p className="text-label-sm text-on-surface-variant">
+                            Check-in necessário para finalizar.
+                          </p>
+                        )
                       ) : (
                         <p className="text-label-sm text-on-surface-variant">
-                          Check-in necessário para finalizar.
+                          L.T. no quadro — confirme a O.S. quando os itens estiverem corretos.
                         </p>
                       )}
                       {selected.coAt && selected.lev && !selected.ltItems?.length ? (
@@ -2766,11 +2777,11 @@ function AssistenciaPage() {
                 ) : null}
 
                 {selected.tipo === "visita" &&
-                (selected.levStatus === "finalizado" || selected.stage >= 6) &&
+                selected.stage >= 7 &&
                 (selected.ltItems?.length || selected.ltNumero) ? (
                   <div className="rounded-lg border border-outline-variant/60 p-sm">
                     <h3 className="text-label-md font-semibold">
-                      L.T. finalizado
+                      L.T. confirmado
                       {selected.ltNumero ? ` · ${selected.ltNumero}` : ""}
                     </h3>
                     <ul className="mt-xs space-y-2xs text-body-md">
@@ -3660,10 +3671,6 @@ function AssistenciaPage() {
               ) : null}
             </div>
           </PageSection>
-        ) : null}
-
-        {feedback && !selectedId ? (
-          <div className={feedbackOk ? feedbackOkClass : feedbackErrClass}>{feedback}</div>
         ) : null}
 
         {dispositionPendingOs.length > 0 ? (
@@ -4617,8 +4624,8 @@ function AssistenciaPage() {
                 setFeedback(null);
                 return;
               }
-              setFeedback(v.text);
               setFeedbackOk(v.type === "ok");
+              setFeedback(v.text);
             }}
             onRefresh={(next) => {
               setProblemTypes(next.problemTypes);

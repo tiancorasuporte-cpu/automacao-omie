@@ -315,21 +315,44 @@ export async function createOportunidadeFromOs(input: {
     productId?: number | null;
     codigoProduto?: number | null;
   }>;
+  /** Substitui itens da OP existente (ajuste do L.T. no quadro). */
+  replaceItems?: boolean;
 }) {
   const db = await getDb();
   const existing = (await db`
     select id from crm_oportunidade where os_origem = ${input.osNum} limit 1
   `) as Array<{ id: number }>;
   if (existing[0]) {
-    // Atualiza L.T. / itens se reprocessar
+    const opId = existing[0].id;
     if (input.ltNumero) {
       await db`
         update crm_oportunidade
         set lt_numero = ${input.ltNumero}, updated_at = now()
-        where id = ${existing[0].id}
+        where id = ${opId}
       `;
     }
-    return getOportunidade(existing[0].id);
+    if (input.replaceItems) {
+      await db`delete from crm_item where oportunidade_id = ${opId}`;
+      for (const it of input.itens) {
+        await db`
+          insert into crm_item (oportunidade_id, qtd, descricao, product_id, codigo_produto)
+          values (
+            ${opId},
+            ${it.qtd},
+            ${it.nome.trim()},
+            ${it.productId ?? null},
+            ${it.codigoProduto ?? null}
+          )
+        `;
+      }
+      await addEvent(
+        opId,
+        input.autor,
+        "sis",
+        `Itens do levantamento atualizados a partir da OS ${input.osNum}.`,
+      );
+    }
+    return getOportunidade(opId);
   }
 
   const cod = await nextCod();
