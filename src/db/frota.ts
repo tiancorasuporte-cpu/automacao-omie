@@ -1103,8 +1103,13 @@ export async function listVehicleHistory(vehicleId: number, limit = 200): Promis
   }));
 }
 
-export async function getFleetReportTotals(vehicleId: number, fromIso: string, toIso: string) {
+export async function getFleetReportTotals(
+  vehicleId: number | null,
+  fromIso: string,
+  toIso: string,
+) {
   const db = await getDb();
+  const vid = vehicleId;
   const [refuel] = (await db`
     select coalesce(sum(total_amount),0)::float as total, count(*)::int as qty,
            coalesce(sum(liters),0)::float as liters,
@@ -1113,7 +1118,8 @@ export async function getFleetReportTotals(vehicleId: number, fromIso: string, t
            coalesce(max(price_per_liter),0)::float as max_price,
            coalesce(sum(case when full_tank then 1 else 0 end),0)::int as full_tank_qty
     from fleet_refuelings
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
   `) as Array<{
     total: number;
     qty: number;
@@ -1126,45 +1132,54 @@ export async function getFleetReportTotals(vehicleId: number, fromIso: string, t
   const [expense] = (await db`
     select coalesce(sum(amount),0)::float as total, count(*)::int as qty
     from fleet_expenses
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
   `) as Array<{ total: number; qty: number }>;
   const [service] = (await db`
     select coalesce(sum(amount),0)::float as total, count(*)::int as qty
     from fleet_services
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
   `) as Array<{ total: number; qty: number }>;
   const [income] = (await db`
     select coalesce(sum(amount),0)::float as total, count(*)::int as qty
     from fleet_incomes
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
   `) as Array<{ total: number; qty: number }>;
   const [route] = (await db`
     select coalesce(sum(distance_km),0)::float as km, coalesce(sum(freight_amount),0)::float as freight,
            count(*)::int as qty
     from fleet_routes
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
   `) as Array<{ km: number; freight: number; qty: number }>;
   const [reading] = (await db`
     select count(*)::int as qty from fleet_readings
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
   `) as Array<{ qty: number }>;
   const [checklist] = (await db`
     select count(*)::int as qty from fleet_checklists
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
   `) as Array<{ qty: number }>;
   const [reminder] = (await db`
     select count(*)::int as qty from fleet_reminders
-    where vehicle_id = ${vehicleId} and active = true
+    where (${vid}::int is null or vehicle_id = ${vid}) and active = true
   `) as Array<{ qty: number }>;
 
   const refuelRows = (await db`
-    select occurred_at::text as occurred_at, odometer::float as odometer,
-           liters::float as liters, total_amount::float as total_amount,
-           price_per_liter::float as price_per_liter, full_tank
+    select vehicle_id::int as vehicle_id, occurred_at::text as occurred_at,
+           odometer::float as odometer, liters::float as liters,
+           total_amount::float as total_amount, price_per_liter::float as price_per_liter,
+           full_tank
     from fleet_refuelings
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
-    order by occurred_at asc, odometer asc, id asc
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    order by vehicle_id asc, occurred_at asc, odometer asc, id asc
   `) as Array<{
+    vehicle_id: number;
     occurred_at: string;
     odometer: number;
     liters: number;
@@ -1179,6 +1194,7 @@ export async function getFleetReportTotals(vehicleId: number, fromIso: string, t
   for (let i = 1; i < refuelRows.length; i++) {
     const prev = refuelRows[i - 1]!;
     const cur = refuelRows[i]!;
+    if (prev.vehicle_id !== cur.vehicle_id) continue;
     const km = num(cur.odometer) - num(prev.odometer);
     if (km > 0) gapsKm.push(km);
     const dayMs = new Date(cur.occurred_at).getTime() - new Date(prev.occurred_at).getTime();
@@ -1197,25 +1213,29 @@ export async function getFleetReportTotals(vehicleId: number, fromIso: string, t
   const monthlyRaw = (await db`
     select to_char(occurred_at, 'YYYY-MM') as month, coalesce(sum(total_amount),0)::float as total
     from fleet_refuelings
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
     group by 1 order by 1
   `) as Array<{ month: string; total: number }>;
   const monthlyExpense = (await db`
     select to_char(occurred_at, 'YYYY-MM') as month, coalesce(sum(amount),0)::float as total
     from fleet_expenses
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
     group by 1 order by 1
   `) as Array<{ month: string; total: number }>;
   const monthlyIncome = (await db`
     select to_char(occurred_at, 'YYYY-MM') as month, coalesce(sum(amount),0)::float as total
     from fleet_incomes
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
     group by 1 order by 1
   `) as Array<{ month: string; total: number }>;
   const monthlyService = (await db`
     select to_char(occurred_at, 'YYYY-MM') as month, coalesce(sum(amount),0)::float as total
     from fleet_services
-    where vehicle_id = ${vehicleId} and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
+    where (${vid}::int is null or vehicle_id = ${vid})
+      and occurred_at >= ${fromIso} and occurred_at <= ${toIso}
     group by 1 order by 1
   `) as Array<{ month: string; total: number }>;
 
@@ -1227,6 +1247,7 @@ export async function getFleetReportTotals(vehicleId: number, fromIso: string, t
   const avgEfficiency = avg(efficiencies);
 
   return {
+    vehicleId: vid,
     from: fromIso,
     to: toIso,
     periodDays,

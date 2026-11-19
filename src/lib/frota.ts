@@ -111,7 +111,7 @@ export const getFrotaReportFn = createServerFn({ method: "GET" })
   .validator((input) =>
     z
       .object({
-        vehicleId: z.number().int().positive(),
+        vehicleId: z.number().int().positive().nullable().optional(),
         from: z.string().min(8),
         to: z.string().min(8),
       })
@@ -120,7 +120,7 @@ export const getFrotaReportFn = createServerFn({ method: "GET" })
   .handler(async ({ data }) => {
     await auth();
     await boot();
-    return getFleetReportTotals(data.vehicleId, data.from, data.to);
+    return getFleetReportTotals(data.vehicleId ?? null, data.from, data.to);
   });
 
 export const saveFleetVehicleFn = createServerFn({ method: "POST" })

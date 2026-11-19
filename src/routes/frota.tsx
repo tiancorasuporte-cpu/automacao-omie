@@ -61,6 +61,8 @@ import {
 } from "@/lib/frota-domain";
 import { downloadFrotaKmExcel } from "@/lib/frota-km-excel";
 import { downloadFrotaKmPdf } from "@/lib/frota-km-pdf";
+import { downloadFrotaReportExcel } from "@/lib/frota-report-excel";
+import { downloadFrotaReportPdf } from "@/lib/frota-report-pdf";
 import { requireModule } from "@/lib/require-auth";
 import { cn } from "@/lib/utils";
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
@@ -162,6 +164,18 @@ function FrotaPage() {
   const [kmFilterDriverId, setKmFilterDriverId] = useState<number | "">("");
   const [kmFilterFrom, setKmFilterFrom] = useState("");
   const [kmFilterTo, setKmFilterTo] = useState("");
+  const [reportFilterVehicleId, setReportFilterVehicleId] = useState<number | "">("");
+  const [reportFilterFrom, setReportFilterFrom] = useState(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() - 2);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  });
+  const [reportFilterTo, setReportFilterTo] = useState(() => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  });
 
   const selected = useMemo(
     () => vehicles.find((v) => v.id === vehicleId) ?? null,
@@ -211,21 +225,24 @@ function FrotaPage() {
   }
 
   async function reloadReport() {
-    if (!vehicleId) {
-      setReport(null);
-      return;
-    }
-    const to = new Date();
-    const from = new Date();
-    from.setFullYear(from.getFullYear() - 2);
+    const fromIso = reportFilterFrom
+      ? new Date(`${reportFilterFrom}T00:00:00`).toISOString()
+      : (() => {
+          const d = new Date();
+          d.setFullYear(d.getFullYear() - 2);
+          return d.toISOString();
+        })();
+    const toIso = reportFilterTo
+      ? new Date(`${reportFilterTo}T23:59:59`).toISOString()
+      : new Date().toISOString();
     setLoading(true);
     try {
       setReport(
         await getFrotaReportFn({
           data: {
-            vehicleId,
-            from: from.toISOString(),
-            to: to.toISOString(),
+            vehicleId: reportFilterVehicleId === "" ? null : Number(reportFilterVehicleId),
+            from: fromIso,
+            to: toIso,
           },
         }),
       );
@@ -266,7 +283,17 @@ function FrotaPage() {
     if (tab === "relatorios") void reloadReport();
     if (tab === "km") void reloadDailyKm();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, vehicleId, kmFilterVehicleId, kmFilterDriverId, kmFilterFrom, kmFilterTo]);
+  }, [
+    tab,
+    vehicleId,
+    reportFilterVehicleId,
+    reportFilterFrom,
+    reportFilterTo,
+    kmFilterVehicleId,
+    kmFilterDriverId,
+    kmFilterFrom,
+    kmFilterTo,
+  ]);
 
   function setTab(next: TabId) {
     void navigate({ search: { tab: next } });
@@ -281,7 +308,7 @@ function FrotaPage() {
         />
         <section className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md sm:p-lg">
           <div className="flex flex-col gap-md sm:flex-row sm:items-end sm:justify-between">
-            <div className="grid w-full min-w-0 flex-1 gap-xs sm:max-w-lg">
+            <div className="grid w-full min-w-0 flex-1 gap-xs sm:max-w-xl">
               <label className="text-label-sm font-medium text-on-surface-variant">Veículo</label>
               <SuggestInput
                 value={vehicleId != null ? String(vehicleId) : ""}
@@ -289,7 +316,7 @@ function FrotaPage() {
                 freeText={false}
                 placeholder={vehicles.length ? "Digite nome, marca ou placa…" : "Cadastre um veículo"}
                 emptyLabel="Nenhum veículo encontrado"
-                className="w-full"
+                className="w-full min-w-[16rem]"
                 leading={
                   selected?.brand ? <FleetBrandMark brand={selected.brand} size="sm" /> : (
                     <Icon name="directions_car" className="text-xl text-on-surface-variant" />
@@ -420,7 +447,47 @@ function FrotaPage() {
             />
           ) : null}
 
-          {tab === "relatorios" ? <ReportPanel report={report} loading={loading} /> : null}
+          {tab === "relatorios" ? (
+            <ReportPanel
+              report={report}
+              loading={loading}
+              vehicles={vehicles}
+              filterVehicleId={reportFilterVehicleId}
+              filterFrom={reportFilterFrom}
+              filterTo={reportFilterTo}
+              onFilterVehicleId={setReportFilterVehicleId}
+              onFilterFrom={setReportFilterFrom}
+              onFilterTo={setReportFilterTo}
+              onExportExcel={() => {
+                if (!report) return;
+                const vehicle =
+                  reportFilterVehicleId === ""
+                    ? null
+                    : vehicles.find((v) => v.id === reportFilterVehicleId) ?? null;
+                downloadFrotaReportExcel({
+                  title: "Frota — Relatório",
+                  generatedAt: new Date().toLocaleString("pt-BR"),
+                  vehicleLabel: vehicle ? vehicleLabel(vehicle) : "Todos os veículos",
+                  periodLabel: `${new Date(report.from).toLocaleDateString("pt-BR")} — ${new Date(report.to).toLocaleDateString("pt-BR")}`,
+                  report,
+                });
+              }}
+              onExportPdf={async () => {
+                if (!report) return;
+                const vehicle =
+                  reportFilterVehicleId === ""
+                    ? null
+                    : vehicles.find((v) => v.id === reportFilterVehicleId) ?? null;
+                await downloadFrotaReportPdf({
+                  title: "Frota — Relatório",
+                  generatedAt: new Date().toLocaleString("pt-BR"),
+                  vehicleLabel: vehicle ? vehicleLabel(vehicle) : "Todos os veículos",
+                  periodLabel: `${new Date(report.from).toLocaleDateString("pt-BR")} — ${new Date(report.to).toLocaleDateString("pt-BR")}`,
+                  report,
+                });
+              }}
+            />
+          ) : null}
 
           {tab === "lembretes" ? (
             <RemindersPanel
@@ -1152,24 +1219,161 @@ function MonthlyBars({
   );
 }
 
-function ReportPanel({ report, loading }: { report: Report | null; loading: boolean }) {
+function ReportPanel({
+  report,
+  loading,
+  vehicles,
+  filterVehicleId,
+  filterFrom,
+  filterTo,
+  onFilterVehicleId,
+  onFilterFrom,
+  onFilterTo,
+  onExportExcel,
+  onExportPdf,
+}: {
+  report: Report | null;
+  loading: boolean;
+  vehicles: Vehicle[];
+  filterVehicleId: number | "";
+  filterFrom: string;
+  filterTo: string;
+  onFilterVehicleId: (v: number | "") => void;
+  onFilterFrom: (v: string) => void;
+  onFilterTo: (v: string) => void;
+  onExportExcel: () => void;
+  onExportPdf: () => Promise<void>;
+}) {
   const [section, setSection] = useState<ReportSection>("refueling");
+  const [exporting, setExporting] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const hasActiveFilters =
+    filterVehicleId !== "" || Boolean(filterFrom) || Boolean(filterTo);
 
-  if (loading) {
-    return (
-      <div className="flex min-h-[12rem] items-center justify-center text-body-sm text-on-surface-variant">
-        Calculando relatório…
+  return (
+    <div className="space-y-md">
+      <div className="flex flex-col gap-md lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h3 className="text-title-md text-primary">Relatórios</h3>
+          <p className="text-body-sm text-on-surface-variant">
+            Resumo de custos, receitas e abastecimento — frota toda ou por veículo.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-sm">
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((v) => !v)}
+            className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold text-primary"
+          >
+            <Icon name="tune" className="text-[18px]" />
+            {filtersOpen ? "Ocultar filtros" : "Filtros"}
+            {hasActiveFilters ? (
+              <span className="rounded-full bg-secondary-container px-sm py-px text-[0.65rem] font-bold text-on-secondary-container">
+                on
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            onClick={onExportExcel}
+            disabled={!report || loading}
+            className="inline-flex items-center gap-xs rounded-lg bg-secondary-container px-md py-sm text-label-md font-semibold text-primary disabled:opacity-50"
+          >
+            <Icon name="download" className="text-[18px]" />
+            Excel
+          </button>
+          <button
+            type="button"
+            disabled={!report || loading || exporting}
+            onClick={() => {
+              void (async () => {
+                setExporting(true);
+                try {
+                  await onExportPdf();
+                } finally {
+                  setExporting(false);
+                }
+              })();
+            }}
+            className="inline-flex items-center gap-xs rounded-lg border border-outline-variant bg-surface px-md py-sm text-label-md font-semibold text-primary disabled:opacity-50"
+          >
+            <Icon name="picture_as_pdf" className="text-[18px]" />
+            {exporting ? "Gerando…" : "PDF"}
+          </button>
+        </div>
       </div>
-    );
-  }
-  if (!report) {
-    return (
-      <div className="flex min-h-[12rem] items-center justify-center text-body-sm text-on-surface-variant">
-        Selecione um veículo para ver o resumo.
-      </div>
-    );
-  }
 
+      {filtersOpen ? (
+        <div className="relative z-20 overflow-visible rounded-xl border border-outline-variant bg-surface p-md">
+          <div className="grid gap-sm md:grid-cols-3">
+            <div className="relative z-30 grid min-w-0 gap-xs text-label-sm md:col-span-1">
+              <span className="text-on-surface-variant">Veículo</span>
+              <SuggestInput
+                value={filterVehicleId === "" ? "" : String(filterVehicleId)}
+                onChange={(v) => onFilterVehicleId(v ? Number(v) : "")}
+                freeText={false}
+                placeholder="Digite nome, marca ou placa…"
+                emptyLabel="Nenhum veículo encontrado"
+                className="w-full min-w-[16rem]"
+                leading={
+                  <Icon name="directions_car" className="text-xl text-on-surface-variant" />
+                }
+                options={[
+                  { value: "", label: "Todos os veículos", hint: "Frota completa" },
+                  ...vehicles.map((v) => ({
+                    value: String(v.id),
+                    label: vehicleLabel(v),
+                    hint: [v.plate, formatKm(v.currentOdometer)].filter(Boolean).join(" · "),
+                  })),
+                ]}
+              />
+            </div>
+            <label className="grid gap-xs text-label-sm">
+              <span className="text-on-surface-variant">De</span>
+              <input
+                type="date"
+                className={inputClass}
+                value={filterFrom}
+                onChange={(e) => onFilterFrom(e.target.value)}
+              />
+            </label>
+            <label className="grid gap-xs text-label-sm">
+              <span className="text-on-surface-variant">Até</span>
+              <input
+                type="date"
+                className={inputClass}
+                value={filterTo}
+                onChange={(e) => onFilterTo(e.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div className="flex min-h-[12rem] items-center justify-center text-body-sm text-on-surface-variant">
+          Calculando relatório…
+        </div>
+      ) : !report ? (
+        <div className="flex min-h-[12rem] items-center justify-center text-body-sm text-on-surface-variant">
+          Nenhum dado no período.
+        </div>
+      ) : (
+        <ReportPanelBody report={report} section={section} setSection={setSection} />
+      )}
+    </div>
+  );
+}
+
+function ReportPanelBody({
+  report,
+  section,
+  setSection,
+}: {
+  report: NonNullable<Report>;
+  section: ReportSection;
+  setSection: (s: ReportSection) => void;
+}) {
   const r = report.refueling;
 
   return (
@@ -1509,29 +1713,37 @@ function VehiclesPanel({
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-sm sm:grid-cols-[minmax(0,1fr)_7.5rem] sm:items-end">
-        <label className="block w-full min-w-0 space-y-xs">
-          <span className="text-label-md text-on-surface-variant">Pesquisar veículo</span>
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Nome, marca, modelo ou placa…"
-            className="box-border w-full min-w-0 rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
-          />
-        </label>
-        <label className="block w-full space-y-xs">
-          <span className="text-label-md text-on-surface-variant">Por página</span>
-          <select
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-            className="box-border w-full rounded-lg border border-outline-variant bg-surface px-sm py-sm text-body-md"
-          >
-            <option value={8}>8</option>
-            <option value={12}>12</option>
-            <option value={20}>20</option>
-            <option value={40}>40</option>
-          </select>
-        </label>
+      <div className="rounded-xl border border-outline-variant bg-surface p-md">
+        <div className="grid grid-cols-1 items-end gap-sm md:grid-cols-[minmax(0,1fr)_8rem]">
+          <label className="grid min-w-0 gap-xs text-label-sm">
+            <span className="text-on-surface-variant">Pesquisar veículo</span>
+            <span className="relative block min-w-0">
+              <Icon
+                name="search"
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xl text-on-surface-variant"
+              />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Nome, marca, modelo ou placa…"
+                className={cn(inputClass, "min-w-0 pl-10 text-on-surface placeholder:text-on-surface-variant")}
+              />
+            </span>
+          </label>
+          <label className="grid gap-xs text-label-sm">
+            <span className="text-on-surface-variant">Por página</span>
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className={cn(inputClass, "text-on-surface")}
+            >
+              <option value={8}>8</option>
+              <option value={12}>12</option>
+              <option value={20}>20</option>
+              <option value={40}>40</option>
+            </select>
+          </label>
+        </div>
       </div>
 
       {!vehicles.length ? (
